@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}New project — Envelope{% endblock %}
+{% block nav %}
+<nav class="nav">
+  <a href="/bundles">Bundles</a>
+  <a href="/projects">Projects</a>
+  <a href="/backup">Backup</a>
+  <a href="/keys">API keys</a>
+  <form method="post" action="/logout" class="inline-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <button type="submit" class="link">Log out</button>
+  </form>
+</nav>
+{% endblock %}
+{% block content %}
+<h1>New project</h1>
+<p class="muted">Display name: start with a letter or number; then letters, numbers, spaces, and <code>.</code>, <code>_</code>, <code>/</code>, <code>'</code>, <code>( )</code>, <code>+ -</code>.</p>
+<p class="muted">Slug: lowercase letters, numbers, <code>.</code>, <code>_</code>, <code>-</code> — used in URLs and API paths. Leave blank to generate one from the name.</p>
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+<form method="post" action="/projects/new" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token }}">
+  <label for="name">Project name</label>
+  <input id="name" name="name" required maxlength="256" placeholder="Acme Corp / Production" value="{{ name_value | default('') }}">
+
+  <label for="slug">Slug <span class="muted">(optional)</span></label>
+  <input id="slug" name="slug" maxlength="128" placeholder="acme-corp-production" value="{{ slug_value | default('') }}" pattern="[a-z0-9][a-z0-9._-]*" autocomplete="off">
+
+  <button type="submit">Create</button>
+  <p><a href="/projects">Cancel</a></p>
+</form>
+{% endblock %}

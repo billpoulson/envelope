@@ -1,0 +1,4 @@
+<nav class="bundle-subnav" aria-label="Bundle sections">
+  <a href="{{ bundle_route_base }}/edit" class="bundle-subnav-link{% if bundle_subnav_active == 'variables' %} is-active{% endif %}"{% if bundle_subnav_active == 'variables' %} aria-current="page"{% endif %}>Variables</a>
+  <a href="{{ bundle_route_base }}/env-links" class="bundle-subnav-link{% if bundle_subnav_active == 'env-links' %} is-active{% endif %}"{% if bundle_subnav_active == 'env-links' %} aria-current="page"{% endif %}>Secret env URL</a>
+</nav>

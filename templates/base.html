@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Envelope{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  {% block header %}
+  <header class="top">
+    <a class="brand" href="/">Envelope</a>
+    {% block nav %}{% endblock %}
+  </header>
+  {% endblock %}
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

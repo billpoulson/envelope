@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}New bundle — Envelope{% endblock %}
+{% block nav %}
+<nav class="nav">
+  <a href="/bundles">Bundles</a>
+  <a href="/projects">Projects</a>
+  <a href="/backup">Backup</a>
+  <a href="/keys">API keys</a>
+  <form method="post" action="/logout" class="inline-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <button type="submit" class="link">Log out</button>
+  </form>
+</nav>
+{% endblock %}
+{% block content %}
+<h1>New bundle</h1>
+<p class="muted">Name: letters, numbers, <code>.</code>, <code>_</code>, <code>-</code> only.</p>
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+<form method="post" action="/bundles/new" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token }}">
+  <label for="name">Bundle name</label>
+  <input id="name" name="name" required pattern="[a-zA-Z0-9._\-]+" maxlength="256" placeholder="myapp-prod">
+
+  <label for="project_slug">Project</label>
+  {% if projects %}
+  <p class="muted small">Every bundle belongs to a project. <a href="/projects/new">Create a project</a> if you need another one.</p>
+  <select id="project_slug" name="project_slug" required aria-required="true">
+    <option value="">— Select a project —</option>
+    {% for pslug, gname in projects %}
+    <option value="{{ pslug }}">{{ gname }}</option>
+    {% endfor %}
+  </select>
+  {% else %}
+  <p class="error">No projects exist yet. <a href="/projects/new">Create a project</a> before adding a bundle.</p>
+  {% endif %}
+
+  <label for="initial_json">Initial variables (optional JSON)</label>
+  <p class="muted small">Paste a JSON object. String values are <strong>encrypted</strong> by default. Use <code>"_plaintext_keys": ["KEY1"]</code> for non-sensitive keys, or per-key <code>"REGION": {"value": "us-east-1", "secret": false}</code>.</p>
+  <textarea id="initial_json" name="initial_json" rows="12" class="mono" placeholder='{
+  "_plaintext_keys": ["STAGE", "REGION"],
+  "STAGE": "prod",
+  "API_TOKEN": "super-secret"
+}'></textarea>
+
+  <button type="submit"{% if not projects %} disabled{% endif %}>Create</button>
+  <p><a href="/bundles">Cancel</a></p>
+</form>
+{% endblock %}

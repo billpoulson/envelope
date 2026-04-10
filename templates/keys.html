@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}API keys — Envelope{% endblock %}
+{% block nav %}
+<nav class="nav">
+  <a href="/bundles">Bundles</a>
+  <a href="/projects">Projects</a>
+  <a href="/backup">Backup</a>
+  <a href="/keys">API keys</a>
+  <form method="post" action="/logout" class="inline-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <button type="submit" class="link">Log out</button>
+  </form>
+</nav>
+{% endblock %}
+{% block content %}
+<h1>API keys</h1>
+<p class="muted">Create keys for automation (CI, scripts). Choose what each key may read or change; use <strong>Administrator</strong> only when you need to manage other keys.</p>
+
+{% if new_plain_key %}
+<div class="banner">
+  <p><strong>New key (save it now):</strong></p>
+  <pre class="mono wrap">{{ new_plain_key }}</pre>
+</div>
+{% endif %}
+
+{% if scopes_error %}
+<p class="error">{{ scopes_error }}</p>
+{% endif %}
+
+<table class="table">
+  <thead>
+    <tr><th>ID</th><th>Name</th><th>Scopes</th><th>Created</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for k in keys %}
+    <tr>
+      <td>{{ k.id }}</td>
+      <td>{{ k.name }}</td>
+      <td class="mono small wrap">{{ k.scopes }}</td>
+      <td class="muted">{{ k.created_at }}</td>
+      <td>
+        <form method="post" action="/keys/{{ k.id }}/delete" class="inline-form" onsubmit="return confirm('Revoke this key?');">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <button type="submit" class="danger small">Revoke</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">No keys (unexpected).</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2 class="h3">Create key</h2>
+<form method="post" action="/keys/new" class="stack" id="key-create-form">
+  <input type="hidden" name="csrf" value="{{ csrf_token }}">
+  <input type="hidden" name="scopes_json" id="scopes_json_field" value="{{ scopes_json_value | default('["read:bundle:*"]') | e }}">
+
+  <label for="name">Label</label>
+  <input id="name" name="name" required maxlength="128" placeholder="ci-production-export">
+
+  <fieldset class="scope-fieldset">
+    <legend class="scope-legend">Access level</legend>
+    <div class="access-cards">
+      <label class="access-card">
+        <input type="radio" name="scope_access" id="scope_access_custom" value="custom" checked>
+        <span class="access-card-title">Scoped access</span>
+        <span class="access-card-desc">Limit to bundles and projects you choose below.</span>
+      </label>
+      <label class="access-card">
+        <input type="radio" name="scope_access" id="scope_access_admin" value="admin">
+        <span class="access-card-title">Administrator</span>
+        <span class="access-card-desc">Full control including creating and revoking API keys.</span>
+      </label>
+    </div>
+  </fieldset>
+
+  <p class="scope-summary" id="scope-summary" aria-live="polite"></p>
+
+  <div id="scope-custom-panel" class="scope-panel">
+    <p class="muted small scope-panel-lead">Quick options — combine as needed. <code>*</code> means “all names” for that category.</p>
+    <div class="scope-quick-grid">
+      <label class="scope-check">
+        <input type="checkbox" data-scope-quick="read:bundle:*">
+        <span><strong>Read</strong> any bundle <span class="muted">(export .env / decrypt)</span></span>
+      </label>
+      <label class="scope-check">
+        <input type="checkbox" data-scope-quick="write:bundle:*">
+        <span><strong>Write</strong> any bundle <span class="muted">(create, secrets, delete)</span></span>
+      </label>
+      <label class="scope-check">
+        <input type="checkbox" data-scope-quick="read:project:*">
+        <span><strong>Read</strong> bundles in any <strong>project</strong></span>
+      </label>
+      <label class="scope-check">
+        <input type="checkbox" data-scope-quick="write:project:*">
+        <span><strong>Manage</strong> all projects <span class="muted">(and create new projects)</span></span>
+      </label>
+    </div>
+
+    <div class="scope-custom-block">
+      <p class="muted small">Add specific access: choose <strong>Read/Write</strong> and <strong>bundle or project</strong>, pick from the list, then <strong>Add</strong>. Use the checkboxes above for “all bundles” or “all projects”. Optional wildcards below.</p>
+      <div class="scope-dropdown-add" role="group" aria-label="Add scope from lists">
+        <label class="scope-inline">
+          <span class="muted small">Access</span>
+          <select id="scope-kind" aria-label="Read or write, bundle or project">
+            <option value="read:bundle:">Read bundle</option>
+            <option value="write:bundle:">Write bundle</option>
+            <option value="read:project:">Read project</option>
+            <option value="write:project:">Write project</option>
+          </select>
+        </label>
+        <label class="scope-inline" id="scope-wrap-bundle">
+          <span class="muted small">Bundle</span>
+          <select id="scope-target-bundle" aria-label="Choose bundle">
+            <option value="">— Select bundle —</option>
+            {% for b in bundles_for_scopes %}
+            <option value="{{ b|e }}">{{ b }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="scope-inline" id="scope-wrap-project" hidden>
+          <span class="muted small">Project</span>
+          <select id="scope-target-project" aria-label="Choose project">
+            <option value="">— Select project —</option>
+            {% for p in projects_for_scopes %}
+            <option value="{{ p.slug|e }}">{{ p.name }} ({{ p.slug }})</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="button" class="secondary" id="scope-add-btn">Add</button>
+      </div>
+      <details class="scope-custom-pattern" id="scope-custom-pattern-box">
+        <summary>Custom pattern <span class="muted">(wildcards, <code>slug:…</code>, <code>id:…</code>)</span></summary>
+        <p class="muted small">Use only if you need a glob or a rule not in the lists.</p>
+        <div class="scope-add-row scope-add-pattern-row">
+          <input type="text" id="scope-pattern" class="mono" placeholder="e.g. myapp-* or slug:other" autocomplete="off" aria-label="Custom scope pattern suffix">
+          <button type="button" class="secondary" id="scope-add-pattern-btn">Add pattern</button>
+        </div>
+      </details>
+      <ul id="scope-chips" class="scope-chips" aria-label="Extra scope rules"></ul>
+    </div>
+  </div>
+
+  <details class="scope-advanced" id="scopes-advanced">
+    <summary>Advanced: edit JSON</summary>
+    <p class="muted small">Same format as the API: a JSON array of strings. Overrides the form above when saved.</p>
+    <textarea id="scopes_json_raw" rows="5" class="mono" aria-label="Scopes JSON"></textarea>
+  </details>
+
+  <button type="submit">Create key</button>
+</form>
+
+<script src="/static/keys-scopes.js" defer></script>
+{% endblock %}

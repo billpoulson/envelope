@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Bundles — Envelope{% endblock %}
+{% block nav %}
+<nav class="nav">
+  <a href="/bundles">Bundles</a>
+  <a href="/projects">Projects</a>
+  <a href="/backup">Backup</a>
+  <a href="/keys">API keys</a>
+  <form method="post" action="/logout" class="inline-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <button type="submit" class="link">Log out</button>
+  </form>
+</nav>
+{% endblock %}
+{% block content %}
+<div class="bundles-page" id="bundles-page">
+  <header class="bundles-page-head">
+    <div>
+      <h1>Bundles</h1>
+      <p class="muted bundles-lead">Environment variable groups for your apps. Export via the API as <code>.env</code> in CI. Assign bundles to a <a href="/projects">project</a> to group them in the table below.</p>
+    </div>
+    <div class="bundles-toolbar">
+      <label class="bundle-filter-label">
+        <span class="muted small">Search</span>
+        <input type="search" id="bundle-filter" class="bundle-filter-input" placeholder="Filter by bundle name…" autocomplete="off" aria-label="Filter bundles by name">
+      </label>
+      <a class="button" href="/bundles/new">New bundle</a>
+    </div>
+  </header>
+
+  {% if bundle_sections and total_bundles %}
+  <p class="bundles-stats muted small" id="bundles-stats" aria-live="polite">
+    <strong>{{ total_bundles }}</strong> bundle{% if total_bundles != 1 %}s{% endif %}
+    {% set n_proj = bundle_sections | selectattr('slug') | list | length %}
+    {% if n_proj %}· <strong>{{ n_proj }}</strong> project{% if n_proj != 1 %}s{% endif %}{% endif %}
+  </p>
+  <p class="bundles-filter-empty muted" id="bundle-filter-empty" hidden>No bundles match your search.</p>
+  {% endif %}
+
+  {% if bundle_sections %}
+  <div class="bundles-table-wrap">
+    <table class="table bundles-table">
+      <thead>
+        <tr>
+          <th scope="col">Project</th>
+          <th scope="col">Bundle</th>
+          <th scope="col" class="bundles-col-num">Variables</th>
+          <th scope="col" class="actions-col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for section in bundle_sections %}
+          {% for b in section.bundles %}
+          <tr class="bundle-row" data-bundle-name="{{ b.name|lower }}">
+            <td class="bundles-cell-project">
+              <span class="bundles-project-title">{{ section.title }}</span>
+              {% if section.slug %}
+              <span class="bundles-project-slug mono small muted" title="Project slug">{{ section.slug }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if section.slug %}
+              <a class="bundles-bundle-link mono" href="/projects/{{ section.slug }}/bundles/{{ b.name }}">{{ b.name }}</a>
+              {% else %}
+              <a class="bundles-bundle-link mono" href="/bundles/{{ b.name }}/edit">{{ b.name }}</a>
+              {% endif %}
+            </td>
+            <td class="bundles-col-num muted">{{ b.secret_count }}</td>
+            <td class="actions-col">
+              {% if section.slug %}
+              <a class="button secondary-outline small" href="/projects/{{ section.slug }}/bundles/{{ b.name }}">Edit</a>
+              {% else %}
+              <a class="button secondary-outline small" href="/bundles/{{ b.name }}/edit">Edit</a>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="bundles-empty">
+    <p class="muted">No bundles yet.</p>
+    <p><a class="button" href="/bundles/new">Create your first bundle</a></p>
+  </div>
+  {% endif %}
+</div>
+<script>
+(function () {
+  var input = document.getElementById("bundle-filter");
+  if (!input) return;
+  var rows = document.querySelectorAll(".bundle-row");
+  var emptyMsg = document.getElementById("bundle-filter-empty");
+  var stats = document.getElementById("bundles-stats");
+  function run() {
+    var q = (input.value || "").trim().toLowerCase();
+    var visible = 0;
+    rows.forEach(function (row) {
+      var name = row.getAttribute("data-bundle-name") || "";
+      var ok = !q || name.indexOf(q) !== -1;
+      row.hidden = !ok;
+      if (ok) visible += 1;
+    });
+    if (emptyMsg) emptyMsg.hidden = !q || visible > 0;
+    if (stats) stats.hidden = !!(q && visible === 0);
+  }
+  input.addEventListener("input", run);
+})();
+</script>
+{% endblock %}

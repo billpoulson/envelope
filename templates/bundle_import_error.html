@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Import failed — Envelope{% endblock %}
+{% block nav %}
+<nav class="nav">
+  <a href="/bundles">Bundles</a>
+  <a href="/projects">Projects</a>
+  <a href="/backup">Backup</a>
+  <a href="/keys">API keys</a>
+  <form method="post" action="/logout" class="inline-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <button type="submit" class="link">Log out</button>
+  </form>
+</nav>
+{% endblock %}
+{% block content %}
+<article class="error-article">
+  <h1>{{ title }}</h1>
+  <p class="error-lead">{{ summary }}</p>
+
+  <section class="error-section">
+    <h2 class="h3">What this means</h2>
+    <p>Each bundle stores variables in a table where <strong>(bundle, variable name)</strong> must be unique. The database rejected this save because something in this request violated that rule—not because an old bundle elsewhere used the same name.</p>
+    <p class="muted small">If you checked the source and see <strong>no duplicate names</strong>, two entries can still collide <strong>after normalization</strong> (Unicode forms, zero‑width characters, or invisible format characters from copied IaC output). Those look like different lines in an editor but become the same key in the database. Current builds also merge duplicates on insert so this error should be rare for variable imports.</p>
+  </section>
+
+  {% if duplicate_groups %}
+  <section class="error-section error-section-highlight">
+    <h2 class="h3">Colliding keys in your JSON</h2>
+    <p class="muted small">After normalizing names (trim, Unicode, invisible characters), these entries refer to the <strong>same</strong> variable more than once. Remove or merge the duplicates.</p>
+    {% for g in duplicate_groups %}
+    <div class="collision-block">
+      <p class="collision-title">Normalized name: <code class="key-offending">{{ g.normalized }}</code></p>
+      <p class="muted small">Original key strings from your paste ({{ g.original_keys|length }}):</p>
+      <ul class="list collision-keys">
+        {% for ok in g.original_keys %}
+        <li><code class="mono raw-key">{{ ok }}</code></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if error_kind == "duplicate_secret_key" %}
+  <section class="error-section">
+    <h2 class="h3">Most likely cause</h2>
+    <ul class="list">
+      <li>The JSON lists the <strong>same variable name more than once</strong> for this bundle (sometimes with invisible or format characters that look identical).</li>
+      <li>An older app build might not normalize keys before insert—rebuild the image with <code>docker compose build --no-cache</code>.</li>
+    </ul>
+  </section>
+  {% elif error_kind == "bundle_name_taken" %}
+  <section class="error-section">
+    <h2 class="h3">Most likely cause</h2>
+    <p>Another bundle already uses the name <code>{{ bundle_name }}</code>, or a concurrent request created it. Pick a different name or delete the existing bundle first.</p>
+  </section>
+  {% else %}
+  <section class="error-section">
+    <h2 class="h3">What to try</h2>
+    <ul class="list">
+      <li>Confirm the bundle name is unique.</li>
+      <li>Ensure each key appears only once in the JSON (names only—values are not shown here).</li>
+      <li>Retry after <code>docker compose build --no-cache</code> if you recently updated the app.</li>
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="error-section">
+    <h2 class="h3">Request context (safe)</h2>
+    <dl class="error-dl">
+      <dt>Bundle name</dt>
+      <dd><code>{{ bundle_name }}</code></dd>
+      <dt>Variables parsed for insert</dt>
+      <dd>{{ row_count }} row(s); {{ unique_key_count }} distinct name(s) after normalization</dd>
+      {% if key_lines %}
+      <dt>Key names (after normalize/dedupe)</dt>
+      <dd>
+        <div class="key-list key-list-lines">
+          {% for line in key_lines %}
+          <div class="key-line{% if line.offending %} key-line-offending{% endif %}"><code>{{ line.name }}</code>{% if line.offending %} <span class="offending-badge">duplicate / collision</span>{% endif %}</div>
+          {% endfor %}
+        </div>
+      </dd>
+      {% endif %}
+    </dl>
+  </section>
+
+  <details class="error-details">
+    <summary>Technical details</summary>
+    <pre class="technical-pre">{{ technical_detail }}</pre>
+  </details>
+
+  <p class="error-actions">
+    <a href="/bundles/new" class="button">Back to new bundle</a>
+    <a href="/bundles" class="button secondary-outline">All bundles</a>
+  </p>
+</article>
+{% endblock %}

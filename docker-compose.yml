@@ -1,0 +1,18 @@
+services:
+  envelope:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      ENVELOPE_MASTER_KEY: ${ENVELOPE_MASTER_KEY:?set ENVELOPE_MASTER_KEY}
+      ENVELOPE_SESSION_SECRET: ${ENVELOPE_SESSION_SECRET:?set ENVELOPE_SESSION_SECRET}
+      ENVELOPE_DATABASE_URL: sqlite+aiosqlite:////data/envelope.db
+      # Optional: full-database restore via API/web (default false)
+      ENVELOPE_RESTORE_ENABLED: ${ENVELOPE_RESTORE_ENABLED:-false}
+      # First run only: creates admin API key in DB, then remove from compose/env
+      ENVELOPE_INITIAL_ADMIN_KEY: ${ENVELOPE_INITIAL_ADMIN_KEY:-}
+    volumes:
+      - envelope_data:/data
+
+volumes:
+  envelope_data:

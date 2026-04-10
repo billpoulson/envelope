@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Backup — Envelope{% endblock %}
+{% block nav %}
+<nav class="nav">
+  <a href="/bundles">Bundles</a>
+  <a href="/projects">Projects</a>
+  <a href="/backup">Backup</a>
+  <a href="/keys">API keys</a>
+  <form method="post" action="/logout" class="inline-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <button type="submit" class="link">Log out</button>
+  </form>
+</nav>
+{% endblock %}
+{% block content %}
+<h1>Backup and restore</h1>
+
+{% if not sqlite_ok %}
+<p class="error">Backup and restore require a file-backed SQLite database (not <code>:memory:</code>). Adjust <code>ENVELOPE_DATABASE_URL</code>.</p>
+{% else %}
+
+<p class="muted">Full-database copies use SQLite’s online backup API. Passphrase-encrypted downloads use Scrypt + AES-256-GCM (same format as <code>POST /api/v1/system/backup/database</code>). Always use <strong>HTTPS</strong> when sending passphrases. Store <code>ENVELOPE_MASTER_KEY</code> separately from backup files.</p>
+
+{% if restore_ok %}
+<div class="banner">
+  <p><strong>Database restored.</strong> New requests use the replaced file. Consider restarting the process if anything looks stale.</p>
+</div>
+{% endif %}
+
+{% if restore_error %}
+<p class="error">{{ restore_error }}</p>
+{% endif %}
+
+<h2 class="h3">Download</h2>
+{% if backup_enabled %}
+<form method="post" action="/backup/download-raw" class="stack backup-download-form">
+  <input type="hidden" name="csrf" value="{{ csrf_token }}">
+  <button type="submit">Download raw SQLite snapshot</button>
+  <p class="muted small">Treat the file like a password: it contains ciphertext, key names, and API key hashes.</p>
+</form>
+
+<form method="post" action="/backup/download-encrypted" class="stack backup-download-form" id="backup-form-encrypted">
+  <input type="hidden" name="csrf" value="{{ csrf_token }}">
+  <label for="dl-pass">Passphrase for encrypted file</label>
+  <input type="password" id="dl-pass" name="passphrase" required minlength="1" autocomplete="new-password">
+  <button type="submit">Download encrypted snapshot</button>
+  <p class="muted small">Encryption uses Scrypt key derivation (CPU-heavy). Preparing the file may take <strong>10–60 seconds</strong>—wait for the save dialog; do not double-submit (rate limit applies).</p>
+  <p class="muted small">Downloads use <code>fetch</code> + a file blob so the response is not handled as a full-page navigation (DevTools may otherwise show type <code>document</code> and mis-handle the body).</p>
+</form>
+<script src="/static/backup-download.js" defer></script>
+{% else %}
+<p class="muted">Backup downloads are disabled (<code>ENVELOPE_BACKUP_ENABLED=false</code>).</p>
+{% endif %}
+
+<h2 class="h3">Restore</h2>
+{% if restore_enabled %}
+<p class="muted">Replaces the entire SQLite file for this instance. Use only with a trusted backup. API: <code>POST /api/v1/system/restore/database</code> (multipart).</p>
+<form method="post" action="/backup/restore" enctype="multipart/form-data" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token }}">
+  <label for="restore-file">Backup file (<code>.db</code> or <code>.envelope-db</code>)</label>
+  <input type="file" id="restore-file" name="file" required accept=".db,.envelope-db,application/octet-stream">
+  <label for="restore-pass">Passphrase (only if file is encrypted)</label>
+  <input type="password" id="restore-pass" name="passphrase" autocomplete="new-password" placeholder="Leave empty for raw .db">
+  <button type="submit" class="danger">Restore database</button>
+</form>
+{% else %}
+<p class="muted">In-app restore is off by default. Set <code>ENVELOPE_RESTORE_ENABLED=true</code> to enable, or stop the service and replace the database file under the data volume manually.</p>
+{% endif %}
+
+{% endif %}
+{% endblock %}

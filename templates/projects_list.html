@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Projects — Envelope{% endblock %}
+{% block nav %}
+<nav class="nav">
+  <a href="/bundles">Bundles</a>
+  <a href="/projects">Projects</a>
+  <a href="/backup">Backup</a>
+  <a href="/keys">API keys</a>
+  <form method="post" action="/logout" class="inline-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <button type="submit" class="link">Log out</button>
+  </form>
+</nav>
+{% endblock %}
+{% block content %}
+<h1>Projects</h1>
+<p class="muted">Named groups for your bundles. Deleting a project does not delete its bundles; they become ungrouped.</p>
+<p><a class="button" href="/projects/new">New project</a></p>
+{% if projects %}
+<table class="table">
+  <thead>
+    <tr><th>Name</th><th>Slug</th><th>Bundles</th><th class="actions-col">Actions</th></tr>
+  </thead>
+  <tbody>
+    {% for p in projects %}
+    <tr>
+      <td><strong>{{ p.name }}</strong></td>
+      <td class="mono muted">{{ p.slug }}</td>
+      <td class="muted">{{ p.bundle_count }}</td>
+      <td class="row-actions">
+        <form method="post" action="/projects/{{ p.slug }}/delete" class="inline-form" onsubmit="return confirm('Delete project “{{ p.name }}”? Bundles will be ungrouped.');">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <button type="submit" class="danger small">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No projects yet. Create one to group bundles on the <a href="/bundles">bundles</a> page.</p>
+{% endif %}
+<p><a href="/bundles">← Back to bundles</a></p>
+{% endblock %}

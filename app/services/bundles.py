@@ -1,0 +1,315 @@
+import json
+import re
+import unicodedata
+from typing import Any
+
+from cryptography.fernet import Fernet
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.crypto import CryptoError, decrypt_value, encrypt_value
+from app.deps import get_fernet
+from app.models import Bundle, Secret
+
+BUNDLE_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
+# INSERT parameters: (bundle_id, 'key_name', 'value...'
+_SQLITE_INSERT_KEY_RE = re.compile(
+    r"\bparameters:\s*\(\s*\d+\s*,\s*'((?:[^'\\]|\\.)*)'",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def extract_conflicting_secret_key_name(error_text: str) -> str | None:
+    """Best-effort parse of SQLite/SQLAlchemy INSERT parameter line for secrets.key_name."""
+    m = _SQLITE_INSERT_KEY_RE.search(error_text)
+    return m.group(1) if m else None
+
+RESERVED_JSON_KEYS = frozenset({"_plaintext_keys", "_bundle_name"})
+
+
+def format_secrets_dotenv(secrets_map: dict[str, str]) -> str:
+    """Serialize key/value map to dotenv-style text (sorted keys)."""
+    lines = []
+    for k in sorted(secrets_map.keys()):
+        v = secrets_map[k]
+        esc = v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        lines.append(f'{k}="{esc}"')
+    return "\n".join(lines) + ("\n" if lines else "")
+
+# Strip, NFC-normalize, remove invisible chars that often duplicate keys in pasted exports.
+_ZW_CHARS = ("\ufeff", "\u200b", "\u200c", "\u200d", "\u2060")
+
+
+def normalize_env_key(key: str) -> str:
+    s = unicodedata.normalize("NFC", key.strip())
+    for ch in _ZW_CHARS:
+        s = s.replace(ch, "")
+    # Drop other format/control characters (Cf) often embedded in copied IaC output
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Cf")
+    return s
+
+
+def duplicate_key_groups_from_object(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Keys whose raw JSON names collapse to the same normalized name (true duplicates in paste)."""
+    from collections import defaultdict
+
+    groups: dict[str, list[str]] = defaultdict(list)
+    for key in data:
+        if key in RESERVED_JSON_KEYS:
+            continue
+        if not isinstance(key, str):
+            continue
+        nk = normalize_env_key(key)
+        if nk:
+            groups[nk].append(key)
+    return [
+        {"normalized": nk, "original_keys": raws}
+        for nk, raws in sorted(groups.items())
+        if len(raws) > 1
+    ]
+
+
+def dedupe_entry_rows(rows: list[tuple[str, str, bool]]) -> list[tuple[str, str, bool]]:
+    """Last occurrence wins per key (safety net before DB insert)."""
+    merged: dict[str, tuple[str, bool]] = {}
+    for k, v, sec in rows:
+        merged[k] = (v, sec)
+    return [(k, merged[k][0], merged[k][1]) for k in sorted(merged.keys())]
+
+
+def validate_bundle_name(name: str) -> None:
+    if not BUNDLE_NAME_RE.match(name):
+        raise HTTPException(
+            status_code=400,
+            detail="Bundle name must match [a-zA-Z0-9._-]+",
+        )
+
+
+def encode_stored_value(fernet: Fernet, value: str, is_secret: bool) -> str:
+    if is_secret:
+        return encrypt_value(fernet, value)
+    return value
+
+
+def decode_stored_value(fernet: Fernet, stored: str, is_secret: bool) -> str:
+    if is_secret:
+        return decrypt_value(fernet, stored)
+    return stored
+
+
+def coerce_value_to_string(v: Any) -> str:
+    if isinstance(v, str):
+        return v
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    return json.dumps(v, sort_keys=True)
+
+
+def parse_bundle_entries_dict(data: dict[str, Any]) -> tuple[list[tuple[str, str, bool]], str | None]:
+    """Parse a JSON object into (key, value, is_secret) rows. Returns (rows, error_message)."""
+    if not isinstance(data, dict):
+        return [], "JSON must be an object"
+
+    plaintext_keys: set[str] = set()
+    raw_pt = data.get("_plaintext_keys")
+    if raw_pt is not None:
+        if not isinstance(raw_pt, list):
+            return [], "_plaintext_keys must be an array of strings"
+        for x in raw_pt:
+            if not isinstance(x, str):
+                return [], "_plaintext_keys must contain only strings"
+            nx = normalize_env_key(x)
+            if nx:
+                plaintext_keys.add(nx)
+
+    # Normalized key -> (value, is_secret); last occurrence wins (handles
+    # whitespace, BOM/zero-width, and NFC vs NFD duplicates in pasted JSON).
+    merged: dict[str, tuple[str, bool]] = {}
+    for key, raw in data.items():
+        if key in RESERVED_JSON_KEYS:
+            continue
+        if not isinstance(key, str):
+            return [], "All keys must be strings"
+        kn = normalize_env_key(key)
+        if not kn:
+            return [], "Empty key is not allowed"
+
+        if isinstance(raw, dict) and "value" in raw:
+            val = coerce_value_to_string(raw["value"])
+            if "secret" in raw:
+                is_secret = bool(raw["secret"])
+            else:
+                is_secret = kn not in plaintext_keys
+        else:
+            val = coerce_value_to_string(raw)
+            is_secret = kn not in plaintext_keys
+
+        merged[kn] = (val, is_secret)
+
+    rows = dedupe_entry_rows([(k, v[0], v[1]) for k, v in merged.items()])
+    return rows, None
+
+
+def parse_bundle_entries_json(raw: str) -> tuple[list[tuple[str, str, bool]], str | None]:
+    raw = raw.strip()
+    if not raw:
+        return [], None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return [], f"Invalid JSON: {e}"
+    return parse_bundle_entries_dict(data)
+
+
+async def bulk_upsert_bundle_secrets(
+    session: AsyncSession,
+    bundle_id: int,
+    rows: list[tuple[str, str, bool]],
+) -> None:
+    """Insert secrets for a bundle; on SQLite, identical (bundle_id, key_name) rows merge (last wins)."""
+    if not rows:
+        return
+    fernet = get_fernet()
+    from app.db import get_engine
+
+    if get_engine().dialect.name != "sqlite":
+        for key_name, val, is_secret in rows:
+            stored = encode_stored_value(fernet, val, is_secret)
+            session.add(
+                Secret(
+                    bundle_id=bundle_id,
+                    key_name=key_name,
+                    value_ciphertext=stored,
+                    is_secret=is_secret,
+                )
+            )
+        return
+
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    for key_name, val, is_secret in rows:
+        stored = encode_stored_value(fernet, val, is_secret)
+        stmt = sqlite_insert(Secret).values(
+            bundle_id=bundle_id,
+            key_name=key_name,
+            value_ciphertext=stored,
+            is_secret=is_secret,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[Secret.bundle_id, Secret.key_name],
+            set_=dict(
+                value_ciphertext=stmt.excluded.value_ciphertext,
+                is_secret=stmt.excluded.is_secret,
+            ),
+        )
+        await session.execute(stmt)
+
+
+async def encrypt_plain_entry(
+    session: AsyncSession, bundle_name: str, key_name: str
+) -> None:
+    """Re-store a plain-text row as Fernet ciphertext (same logical value)."""
+    validate_bundle_name(bundle_name)
+    kn = key_name.strip()
+    if not kn:
+        raise HTTPException(status_code=400, detail="key_name required")
+    r = await session.execute(
+        select(Secret)
+        .join(Bundle, Secret.bundle_id == Bundle.id)
+        .where(Bundle.name == bundle_name, Secret.key_name == kn)
+    )
+    row = r.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Secret not found")
+    if row.is_secret:
+        return
+    fernet = get_fernet()
+    plain = decode_stored_value(fernet, row.value_ciphertext, False)
+    row.value_ciphertext = encode_stored_value(fernet, plain, True)
+    row.is_secret = True
+
+
+async def load_bundle_entries(
+    session: AsyncSession, name: str
+) -> tuple[Bundle, dict[str, tuple[str, bool]]]:
+    """Returns map key -> (value, is_secret). Decrypts every row (export/API)."""
+    validate_bundle_name(name)
+    r = await session.execute(
+        select(Bundle)
+        .where(Bundle.name == name)
+        .options(selectinload(Bundle.secrets), selectinload(Bundle.group))
+    )
+    bundle = r.scalar_one_or_none()
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    fernet = get_fernet()
+    out: dict[str, tuple[str, bool]] = {}
+    for s in bundle.secrets:
+        try:
+            plain = decode_stored_value(fernet, s.value_ciphertext, s.is_secret)
+        except CryptoError:
+            raise HTTPException(status_code=500, detail="Failed to decrypt secret") from None
+        out[s.key_name] = (plain, s.is_secret)
+    return bundle, out
+
+
+async def load_bundle_entries_list_masked(
+    session: AsyncSession, name: str
+) -> tuple[Bundle, dict[str, tuple[str | None, bool]]]:
+    """Web list view: decrypt plaintext rows only; encrypted values are not loaded (None)."""
+    validate_bundle_name(name)
+    r = await session.execute(
+        select(Bundle)
+        .where(Bundle.name == name)
+        .options(selectinload(Bundle.secrets), selectinload(Bundle.group))
+    )
+    bundle = r.scalar_one_or_none()
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    fernet = get_fernet()
+    out: dict[str, tuple[str | None, bool]] = {}
+    for s in bundle.secrets:
+        if s.is_secret:
+            out[s.key_name] = (None, True)
+        else:
+            try:
+                plain = decode_stored_value(fernet, s.value_ciphertext, False)
+            except CryptoError:
+                raise HTTPException(status_code=500, detail="Failed to decode value") from None
+            out[s.key_name] = (plain, False)
+    return bundle, out
+
+
+async def decrypt_bundle_entry_value(
+    session: AsyncSession, bundle_name: str, key_name: str
+) -> tuple[str, bool]:
+    """Decrypt a single row (e.g. edit form); does not load other encrypted values."""
+    validate_bundle_name(bundle_name)
+    kn = key_name.strip()
+    r = await session.execute(
+        select(Secret)
+        .join(Bundle, Secret.bundle_id == Bundle.id)
+        .where(Bundle.name == bundle_name, Secret.key_name == kn)
+    )
+    s = r.scalar_one_or_none()
+    if s is None:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    fernet = get_fernet()
+    try:
+        plain = decode_stored_value(fernet, s.value_ciphertext, s.is_secret)
+    except CryptoError:
+        raise HTTPException(status_code=500, detail="Failed to decrypt value") from None
+    return plain, s.is_secret
+
+
+async def load_bundle_secrets(
+    session: AsyncSession, name: str
+) -> tuple[Bundle, dict[str, str]]:
+    bundle, ent = await load_bundle_entries(session, name)
+    return bundle, {k: v[0] for k, v in ent.items()}

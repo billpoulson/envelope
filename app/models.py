@@ -1,0 +1,90 @@
+from datetime import datetime, timezone
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class BundleGroup(Base):
+    """Named project / folder for bundles (optional)."""
+
+    __tablename__ = "bundle_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    # Stable URL/API identifier (lowercase a-z0-9._-); not the numeric primary key.
+    slug: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    bundles: Mapped[list["Bundle"]] = relationship(back_populates="group")
+
+
+class BundleEnvLink(Base):
+    """Opaque URL token → bundle export (dotenv/json). Raw token is never stored."""
+
+    __tablename__ = "bundle_env_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    bundle_id: Mapped[int] = mapped_column(
+        ForeignKey("bundles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    bundle: Mapped["Bundle"] = relationship(back_populates="env_links")
+
+
+class Bundle(Base):
+    __tablename__ = "bundles"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bundle_groups.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    group: Mapped["BundleGroup | None"] = relationship(back_populates="bundles")
+    secrets: Mapped[list["Secret"]] = relationship(
+        back_populates="bundle", cascade="all, delete-orphan"
+    )
+    env_links: Mapped[list["BundleEnvLink"]] = relationship(
+        back_populates="bundle", cascade="all, delete-orphan"
+    )
+
+
+class Secret(Base):
+    __tablename__ = "secrets"
+    __table_args__ = (UniqueConstraint("bundle_id", "key_name", name="uq_bundle_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    bundle_id: Mapped[int] = mapped_column(ForeignKey("bundles.id", ondelete="CASCADE"))
+    key_name: Mapped[str] = mapped_column(String(512))
+    # Fernet token when is_secret; UTF-8 plaintext when not (still at rest on disk)
+    value_ciphertext: Mapped[str] = mapped_column(Text)
+    is_secret: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    bundle: Mapped["Bundle"] = relationship(back_populates="secrets")
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128))
+    key_hash: Mapped[str] = mapped_column(String(256))
+    # JSON array of scope strings, e.g. ["admin"] or ["read:bundle:*","read:project:prod-*"]
+    scopes: Mapped[str] = mapped_column(Text, default='["read:bundle:*"]')
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
