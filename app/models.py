@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -74,6 +74,30 @@ class Secret(Base):
     is_secret: Mapped[bool] = mapped_column(Boolean, default=True)
 
     bundle: Mapped["Bundle"] = relationship(back_populates="secrets")
+
+
+class PulumiStateBlob(Base):
+    """Raw checkpoint bytes for Terraform HTTP / tooling (not Fernet-wrapped bundle secrets)."""
+
+    __tablename__ = "pulumi_state_blobs"
+
+    key: Mapped[str] = mapped_column(String(2048), primary_key=True)
+    body: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class PulumiStateLock(Base):
+    """Advisory lock row for Terraform LOCK/UNLOCK (one lock per state key)."""
+
+    __tablename__ = "pulumi_state_locks"
+
+    key: Mapped[str] = mapped_column(String(2048), primary_key=True)
+    lock_body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class ApiKey(Base):

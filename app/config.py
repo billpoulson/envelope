@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     root_path: str = ""
     # Set true when users use HTTPS so session cookies get the Secure flag (TLS terminated at the gateway).
     https_cookies: bool = False
+    # Terraform HTTP remote state API (/tfstate/...). See docs/terraform-http-remote-state.md
+    pulumi_state_enabled: bool = True
 
     @field_validator("root_path", mode="before")
     @classmethod

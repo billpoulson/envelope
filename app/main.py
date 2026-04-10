@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.api.tfstate.routes import router as tfstate_router
 from app.api.v1.router import router as api_v1_router
 from app.limiter import limiter
 from app.config import Settings, get_settings
@@ -87,6 +88,8 @@ def create_app() -> FastAPI:
 
     app.include_router(web_router)
     app.include_router(api_v1_router, prefix="/api/v1")
+    if settings.pulumi_state_enabled:
+        app.include_router(tfstate_router, prefix="/tfstate")
 
     app.mount("/static", StaticFiles(directory="static"), name="static")
     return app

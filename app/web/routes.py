@@ -289,6 +289,12 @@ async def download_env_by_secret_token(
     )
 
 
+@router.get("/help", response_class=HTMLResponse, response_model=None)
+async def help_page(request: Request) -> HTMLResponse:
+    """Public usage and Terraform state documentation."""
+    return templates.TemplateResponse("help.html", {"request": request})
+
+
 @router.get("/login", response_class=HTMLResponse, response_model=None)
 async def login_get(request: Request) -> HTMLResponse:
     if request.session.get("admin"):

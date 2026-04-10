@@ -32,6 +32,55 @@ body {
   text-decoration: none;
 }
 
+.header-help {
+  margin-left: auto;
+  margin-right: 0;
+  font-size: 0.9rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.header-help:hover {
+  text-decoration: underline;
+}
+
+.top:has(.nav) .header-help {
+  margin-left: 0;
+}
+
+.doc-page .doc-section {
+  margin-top: 1.75rem;
+}
+
+.doc-page .doc-section:first-of-type {
+  margin-top: 1rem;
+}
+
+.doc-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.doc-list li {
+  margin: 0.35rem 0;
+}
+
+.doc-sub {
+  margin-top: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.doc-pre {
+  margin: 0.5rem 0 0;
+  padding: 0.65rem 0.75rem;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .nav {
   display: flex;
   align-items: center;

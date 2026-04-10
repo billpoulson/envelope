@@ -87,6 +87,8 @@
       else if (s === "write:bundle:*") bits.push("change any bundle");
       else if (s === "read:project:*") bits.push("read bundles in any project");
       else if (s === "write:project:*") bits.push("manage all projects");
+      else if (s === "terraform:http_state") bits.push("Terraform flat keys only (legacy)");
+      else if (s === "pulumi:state") bits.push("Terraform flat keys (legacy)");
       else bits.push(s);
     });
     summaryEl.textContent = "This key can: " + bits.join("; ") + ".";

@@ -14,7 +14,7 @@
 {% endblock %}
 {% block content %}
 <h1>API keys</h1>
-<p class="muted">Create keys for automation (CI, scripts). Choose what each key may read or change; use <strong>Administrator</strong> only when you need to manage other keys.</p>
+<p class="muted">Keys for CI and scripts—pick scopes below. <strong>Administrator</strong> manages keys. <strong>Terraform state</strong> is per project: grant <strong>Read</strong> or <strong>Write project</strong> for that project; state URLs are <code class="mono">/tfstate/projects/&lt;slug&gt;/…</code>. Legacy flat keys: <code class="mono">terraform:http_state</code> in Advanced JSON.</p>
 
 {% if new_plain_key %}
 <div class="banner">
