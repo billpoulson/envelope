@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.deps import get_fernet
 from app.limiter import limiter
+from app.paths import url_path
 from app.models import ApiKey, Bundle, BundleEnvLink, BundleGroup, Secret
 from app.services.projects import (
     get_project_by_slug_or_404,
@@ -59,8 +60,8 @@ router = APIRouter()
 def _bundle_web_base(project_slug: str | None, bundle_name: str) -> str:
     """Canonical web path prefix for a bundle (no trailing slash)."""
     if project_slug is not None:
-        return f"/projects/{project_slug}/bundles/{bundle_name}"
-    return f"/bundles/{bundle_name}"
+        return url_path(f"/projects/{project_slug}/bundles/{bundle_name}")
+    return url_path(f"/bundles/{bundle_name}")
 
 
 async def _validate_bundle_in_project(
@@ -90,7 +91,7 @@ async def _validate_bundle_ungrouped_web(session: AsyncSession, bundle_name: str
             status_code=400,
             detail=(
                 f"This bundle lives under project “{b.group.name}”; "
-                f"use /projects/{b.group.slug}/bundles/{bundle_name}/edit"
+                f"use {url_path(f'/projects/{b.group.slug}/bundles/{bundle_name}/edit')}"
             ),
         )
 
@@ -229,7 +230,7 @@ async def _keys_template_context(
 def _require_web_admin(request: Request) -> RedirectResponse | None:
     if request.session.get("admin") is True:
         return None
-    return RedirectResponse("/login", status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/login"), status_code=HTTP_302_FOUND)
 
 
 def _csrf_token(request: Request) -> str:
@@ -291,7 +292,7 @@ async def download_env_by_secret_token(
 @router.get("/login", response_class=HTMLResponse, response_model=None)
 async def login_get(request: Request) -> HTMLResponse:
     if request.session.get("admin"):
-        return RedirectResponse("/bundles", status_code=HTTP_302_FOUND)
+        return RedirectResponse(url_path("/bundles"), status_code=HTTP_302_FOUND)
     return templates.TemplateResponse(
         "login.html",
         {"request": request, "csrf_token": _csrf_token(request), "error": None},
@@ -326,7 +327,7 @@ async def login_post(
         ):
             request.session["admin"] = True
             request.session.pop("csrf", None)
-            return RedirectResponse("/bundles", status_code=HTTP_302_FOUND)
+            return RedirectResponse(url_path("/bundles"), status_code=HTTP_302_FOUND)
     return templates.TemplateResponse(
         "login.html",
         {
@@ -342,14 +343,14 @@ async def login_post(
 async def logout(request: Request, csrf: Annotated[str, Form()]) -> RedirectResponse:
     _check_csrf(request, csrf)
     request.session.clear()
-    return RedirectResponse("/login", status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/login"), status_code=HTTP_302_FOUND)
 
 
 @router.get("/", response_class=HTMLResponse, response_model=None)
 async def root(request: Request) -> RedirectResponse:
     if request.session.get("admin"):
-        return RedirectResponse("/bundles", status_code=HTTP_302_FOUND)
-    return RedirectResponse("/login", status_code=HTTP_302_FOUND)
+        return RedirectResponse(url_path("/bundles"), status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/login"), status_code=HTTP_302_FOUND)
 
 
 @router.get("/bundles", response_class=HTMLResponse, response_model=None)
@@ -572,7 +573,7 @@ async def bundle_new_post(
             status_code=400,
         )
     return RedirectResponse(
-        f"/projects/{g.slug}/bundles/{name}/edit",
+        url_path(f"/projects/{g.slug}/bundles/{name}/edit"),
         status_code=HTTP_302_FOUND,
     )
 
@@ -587,7 +588,7 @@ async def bundle_in_project_short_url(
     if (redir := _require_web_admin(request)) is not None:
         return redir
     return RedirectResponse(
-        f"/projects/{project_slug}/bundles/{name}/edit",
+        url_path(f"/projects/{project_slug}/bundles/{name}/edit"),
         status_code=HTTP_302_FOUND,
     )
 
@@ -663,7 +664,7 @@ async def bundle_edit_legacy(
         )
     if b.group_id and b.group:
         return RedirectResponse(
-            f"/projects/{b.group.slug}/bundles/{name}/edit",
+            url_path(f"/projects/{b.group.slug}/bundles/{name}/edit"),
             status_code=HTTP_302_FOUND,
         )
     base = _bundle_web_base(None, name)
@@ -694,7 +695,7 @@ async def bundle_env_links_page_legacy(
         )
     if b.group_id and b.group:
         return RedirectResponse(
-            f"/projects/{b.group.slug}/bundles/{name}/env-links",
+            url_path(f"/projects/{b.group.slug}/bundles/{name}/env-links"),
             status_code=HTTP_302_FOUND,
         )
     base = _bundle_web_base(None, name)
@@ -921,7 +922,7 @@ async def bundle_delete_in_project(
     validate_bundle_name(name)
     await session.execute(delete(Bundle).where(Bundle.name == name))
     await session.commit()
-    return RedirectResponse("/bundles", status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/bundles"), status_code=HTTP_302_FOUND)
 
 
 @router.post("/bundles/{name}/delete", response_model=None)
@@ -938,7 +939,7 @@ async def bundle_delete_legacy(
     validate_bundle_name(name)
     await session.execute(delete(Bundle).where(Bundle.name == name))
     await session.commit()
-    return RedirectResponse("/bundles", status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/bundles"), status_code=HTTP_302_FOUND)
 
 
 @router.post("/projects/{project_slug}/bundles/{name}/env-links", response_model=None)
@@ -1105,7 +1106,7 @@ async def keys_new(
     session.add(row)
     await session.commit()
     request.session["new_plain_key"] = plain
-    return RedirectResponse("/keys", status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/keys"), status_code=HTTP_302_FOUND)
 
 
 @router.post("/keys/{key_id}/delete", response_model=None)
@@ -1120,18 +1121,18 @@ async def keys_delete(
     _check_csrf(request, csrf)
     await session.execute(delete(ApiKey).where(ApiKey.id == key_id))
     await session.commit()
-    return RedirectResponse("/keys", status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/keys"), status_code=HTTP_302_FOUND)
 
 
 @router.get("/groups", response_model=None)
 async def legacy_groups_to_projects() -> RedirectResponse:
     """Old URL; use /projects."""
-    return RedirectResponse("/projects", status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
 
 
 @router.get("/groups/new", response_model=None)
 async def legacy_groups_new_to_projects_new() -> RedirectResponse:
-    return RedirectResponse("/projects/new", status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/projects/new"), status_code=HTTP_302_FOUND)
 
 
 @router.get("/projects", response_class=HTMLResponse, response_model=None)
@@ -1278,7 +1279,7 @@ async def projects_new_post(
             },
             status_code=409,
         )
-    return RedirectResponse("/projects", status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
 
 
 @router.post("/projects/{project_slug}/delete", response_model=None)
@@ -1293,9 +1294,9 @@ async def projects_delete(
     _check_csrf(request, csrf)
     r = await session.execute(delete(BundleGroup).where(BundleGroup.slug == project_slug.strip()))
     if r.rowcount == 0:
-        return RedirectResponse("/projects", status_code=HTTP_302_FOUND)
+        return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
     await session.commit()
-    return RedirectResponse("/projects", status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
 
 
 def _backup_download_filename(prefix: str, ext: str) -> str:

@@ -11,6 +11,10 @@ services:
       ENVELOPE_RESTORE_ENABLED: ${ENVELOPE_RESTORE_ENABLED:-false}
       # First run only: creates admin API key in DB, then remove from compose/env
       ENVELOPE_INITIAL_ADMIN_KEY: ${ENVELOPE_INITIAL_ADMIN_KEY:-}
+      # Optional — reverse proxy / gateway (see README “Behind a gateway”)
+      # FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      # ENVELOPE_ROOT_PATH: ${ENVELOPE_ROOT_PATH:-}
+      # ENVELOPE_HTTPS_COOKIES: ${ENVELOPE_HTTPS_COOKIES:-false}
     volumes:
       - envelope_data:/data
 

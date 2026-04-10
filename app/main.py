@@ -15,7 +15,8 @@ from app.config import Settings, get_settings
 from app.db import get_session_factory, init_db
 from app.models import ApiKey
 from app.auth_keys import hash_api_key
-from app.web.routes import router as web_router
+from app.paths import url_path
+from app.web.routes import router as web_router, templates
 
 
 def _validate_master_key(settings: Settings) -> None:
@@ -67,14 +68,22 @@ def create_app() -> FastAPI:
         raise RuntimeError("ENVELOPE_SESSION_SECRET is required when ENVELOPE_DEBUG is false")
     session_secret = settings.session_secret or "dev-insecure-change-me"
 
+    root = settings.root_path or ""
+    templates.env.globals["url_path"] = url_path
+
     app = FastAPI(
         title="Envelope",
         description="Self-hosted secure environment bundle manager",
         lifespan=lifespan,
+        root_path=root,
     )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    app.add_middleware(SessionMiddleware, secret_key=session_secret, https_only=False)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=session_secret,
+        https_only=settings.https_cookies,
+    )
 
     app.include_router(web_router)
     app.include_router(api_v1_router, prefix="/api/v1")

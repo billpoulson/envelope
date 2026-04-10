@@ -2,11 +2,11 @@
 {% block title %}New bundle — Envelope{% endblock %}
 {% block nav %}
 <nav class="nav">
-  <a href="/bundles">Bundles</a>
-  <a href="/projects">Projects</a>
-  <a href="/backup">Backup</a>
-  <a href="/keys">API keys</a>
-  <form method="post" action="/logout" class="inline-form">
+  <a href="{{ url_path('/bundles') }}">Bundles</a>
+  <a href="{{ url_path('/projects') }}">Projects</a>
+  <a href="{{ url_path('/backup') }}">Backup</a>
+  <a href="{{ url_path('/keys') }}">API keys</a>
+  <form method="post" action="{{ url_path('/logout') }}" class="inline-form">
     <input type="hidden" name="csrf" value="{{ csrf_token }}">
     <button type="submit" class="link">Log out</button>
   </form>
@@ -18,14 +18,14 @@
 {% if error %}
 <p class="error">{{ error }}</p>
 {% endif %}
-<form method="post" action="/bundles/new" class="stack">
+<form method="post" action="{{ url_path('/bundles/new') }}" class="stack">
   <input type="hidden" name="csrf" value="{{ csrf_token }}">
   <label for="name">Bundle name</label>
   <input id="name" name="name" required pattern="[a-zA-Z0-9._\-]+" maxlength="256" placeholder="myapp-prod">
 
   <label for="project_slug">Project</label>
   {% if projects %}
-  <p class="muted small">Every bundle belongs to a project. <a href="/projects/new">Create a project</a> if you need another one.</p>
+  <p class="muted small">Every bundle belongs to a project. <a href="{{ url_path('/projects/new') }}">Create a project</a> if you need another one.</p>
   <select id="project_slug" name="project_slug" required aria-required="true">
     <option value="">— Select a project —</option>
     {% for pslug, gname in projects %}
@@ -33,7 +33,7 @@
     {% endfor %}
   </select>
   {% else %}
-  <p class="error">No projects exist yet. <a href="/projects/new">Create a project</a> before adding a bundle.</p>
+  <p class="error">No projects exist yet. <a href="{{ url_path('/projects/new') }}">Create a project</a> before adding a bundle.</p>
   {% endif %}
 
   <label for="initial_json">Initial variables (optional JSON)</label>
@@ -45,6 +45,6 @@
 }'></textarea>
 
   <button type="submit"{% if not projects %} disabled{% endif %}>Create</button>
-  <p><a href="/bundles">Cancel</a></p>
+  <p><a href="{{ url_path('/bundles') }}">Cancel</a></p>
 </form>
 {% endblock %}

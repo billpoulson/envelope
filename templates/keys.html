@@ -2,11 +2,11 @@
 {% block title %}API keys — Envelope{% endblock %}
 {% block nav %}
 <nav class="nav">
-  <a href="/bundles">Bundles</a>
-  <a href="/projects">Projects</a>
-  <a href="/backup">Backup</a>
-  <a href="/keys">API keys</a>
-  <form method="post" action="/logout" class="inline-form">
+  <a href="{{ url_path('/bundles') }}">Bundles</a>
+  <a href="{{ url_path('/projects') }}">Projects</a>
+  <a href="{{ url_path('/backup') }}">Backup</a>
+  <a href="{{ url_path('/keys') }}">API keys</a>
+  <form method="post" action="{{ url_path('/logout') }}" class="inline-form">
     <input type="hidden" name="csrf" value="{{ csrf_token }}">
     <button type="submit" class="link">Log out</button>
   </form>
@@ -39,7 +39,7 @@
       <td class="mono small wrap">{{ k.scopes }}</td>
       <td class="muted">{{ k.created_at }}</td>
       <td>
-        <form method="post" action="/keys/{{ k.id }}/delete" class="inline-form" onsubmit="return confirm('Revoke this key?');">
+        <form method="post" action="{{ url_path('/keys/' ~ k.id ~ '/delete') }}" class="inline-form" onsubmit="return confirm('Revoke this key?');">
           <input type="hidden" name="csrf" value="{{ csrf_token }}">
           <button type="submit" class="danger small">Revoke</button>
         </form>
@@ -52,7 +52,7 @@
 </table>
 
 <h2 class="h3">Create key</h2>
-<form method="post" action="/keys/new" class="stack" id="key-create-form">
+<form method="post" action="{{ url_path('/keys/new') }}" class="stack" id="key-create-form">
   <input type="hidden" name="csrf" value="{{ csrf_token }}">
   <input type="hidden" name="scopes_json" id="scopes_json_field" value="{{ scopes_json_value | default('["read:bundle:*"]') | e }}">
 
@@ -151,5 +151,5 @@
   <button type="submit">Create key</button>
 </form>
 
-<script src="/static/keys-scopes.js" defer></script>
+<script src="{{ url_path('/static/keys-scopes.js') }}" defer></script>
 {% endblock %}

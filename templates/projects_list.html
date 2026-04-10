@@ -2,11 +2,11 @@
 {% block title %}Projects — Envelope{% endblock %}
 {% block nav %}
 <nav class="nav">
-  <a href="/bundles">Bundles</a>
-  <a href="/projects">Projects</a>
-  <a href="/backup">Backup</a>
-  <a href="/keys">API keys</a>
-  <form method="post" action="/logout" class="inline-form">
+  <a href="{{ url_path('/bundles') }}">Bundles</a>
+  <a href="{{ url_path('/projects') }}">Projects</a>
+  <a href="{{ url_path('/backup') }}">Backup</a>
+  <a href="{{ url_path('/keys') }}">API keys</a>
+  <form method="post" action="{{ url_path('/logout') }}" class="inline-form">
     <input type="hidden" name="csrf" value="{{ csrf_token }}">
     <button type="submit" class="link">Log out</button>
   </form>
@@ -15,7 +15,7 @@
 {% block content %}
 <h1>Projects</h1>
 <p class="muted">Named groups for your bundles. Deleting a project does not delete its bundles; they become ungrouped.</p>
-<p><a class="button" href="/projects/new">New project</a></p>
+<p><a class="button" href="{{ url_path('/projects/new') }}">New project</a></p>
 {% if projects %}
 <table class="table">
   <thead>
@@ -28,7 +28,7 @@
       <td class="mono muted">{{ p.slug }}</td>
       <td class="muted">{{ p.bundle_count }}</td>
       <td class="row-actions">
-        <form method="post" action="/projects/{{ p.slug }}/delete" class="inline-form" onsubmit="return confirm('Delete project “{{ p.name }}”? Bundles will be ungrouped.');">
+        <form method="post" action="{{ url_path('/projects/' ~ p.slug ~ '/delete') }}" class="inline-form" onsubmit="return confirm('Delete project “{{ p.name }}”? Bundles will be ungrouped.');">
           <input type="hidden" name="csrf" value="{{ csrf_token }}">
           <button type="submit" class="danger small">Delete</button>
         </form>
@@ -38,7 +38,7 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No projects yet. Create one to group bundles on the <a href="/bundles">bundles</a> page.</p>
+<p class="muted">No projects yet. Create one to group bundles on the <a href="{{ url_path('/bundles') }}">bundles</a> page.</p>
 {% endif %}
-<p><a href="/bundles">← Back to bundles</a></p>
+<p><a href="{{ url_path('/bundles') }}">← Back to bundles</a></p>
 {% endblock %}

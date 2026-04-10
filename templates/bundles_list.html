@@ -2,11 +2,11 @@
 {% block title %}Bundles — Envelope{% endblock %}
 {% block nav %}
 <nav class="nav">
-  <a href="/bundles">Bundles</a>
-  <a href="/projects">Projects</a>
-  <a href="/backup">Backup</a>
-  <a href="/keys">API keys</a>
-  <form method="post" action="/logout" class="inline-form">
+  <a href="{{ url_path('/bundles') }}">Bundles</a>
+  <a href="{{ url_path('/projects') }}">Projects</a>
+  <a href="{{ url_path('/backup') }}">Backup</a>
+  <a href="{{ url_path('/keys') }}">API keys</a>
+  <form method="post" action="{{ url_path('/logout') }}" class="inline-form">
     <input type="hidden" name="csrf" value="{{ csrf_token }}">
     <button type="submit" class="link">Log out</button>
   </form>
@@ -17,14 +17,14 @@
   <header class="bundles-page-head">
     <div>
       <h1>Bundles</h1>
-      <p class="muted bundles-lead">Environment variable groups for your apps. Export via the API as <code>.env</code> in CI. Assign bundles to a <a href="/projects">project</a> to group them in the table below.</p>
+      <p class="muted bundles-lead">Environment variable groups for your apps. Export via the API as <code>.env</code> in CI. Assign bundles to a <a href="{{ url_path('/projects') }}">project</a> to group them in the table below.</p>
     </div>
     <div class="bundles-toolbar">
       <label class="bundle-filter-label">
         <span class="muted small">Search</span>
         <input type="search" id="bundle-filter" class="bundle-filter-input" placeholder="Filter by bundle name…" autocomplete="off" aria-label="Filter bundles by name">
       </label>
-      <a class="button" href="/bundles/new">New bundle</a>
+      <a class="button" href="{{ url_path('/bundles/new') }}">New bundle</a>
     </div>
   </header>
 
@@ -60,17 +60,17 @@
             </td>
             <td>
               {% if section.slug %}
-              <a class="bundles-bundle-link mono" href="/projects/{{ section.slug }}/bundles/{{ b.name }}">{{ b.name }}</a>
+              <a class="bundles-bundle-link mono" href="{{ url_path('/projects/' ~ section.slug ~ '/bundles/' ~ b.name) }}">{{ b.name }}</a>
               {% else %}
-              <a class="bundles-bundle-link mono" href="/bundles/{{ b.name }}/edit">{{ b.name }}</a>
+              <a class="bundles-bundle-link mono" href="{{ url_path('/bundles/' ~ b.name ~ '/edit') }}">{{ b.name }}</a>
               {% endif %}
             </td>
             <td class="bundles-col-num muted">{{ b.secret_count }}</td>
             <td class="actions-col">
               {% if section.slug %}
-              <a class="button secondary-outline small" href="/projects/{{ section.slug }}/bundles/{{ b.name }}">Edit</a>
+              <a class="button secondary-outline small" href="{{ url_path('/projects/' ~ section.slug ~ '/bundles/' ~ b.name) }}">Edit</a>
               {% else %}
-              <a class="button secondary-outline small" href="/bundles/{{ b.name }}/edit">Edit</a>
+              <a class="button secondary-outline small" href="{{ url_path('/bundles/' ~ b.name ~ '/edit') }}">Edit</a>
               {% endif %}
             </td>
           </tr>
@@ -82,7 +82,7 @@
   {% else %}
   <div class="bundles-empty">
     <p class="muted">No bundles yet.</p>
-    <p><a class="button" href="/bundles/new">Create your first bundle</a></p>
+    <p><a class="button" href="{{ url_path('/bundles/new') }}">Create your first bundle</a></p>
   </div>
   {% endif %}
 </div>
