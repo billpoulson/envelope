@@ -32,8 +32,11 @@ jobs:
       - name: Test
         run: python -m unittest discover -s tests -v
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      # Self-hosted: Docker Engine must be running and the runner user must access the API
+      # (e.g. Linux: /var/run/docker.sock + user in `docker` group; WSL: enable Docker Desktop
+      # integration for this distro, or install docker.io inside WSL and start the service).
+      - name: Verify Docker daemon
+        run: docker version && docker info
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
