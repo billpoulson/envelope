@@ -10,6 +10,7 @@ Self-hosted **secure environment bundle** manager: named groups of secrets (like
 - **Opaque env URLs**: download a bundle as `.env` or JSON via `GET /env/{secret-token}` — the path is a random token only (no project or bundle name). Create links from the bundle’s **Secret env URL** page in the web UI (`…/bundles/{name}/env-links`, or under **Projects**) or `POST /api/v1/bundles/{name}/env-links` (API key with write access to that bundle).
 - **Backups**: full SQLite snapshots and passphrase-encrypted files (admin); per-bundle JSON/encrypted export and merge import (scoped API keys)
 - **Rate limits** on sensitive routes (export, web login)
+- **Certificate-backed sealed secrets** (zero-knowledge path): store client-encrypted ciphertext + wrapped data keys per recipient certificate; server does not need private keys to decrypt
 - **Terraform HTTP remote state** (optional): per-project URLs `/tfstate/projects/<slug>/…` with **read/write project** scopes; legacy flat `/tfstate/blobs/…` with **`terraform:http_state`** (or **admin**). See [docs/terraform-http-remote-state.md](docs/terraform-http-remote-state.md) and [docs/usage.md](docs/usage.md) (storage model and scopes).
 - **Help** in the web UI at **`/help`** (no login required) — usage overview including Terraform state storage.
 
@@ -157,6 +158,57 @@ curl -fsS "$ENVELOPE_SECRET_ENV_URL?format=json" | python -m json.tool
 
 If Envelope is behind a **path prefix** (`ENVELOPE_ROOT_PATH`), the `url` from the API already includes that prefix—use it exactly as returned.
 
+## Certificate-backed sealed secrets (server-blind mode)
+
+Use this mode when you want Envelope to store only ciphertext envelopes and wrapped data keys for recipients. You encrypt on the client side (browser app, CLI, or pipeline step), then upload:
+
+- ciphertext payload (`payload_ciphertext`)
+- payload nonce (`payload_nonce`)
+- optional AAD (`payload_aad`)
+- recipient wrapped keys (one per registered certificate)
+
+Envelope stores only these values and certificate metadata; it does **not** store recipient private keys.
+
+### Web UI
+
+- **Certificates** page (`/certificates`) — register/delete recipient public certificates.
+- Bundle sub-nav **Sealed secrets** (`…/bundles/{name}/sealed-secrets`) — manage ciphertext rows per bundle.
+
+### API workflow
+
+1. Register recipient certificates (admin):
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  "$ENVELOPE_URL/api/v1/certificates" \
+  -d '{"name":"team-a-prod","certificate_pem":"-----BEGIN CERTIFICATE-----\n..."}'
+```
+
+2. Upload a sealed secret (write scope for bundle):
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $WRITE_KEY" \
+  -H "Content-Type: application/json" \
+  "$ENVELOPE_URL/api/v1/bundles/myapp-prod/sealed-secrets" \
+  -d '{
+    "key_name": "API_TOKEN",
+    "enc_alg": "aes-256-gcm",
+    "payload_ciphertext": "BASE64_CIPHERTEXT",
+    "payload_nonce": "BASE64_NONCE",
+    "payload_aad": "optional-context",
+    "recipients": [
+      {"certificate_id": 1, "wrapped_key": "BASE64_WRAPPED_KEY_1", "key_wrap_alg": "rsa-oaep-256"},
+      {"certificate_id": 2, "wrapped_key": "BASE64_WRAPPED_KEY_2", "key_wrap_alg": "rsa-oaep-256"}
+    ]
+  }'
+```
+
+3. Read/delete sealed secret metadata (read/write scope for bundle):
+
+- `GET /api/v1/bundles/{name}/sealed-secrets`
+- `DELETE /api/v1/bundles/{name}/sealed-secrets?key_name=...`
+
 ## Local development
 
 ```bash
@@ -186,6 +238,12 @@ API docs: `http://localhost:8080/docs`
 | GET | `/api/v1/bundles/{name}/env-links` | write scope for bundle — list link ids (not full URLs) |
 | POST | `/api/v1/bundles/{name}/env-links` | write — returns `{ "url": "…/env/<token>" }` once |
 | DELETE | `/api/v1/bundles/{name}/env-links/{id}` | write — revoke |
+| GET | `/api/v1/certificates` | admin — list recipient certificates |
+| POST | `/api/v1/certificates` | admin — body `{"name":"…","certificate_pem":"-----BEGIN CERTIFICATE-----..."}` |
+| DELETE | `/api/v1/certificates/{id}` | admin — delete certificate (fails if in use) |
+| GET | `/api/v1/bundles/{name}/sealed-secrets` | read access to bundle — list ciphertext envelopes + recipients |
+| POST | `/api/v1/bundles/{name}/sealed-secrets` | write access to bundle — upsert ciphertext envelope + recipients |
+| DELETE | `/api/v1/bundles/{name}/sealed-secrets?key_name=…` | write access to bundle — delete one sealed secret row |
 | GET | `/api/v1/api-keys` | admin |
 | POST | `/api/v1/api-keys` | admin — body `{"name":"…","scopes":["…"]}`; use `read:project:…` / `write:project:…` for Terraform state under `/tfstate/projects/<slug>/…`; `terraform:http_state` only for legacy `/tfstate/blobs/…` |
 | DELETE | `/api/v1/api-keys/{id}` | admin |

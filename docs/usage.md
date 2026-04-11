@@ -12,8 +12,10 @@ For installation, environment variables, TLS, and reverse-proxy notes, see the [
 2. **Projects** — Create projects to group bundles. Each project has a **slug** (used in URLs and Terraform state paths).
 3. **Bundles** — Create bundles inside a project. Each bundle holds key/value entries; values can be stored as secrets (Fernet-encrypted) or plaintext config.
 4. **Variables** — Add, edit, encrypt, or delete entries on a bundle’s edit page.
-5. **Secret env URL** — Generate opaque download links (`GET /env/<token>`) that do not expose project or bundle names. Treat these URLs like credentials.
-6. **API keys** — Create keys with scoped access (`read`, `write`, per-bundle or per-project scopes). Use **read** keys in CI to export bundles; reserve **admin** for management.
+5. **Sealed secrets** — In each bundle, manage ciphertext-only rows for client-side encrypted values and wrapped recipient keys.
+6. **Secret env URL** — Generate opaque download links (`GET /env/<token>`) that do not expose project or bundle names. Treat these URLs like credentials.
+7. **Certificates** — Register recipient public certificates used by sealed secrets.
+8. **API keys** — Create keys with scoped access (`read`, `write`, per-bundle or per-project scopes). Use **read** keys in CI to export bundles; reserve **admin** for management.
 
 ---
 
@@ -35,6 +37,51 @@ curl -fsS "https://your-envelope.example.com/env/<token>" -o .env
 ```
 
 Create links from the UI or `POST /api/v1/bundles/{name}/env-links` with a key that has write access to the bundle.
+
+---
+
+## Certificate-backed sealed secrets
+
+Use sealed secrets when you want a server-blind storage path: clients encrypt data locally, then upload ciphertext envelopes and wrapped data keys for recipients. Envelope stores:
+
+- ciphertext payload
+- nonce (and optional AAD)
+- wrapped keys per certificate recipient
+
+Envelope does **not** store recipient private keys.
+
+### Endpoints
+
+- `GET /api/v1/certificates` (admin)
+- `POST /api/v1/certificates` (admin)
+- `DELETE /api/v1/certificates/{id}` (admin, blocked if certificate is in use)
+- `GET /api/v1/bundles/{name}/sealed-secrets` (read scope for bundle)
+- `POST /api/v1/bundles/{name}/sealed-secrets` (write scope for bundle)
+- `DELETE /api/v1/bundles/{name}/sealed-secrets?key_name=...` (write scope for bundle)
+
+### Typical flow
+
+1. Register public certificates (admin).
+2. Client encrypts plaintext with a random data key (for example AES-GCM).
+3. Client wraps that data key once per recipient certificate.
+4. Upload ciphertext + recipients to `POST /sealed-secrets`.
+5. Consumers fetch sealed metadata and decrypt client-side with recipient private key.
+
+### Example payload
+
+```json
+{
+  "key_name": "API_TOKEN",
+  "enc_alg": "aes-256-gcm",
+  "payload_ciphertext": "BASE64_CIPHERTEXT",
+  "payload_nonce": "BASE64_NONCE",
+  "payload_aad": "optional-context",
+  "recipients": [
+    {"certificate_id": 1, "wrapped_key": "BASE64_WRAPPED_KEY_1", "key_wrap_alg": "rsa-oaep-256"},
+    {"certificate_id": 2, "wrapped_key": "BASE64_WRAPPED_KEY_2", "key_wrap_alg": "rsa-oaep-256"}
+  ]
+}
+```
 
 ---
 
@@ -108,3 +155,4 @@ More detail: [terraform-http-remote-state.md](terraform-http-remote-state.md).
 - Use **HTTPS** in production; opaque env URLs and exports return **plaintext** for use in pipelines.
 - Never log request bodies or API keys.
 - Rate limits apply to sensitive routes (export, login, Terraform state).
+- Sealed secret payloads are opaque to the server, but holders of recipient private keys can decrypt them; treat wrapped-key metadata and ciphertext as sensitive configuration artifacts.
