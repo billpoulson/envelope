@@ -14,6 +14,11 @@ class DatabaseUrlToSqlitePathTests(unittest.TestCase):
         p = database_url_to_sqlite_path("sqlite+aiosqlite:///C:/tmp/envelope.db")
         self.assertEqual(p, "C:/tmp/envelope.db")
 
+    def test_unix_absolute_four_slash_form(self) -> None:
+        """Absolute Unix paths use sqlite:////abs (four slashes); regex-only parsers strip the leading /."""
+        p = database_url_to_sqlite_path("sqlite+aiosqlite:////tmp/envelope.db")
+        self.assertEqual(p, "/tmp/envelope.db")
+
     def test_relative_becomes_absolute(self) -> None:
         p = database_url_to_sqlite_path("sqlite+aiosqlite:///./data/envelope.db")
         self.assertIsNotNone(p)

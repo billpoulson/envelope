@@ -10,6 +10,8 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+from sqlalchemy.engine.url import make_url
+
 from app.db import get_engine, init_db, reset_engine
 
 # Core tables that must exist (older backups may lack optional tables added later; init_db creates missing ones).
@@ -27,11 +29,14 @@ def database_url_to_sqlite_path(database_url: str) -> str | None:
     """Return filesystem path for sqlite+aiosqlite URL, or None if not a file-backed SQLite URL."""
     if not database_url.startswith("sqlite"):
         return None
-    m = re.match(r"sqlite\+aiosqlite:///+(.*)", database_url)
-    if not m:
+    try:
+        url = make_url(database_url)
+    except Exception:
         return None
-    path = m.group(1)
-    if path in (":memory:",):
+    if url.get_backend_name() != "sqlite":
+        return None
+    path = url.database
+    if path is None or path == ":memory:":
         return None
     if path.startswith("/") or re.match(r"^[A-Za-z]:", path):
         return path
