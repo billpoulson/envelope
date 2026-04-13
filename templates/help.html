@@ -3,7 +3,7 @@
 {% block content %}
 <article class="doc-page">
   <h1>Documentation</h1>
-  <p class="muted">How to use Envelope in the UI and via the API, including Terraform remote state. The same content lives in the repo as <code>docs/usage.md</code>.</p>
+  <p class="muted">How to use Envelope in the UI and via the API, including Terraform remote state and how Pulumi fits in. The same content lives in the repo as <code>docs/usage.md</code>.</p>
 
   <section class="doc-section">
     <h2 class="h3">What Envelope does</h2>
@@ -72,6 +72,15 @@ Authorization: Bearer &lt;api-key&gt;</pre>
     <pre class="doc-pre wrap" role="region" aria-label="Terraform auth env vars">export TF_HTTP_USERNAME=terraform
 export TF_HTTP_PASSWORD="$ENVELOPE_TF_WRITE_KEY"</pre>
     <p class="muted">Set these for <code>terraform init</code> as well as plan/apply. In CI, inject <code>TF_HTTP_PASSWORD</code> from your secret store (never commit it).</p>
+  </section>
+
+  <section class="doc-section">
+    <h2 class="h3">Pulumi state (not the same HTTP API)</h2>
+    <p>Envelope’s <code>/tfstate/…</code> endpoints implement the <strong>Terraform HTTP backend</strong> contract. The <strong>Pulumi CLI</strong> does not use that protocol for <code>pulumi login</code> — it supports backends such as <strong>PostgreSQL</strong>, <strong>S3</strong>, Azure Blob, GCS, and file.</p>
+    <p><strong>Practical setup:</strong> run Pulumi against a <a href="https://www.pulumi.com/docs/concepts/state/">supported backend</a>, and keep the connection URL or cloud credentials in an Envelope <strong>bundle</strong> (or inject them in CI after exporting from Envelope). Example for Postgres:</p>
+    <pre class="doc-pre wrap" role="region" aria-label="Pulumi login with Postgres URL from env"># Export vars from Envelope (or CI secrets), then:
+pulumi login postgres://user:pass@host:5432/pulumi</pre>
+    <p class="muted">The legacy API scope name <code>pulumi:state</code> only applies to flat <code>/tfstate/blobs/…</code> keys — it does not make the stock Pulumi CLI speak Envelope’s HTTP API. Prefer Postgres/S3 state plus secrets from Envelope for Pulumi.</p>
   </section>
 
   <section class="doc-section">

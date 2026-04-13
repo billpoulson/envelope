@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import gc
 import os
 import re
 import sqlite3
@@ -114,7 +116,8 @@ async def replace_sqlite_database(*, new_content: bytes) -> None:
 
     get_engine()
     await reset_engine()
-
+    gc.collect()
+    await asyncio.sleep(0)
     try:
         os.replace(tmp_path, path)
     except Exception:

@@ -19,9 +19,13 @@ State is **scoped to an Envelope project** (same “project” as bundles). Use:
 
 `GET/POST/DELETE/LOCK/UNLOCK` on `/tfstate/blobs/<key>` still works for keys with scope **`terraform:http_state`** or **`pulumi:state`** (or **admin**). Prefer per-project URLs for new setups.
 
-## Pulumi CLI note
+## Pulumi
 
-**Current Pulumi CLI** (e.g. v3.225+) does **not** register `resthttp://` or `resthttps://` URLs for `pulumi login`. For **Pulumi** without Pulumi Cloud, prefer **`pulumi login postgres://...`** or **`pulumi login s3://...`**, and store connection strings in Envelope bundles as usual.
+Envelope’s `/tfstate/…` API implements the **Terraform HTTP backend** wire protocol. The **Pulumi CLI** does not use that protocol — there is no supported `pulumi login https://…/tfstate/…` that stores state in Envelope’s HTTP API.
+
+**Use a [Pulumi-supported backend](https://www.pulumi.com/docs/concepts/state/)** (e.g. **`pulumi login postgres://…`**, **`s3://…`**) and keep the URL and credentials in an Envelope **bundle** or CI secrets exported from Envelope.
+
+The legacy scope **`pulumi:state`** only authorizes Envelope’s flat **`/tfstate/blobs/…`** paths; it does not connect the stock Pulumi CLI to this HTTP API.
 
 ## Envelope configuration
 

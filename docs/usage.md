@@ -96,6 +96,20 @@ More detail: [terraform-http-remote-state.md](terraform-http-remote-state.md).
 
 ---
 
+## Pulumi state (not Envelope’s Terraform HTTP API)
+
+Envelope’s `/tfstate/…` API implements the **Terraform HTTP backend** wire protocol. The **Pulumi CLI** does not use that protocol for `pulumi login`. Supported self-managed backends include **PostgreSQL**, **S3**, Azure Blob, GCS, and local file — see [Pulumi: State and backends](https://www.pulumi.com/docs/concepts/state/).
+
+**Recommended:** Point Pulumi at Postgres (or S3, etc.), and store the backend URL and credentials in an Envelope **bundle** (or supply them from CI after exporting from Envelope). Example:
+
+```bash
+pulumi login postgres://user:pass@host:5432/pulumi
+```
+
+The legacy scope name **`pulumi:state`** only authorizes flat **`/tfstate/blobs/…`** keys in Envelope; it does not enable the stock Pulumi CLI to use Envelope as an HTTP state store. For Pulumi, use a native backend plus secrets from Envelope.
+
+---
+
 ## Backups
 
 - **Full database** — Admin API or **Backup** in the UI; optional passphrase-encrypted download. The encrypted backup does not include `ENVELOPE_MASTER_KEY`; keep the Fernet key separately.

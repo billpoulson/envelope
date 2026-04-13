@@ -13,7 +13,7 @@ from app.api.tfstate.routes import router as tfstate_router
 from app.api.v1.router import router as api_v1_router
 from app.limiter import limiter
 from app.config import Settings, get_settings
-from app.db import get_session_factory, init_db
+from app.db import get_session_factory, init_db, reset_engine
 from app.models import ApiKey
 from app.auth_keys import hash_api_key
 from app.paths import url_path
@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI):
         settings = get_settings()
         await _bootstrap_admin_if_needed(session, settings)
     yield
+    await reset_engine()
 
 
 def create_app() -> FastAPI:
