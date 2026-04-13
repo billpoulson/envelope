@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from itertools import groupby
 from typing import Annotated, Literal
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import delete, func, select
@@ -17,8 +19,17 @@ from app.config import get_settings
 from app.db import get_db
 from app.deps import get_fernet
 from app.limiter import limiter
+from app.models import (
+    ApiKey,
+    Bundle,
+    BundleEnvLink,
+    BundleGroup,
+    Certificate,
+    SealedSecret,
+    SealedSecretRecipient,
+    Secret,
+)
 from app.paths import url_path
-from app.models import ApiKey, Bundle, BundleEnvLink, BundleGroup, Secret
 from app.services.projects import (
     get_project_by_slug_or_404,
     next_available_slug,
@@ -186,6 +197,153 @@ async def _bundle_env_links_template(
             "env_links": env_links,
             "new_env_url": new_env_url,
             "bundle_subnav_active": "env-links",
+        },
+    )
+
+
+def _certificate_fingerprint_sha256_hex(certificate_pem: str) -> str:
+    try:
+        cert = x509.load_pem_x509_certificate(certificate_pem.encode("utf-8"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid PEM certificate") from e
+    return cert.fingerprint(hashes.SHA256()).hex()
+
+
+async def _certificates_template(
+    request: Request,
+    session: AsyncSession,
+    *,
+    error: str | None = None,
+    form_name: str = "",
+    form_certificate_pem: str = "",
+) -> HTMLResponse:
+    r = await session.execute(select(Certificate).order_by(Certificate.name))
+    rows = r.scalars().all()
+    ur = await session.execute(
+        select(
+            SealedSecretRecipient.certificate_id,
+            func.count(SealedSecretRecipient.id).label("n"),
+        )
+        .group_by(SealedSecretRecipient.certificate_id)
+    )
+    usage_by_cert = {int(row.certificate_id): int(row.n) for row in ur.all()}
+    certificates = [
+        {
+            "id": row.id,
+            "name": row.name,
+            "fingerprint_sha256": row.fingerprint_sha256,
+            "created_at": row.created_at,
+            "usage_count": usage_by_cert.get(row.id, 0),
+        }
+        for row in rows
+    ]
+    return templates.TemplateResponse(
+        "certificates.html",
+        {
+            "request": request,
+            "csrf_token": _csrf_token(request),
+            "error": error,
+            "form_name": form_name,
+            "form_certificate_pem": form_certificate_pem,
+            "certificates": certificates,
+        },
+    )
+
+
+def _default_recipients_json(certificates: list[Certificate]) -> str:
+    if not certificates:
+        return '[{"certificate_id": 1, "wrapped_key": "BASE64_WRAPPED_KEY", "key_wrap_alg": "rsa-oaep-256"}]'
+    first = certificates[0]
+    return (
+        "[\n"
+        f'  {{"certificate_id": {first.id}, "wrapped_key": "BASE64_WRAPPED_KEY", "key_wrap_alg": "rsa-oaep-256"}}\n'
+        "]"
+    )
+
+
+def _parse_recipients_json(raw: str) -> tuple[list[dict[str, object]], str | None]:
+    text = raw.strip()
+    if not text:
+        return [], "Recipients JSON is required"
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        return [], f"Recipients JSON is invalid: {e}"
+    if not isinstance(data, list) or not data:
+        return [], "Recipients JSON must be a non-empty JSON array"
+    deduped: dict[int, dict[str, object]] = {}
+    for idx, item in enumerate(data):
+        if not isinstance(item, dict):
+            return [], f"Recipient #{idx + 1} must be an object"
+        cid = item.get("certificate_id")
+        wrapped = item.get("wrapped_key")
+        alg = item.get("key_wrap_alg", "rsa-oaep-256")
+        if not isinstance(cid, int) or cid < 1:
+            return [], f"Recipient #{idx + 1} certificate_id must be a positive integer"
+        if not isinstance(wrapped, str) or not wrapped.strip():
+            return [], f"Recipient #{idx + 1} wrapped_key is required"
+        if not isinstance(alg, str) or not alg.strip():
+            return [], f"Recipient #{idx + 1} key_wrap_alg is required"
+        deduped[cid] = {
+            "certificate_id": cid,
+            "wrapped_key": wrapped.strip(),
+            "key_wrap_alg": alg.strip(),
+        }
+    return list(deduped.values()), None
+
+
+async def _bundle_sealed_secrets_template(
+    request: Request,
+    session: AsyncSession,
+    name: str,
+    bundle_route_base: str,
+    project_slug: str | None,
+    *,
+    error: str | None = None,
+    form_values: dict[str, str] | None = None,
+) -> HTMLResponse:
+    r = await session.execute(select(Bundle.id).where(Bundle.name == name))
+    bid = r.scalar_one_or_none()
+    if bid is None:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "message": "Bundle not found"},
+            status_code=404,
+        )
+    cr = await session.execute(select(Certificate).order_by(Certificate.name))
+    certificates = cr.scalars().all()
+    cert_name_by_id = {int(c.id): c.name for c in certificates}
+    sr = await session.execute(
+        select(SealedSecret)
+        .where(SealedSecret.bundle_id == bid)
+        .options(joinedload(SealedSecret.recipients))
+        .order_by(SealedSecret.key_name)
+    )
+    sealed_rows = sr.unique().scalars().all()
+    initial_values = {
+        "key_name": "",
+        "enc_alg": "aes-256-gcm",
+        "payload_ciphertext": "",
+        "payload_nonce": "",
+        "payload_aad": "",
+        "recipients_json": _default_recipients_json(certificates),
+    }
+    if form_values:
+        initial_values.update(form_values)
+    return templates.TemplateResponse(
+        "bundle_sealed_secrets.html",
+        {
+            "request": request,
+            "bundle_name": name,
+            "bundle_route_base": bundle_route_base,
+            "project_slug": project_slug,
+            "csrf_token": _csrf_token(request),
+            "bundle_subnav_active": "sealed-secrets",
+            "sealed_secrets": sealed_rows,
+            "certificates": certificates,
+            "certificate_name_by_id": cert_name_by_id,
+            "error": error,
+            "form_values": initial_values,
         },
     )
 
@@ -1035,6 +1193,462 @@ async def bundle_env_link_delete_legacy(
     )
     await session.commit()
     return RedirectResponse(f"{_bundle_web_base(None, name)}/env-links", status_code=HTTP_302_FOUND)
+
+
+@router.get(
+    "/projects/{project_slug}/bundles/{name}/sealed-secrets",
+    response_class=HTMLResponse,
+    response_model=None,
+)
+async def bundle_sealed_secrets_page_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    await _validate_bundle_in_project(session, project_slug, name)
+    base = _bundle_web_base(project_slug, name)
+    return await _bundle_sealed_secrets_template(
+        request,
+        session,
+        name,
+        base,
+        project_slug,
+    )
+
+
+@router.get(
+    "/bundles/{name}/sealed-secrets",
+    response_class=HTMLResponse,
+    response_model=None,
+)
+async def bundle_sealed_secrets_page_legacy(
+    request: Request,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    validate_bundle_name(name)
+    r = await session.execute(
+        select(Bundle).where(Bundle.name == name).options(joinedload(Bundle.group))
+    )
+    b = r.unique().scalar_one_or_none()
+    if b is None:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "message": "Bundle not found"},
+            status_code=404,
+        )
+    if b.group_id and b.group:
+        return RedirectResponse(
+            url_path(f"/projects/{b.group.slug}/bundles/{name}/sealed-secrets"),
+            status_code=HTTP_302_FOUND,
+        )
+    base = _bundle_web_base(None, name)
+    return await _bundle_sealed_secrets_template(request, session, name, base, None)
+
+
+@router.post(
+    "/projects/{project_slug}/bundles/{name}/sealed-secrets/add",
+    response_model=None,
+)
+async def bundle_sealed_secret_add_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    key_name: Annotated[str, Form()],
+    enc_alg: Annotated[str, Form()],
+    payload_ciphertext: Annotated[str, Form()],
+    payload_nonce: Annotated[str, Form()],
+    payload_aad: Annotated[str, Form()] = "",
+    recipients_json: Annotated[str, Form()] = "",
+    csrf: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse | HTMLResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_bundle_in_project(session, project_slug, name)
+    base = _bundle_web_base(project_slug, name)
+    bundle_r = await session.execute(select(Bundle.id).where(Bundle.name == name))
+    bundle_id = bundle_r.scalar_one_or_none()
+    if bundle_id is None:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "message": "Bundle not found"},
+            status_code=404,
+        )
+    normalized_key = normalize_env_key(key_name)
+    if not normalized_key:
+        return await _bundle_sealed_secrets_template(
+            request,
+            session,
+            name,
+            base,
+            project_slug,
+            error="Key name is required",
+            form_values={
+                "key_name": key_name,
+                "enc_alg": enc_alg,
+                "payload_ciphertext": payload_ciphertext,
+                "payload_nonce": payload_nonce,
+                "payload_aad": payload_aad,
+                "recipients_json": recipients_json,
+            },
+        )
+    recipients, recipients_err = _parse_recipients_json(recipients_json)
+    if recipients_err:
+        return await _bundle_sealed_secrets_template(
+            request,
+            session,
+            name,
+            base,
+            project_slug,
+            error=recipients_err,
+            form_values={
+                "key_name": key_name,
+                "enc_alg": enc_alg,
+                "payload_ciphertext": payload_ciphertext,
+                "payload_nonce": payload_nonce,
+                "payload_aad": payload_aad,
+                "recipients_json": recipients_json,
+            },
+        )
+    cert_ids = [int(x["certificate_id"]) for x in recipients]
+    cert_r = await session.execute(select(Certificate.id).where(Certificate.id.in_(cert_ids)))
+    found = {int(row[0]) for row in cert_r.all()}
+    missing = [str(cid) for cid in cert_ids if cid not in found]
+    if missing:
+        return await _bundle_sealed_secrets_template(
+            request,
+            session,
+            name,
+            base,
+            project_slug,
+            error=f"Unknown certificate IDs: {', '.join(missing)}",
+            form_values={
+                "key_name": key_name,
+                "enc_alg": enc_alg,
+                "payload_ciphertext": payload_ciphertext,
+                "payload_nonce": payload_nonce,
+                "payload_aad": payload_aad,
+                "recipients_json": recipients_json,
+            },
+        )
+    row_r = await session.execute(
+        select(SealedSecret)
+        .where(SealedSecret.bundle_id == bundle_id, SealedSecret.key_name == normalized_key)
+        .options(joinedload(SealedSecret.recipients))
+    )
+    row = row_r.unique().scalar_one_or_none()
+    if row is None:
+        row = SealedSecret(
+            bundle_id=bundle_id,
+            key_name=normalized_key,
+            enc_alg=(enc_alg or "aes-256-gcm").strip() or "aes-256-gcm",
+            payload_ciphertext=payload_ciphertext.strip(),
+            payload_nonce=payload_nonce.strip(),
+            payload_aad=payload_aad.strip() or None,
+        )
+        session.add(row)
+        await session.flush()
+    else:
+        row.enc_alg = (enc_alg or "aes-256-gcm").strip() or "aes-256-gcm"
+        row.payload_ciphertext = payload_ciphertext.strip()
+        row.payload_nonce = payload_nonce.strip()
+        row.payload_aad = payload_aad.strip() or None
+        await session.execute(
+            delete(SealedSecretRecipient).where(SealedSecretRecipient.sealed_secret_id == row.id)
+        )
+    for rec in recipients:
+        session.add(
+            SealedSecretRecipient(
+                sealed_secret_id=row.id,
+                certificate_id=int(rec["certificate_id"]),
+                wrapped_key=str(rec["wrapped_key"]),
+                key_wrap_alg=str(rec["key_wrap_alg"]),
+            )
+        )
+    await session.commit()
+    return RedirectResponse(f"{base}/sealed-secrets", status_code=HTTP_302_FOUND)
+
+
+@router.post("/bundles/{name}/sealed-secrets/add", response_model=None)
+async def bundle_sealed_secret_add_legacy(
+    request: Request,
+    name: str,
+    key_name: Annotated[str, Form()],
+    enc_alg: Annotated[str, Form()],
+    payload_ciphertext: Annotated[str, Form()],
+    payload_nonce: Annotated[str, Form()],
+    payload_aad: Annotated[str, Form()] = "",
+    recipients_json: Annotated[str, Form()] = "",
+    csrf: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse | HTMLResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_bundle_ungrouped_web(session, name)
+    base = _bundle_web_base(None, name)
+    bundle_r = await session.execute(select(Bundle.id).where(Bundle.name == name))
+    bundle_id = bundle_r.scalar_one_or_none()
+    if bundle_id is None:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "message": "Bundle not found"},
+            status_code=404,
+        )
+    normalized_key = normalize_env_key(key_name)
+    if not normalized_key:
+        return await _bundle_sealed_secrets_template(
+            request,
+            session,
+            name,
+            base,
+            None,
+            error="Key name is required",
+            form_values={
+                "key_name": key_name,
+                "enc_alg": enc_alg,
+                "payload_ciphertext": payload_ciphertext,
+                "payload_nonce": payload_nonce,
+                "payload_aad": payload_aad,
+                "recipients_json": recipients_json,
+            },
+        )
+    recipients, recipients_err = _parse_recipients_json(recipients_json)
+    if recipients_err:
+        return await _bundle_sealed_secrets_template(
+            request,
+            session,
+            name,
+            base,
+            None,
+            error=recipients_err,
+            form_values={
+                "key_name": key_name,
+                "enc_alg": enc_alg,
+                "payload_ciphertext": payload_ciphertext,
+                "payload_nonce": payload_nonce,
+                "payload_aad": payload_aad,
+                "recipients_json": recipients_json,
+            },
+        )
+    cert_ids = [int(x["certificate_id"]) for x in recipients]
+    cert_r = await session.execute(select(Certificate.id).where(Certificate.id.in_(cert_ids)))
+    found = {int(row[0]) for row in cert_r.all()}
+    missing = [str(cid) for cid in cert_ids if cid not in found]
+    if missing:
+        return await _bundle_sealed_secrets_template(
+            request,
+            session,
+            name,
+            base,
+            None,
+            error=f"Unknown certificate IDs: {', '.join(missing)}",
+            form_values={
+                "key_name": key_name,
+                "enc_alg": enc_alg,
+                "payload_ciphertext": payload_ciphertext,
+                "payload_nonce": payload_nonce,
+                "payload_aad": payload_aad,
+                "recipients_json": recipients_json,
+            },
+        )
+    row_r = await session.execute(
+        select(SealedSecret)
+        .where(SealedSecret.bundle_id == bundle_id, SealedSecret.key_name == normalized_key)
+        .options(joinedload(SealedSecret.recipients))
+    )
+    row = row_r.unique().scalar_one_or_none()
+    if row is None:
+        row = SealedSecret(
+            bundle_id=bundle_id,
+            key_name=normalized_key,
+            enc_alg=(enc_alg or "aes-256-gcm").strip() or "aes-256-gcm",
+            payload_ciphertext=payload_ciphertext.strip(),
+            payload_nonce=payload_nonce.strip(),
+            payload_aad=payload_aad.strip() or None,
+        )
+        session.add(row)
+        await session.flush()
+    else:
+        row.enc_alg = (enc_alg or "aes-256-gcm").strip() or "aes-256-gcm"
+        row.payload_ciphertext = payload_ciphertext.strip()
+        row.payload_nonce = payload_nonce.strip()
+        row.payload_aad = payload_aad.strip() or None
+        await session.execute(
+            delete(SealedSecretRecipient).where(SealedSecretRecipient.sealed_secret_id == row.id)
+        )
+    for rec in recipients:
+        session.add(
+            SealedSecretRecipient(
+                sealed_secret_id=row.id,
+                certificate_id=int(rec["certificate_id"]),
+                wrapped_key=str(rec["wrapped_key"]),
+                key_wrap_alg=str(rec["key_wrap_alg"]),
+            )
+        )
+    await session.commit()
+    return RedirectResponse(f"{base}/sealed-secrets", status_code=HTTP_302_FOUND)
+
+
+@router.post(
+    "/projects/{project_slug}/bundles/{name}/sealed-secrets/delete",
+    response_model=None,
+)
+async def bundle_sealed_secret_delete_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    key_name: Annotated[str, Form()],
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_bundle_in_project(session, project_slug, name)
+    bundle_r = await session.execute(select(Bundle.id).where(Bundle.name == name))
+    bundle_id = bundle_r.scalar_one_or_none()
+    if bundle_id is not None:
+        await session.execute(
+            delete(SealedSecret).where(
+                SealedSecret.bundle_id == bundle_id,
+                SealedSecret.key_name == normalize_env_key(key_name),
+            )
+        )
+        await session.commit()
+    base = _bundle_web_base(project_slug, name)
+    return RedirectResponse(f"{base}/sealed-secrets", status_code=HTTP_302_FOUND)
+
+
+@router.post("/bundles/{name}/sealed-secrets/delete", response_model=None)
+async def bundle_sealed_secret_delete_legacy(
+    request: Request,
+    name: str,
+    key_name: Annotated[str, Form()],
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_bundle_ungrouped_web(session, name)
+    bundle_r = await session.execute(select(Bundle.id).where(Bundle.name == name))
+    bundle_id = bundle_r.scalar_one_or_none()
+    if bundle_id is not None:
+        await session.execute(
+            delete(SealedSecret).where(
+                SealedSecret.bundle_id == bundle_id,
+                SealedSecret.key_name == normalize_env_key(key_name),
+            )
+        )
+        await session.commit()
+    return RedirectResponse(f"{_bundle_web_base(None, name)}/sealed-secrets", status_code=HTTP_302_FOUND)
+
+
+@router.get("/certificates", response_class=HTMLResponse, response_model=None)
+async def certificates_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    return await _certificates_template(request, session)
+
+
+@router.post("/certificates/new", response_model=None)
+async def certificates_new(
+    request: Request,
+    name: Annotated[str, Form()],
+    certificate_pem: Annotated[str, Form()],
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse | HTMLResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    clean_name = name.strip()
+    clean_pem = certificate_pem.strip()
+    if not clean_name:
+        return await _certificates_template(
+            request,
+            session,
+            error="Certificate name is required",
+            form_name=clean_name,
+            form_certificate_pem=clean_pem,
+        )
+    if not clean_pem:
+        return await _certificates_template(
+            request,
+            session,
+            error="Certificate PEM is required",
+            form_name=clean_name,
+            form_certificate_pem=clean_pem,
+        )
+    try:
+        fingerprint = _certificate_fingerprint_sha256_hex(clean_pem)
+    except HTTPException as e:
+        return await _certificates_template(
+            request,
+            session,
+            error=str(e.detail),
+            form_name=clean_name,
+            form_certificate_pem=clean_pem,
+        )
+    existing = await session.execute(
+        select(Certificate.id).where(
+            (Certificate.name == clean_name) | (Certificate.fingerprint_sha256 == fingerprint)
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        return await _certificates_template(
+            request,
+            session,
+            error="Certificate with this name or fingerprint already exists",
+            form_name=clean_name,
+            form_certificate_pem=clean_pem,
+        )
+    session.add(
+        Certificate(
+            name=clean_name,
+            fingerprint_sha256=fingerprint,
+            certificate_pem=clean_pem,
+        )
+    )
+    await session.commit()
+    return RedirectResponse(url_path("/certificates"), status_code=HTTP_302_FOUND)
+
+
+@router.post("/certificates/{certificate_id}/delete", response_model=None)
+async def certificates_delete(
+    request: Request,
+    certificate_id: int,
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse | HTMLResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    in_use = await session.execute(
+        select(SealedSecretRecipient.id)
+        .where(SealedSecretRecipient.certificate_id == certificate_id)
+        .limit(1)
+    )
+    if in_use.scalar_one_or_none() is not None:
+        return await _certificates_template(
+            request,
+            session,
+            error="Certificate is in use by sealed secrets and cannot be deleted",
+        )
+    await session.execute(delete(Certificate).where(Certificate.id == certificate_id))
+    await session.commit()
+    return RedirectResponse(url_path("/certificates"), status_code=HTTP_302_FOUND)
 
 
 @router.get("/keys", response_class=HTMLResponse, response_model=None)
