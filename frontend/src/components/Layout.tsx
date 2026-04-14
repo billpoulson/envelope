@@ -24,6 +24,8 @@ export function Layout() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { pathname } = useLocation();
+  /** Stack key graph is table-heavy; allow more horizontal room than default pages. */
+  const wideMain = pathname.includes("/key-graph");
   const projectMatch = useMatch({ path: "/projects/:projectSlug/*", end: false });
   const rawSlug = projectMatch?.params.projectSlug;
   const projectSlug = rawSlug && rawSlug !== "new" ? rawSlug : undefined;
@@ -210,7 +212,9 @@ export function Layout() {
           ) : null}
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <main
+        className={`mx-auto px-4 py-8 ${wideMain ? "max-w-[min(100rem,calc(100vw-2rem))]" : "max-w-6xl"}`}
+      >
         <Outlet />
       </main>
     </div>

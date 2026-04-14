@@ -16,6 +16,8 @@ from app.deps import get_fernet
 from app.models import Bundle, Secret
 
 BUNDLE_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
+# Skip lines that are only JSON/array/bracket junk when a JSON blob was pasted into dotenv mode.
+_DOTENV_JSON_FRAME_LINE = re.compile(r"^[\s\[\]{},]*$")
 # INSERT parameters: (bundle_id, 'key_name', 'value...'
 _SQLITE_INSERT_KEY_RE = re.compile(
     r"\bparameters:\s*\(\s*\d+\s*,\s*'((?:[^'\\]|\\.)*)'",
@@ -164,14 +166,38 @@ def parse_bundle_entries_dict(data: dict[str, Any]) -> tuple[list[tuple[str, str
     return rows, None
 
 
+def _strip_kv_json_line_artifacts(k: str, v: str) -> tuple[str, str]:
+    """Strip JSON-array line junk when KEY=value was parsed line-by-line (wrong import kind).
+
+    Pasting a JSON array into **dotenv lines** yields rows like ``"NODE_VERSION=20.20.2",`` — split on
+    ``=`` leaves a leading ``"`` on the key and trailing ``"`` on the value. This is not server-side
+    buffering; each request is independent.
+    """
+    k = k.strip().rstrip(",").strip()
+    v = v.strip().rstrip(",").strip()
+    key_had_leading_quote = k.startswith('"')
+    if key_had_leading_quote:
+        k = k[1:]
+    k = k.rstrip('"').strip()
+    if key_had_leading_quote:
+        if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
+            v = v[1:-1]
+        elif v.endswith('"'):
+            v = v[:-1].strip()
+        elif v.startswith('"'):
+            v = v[1:].strip()
+    return k, v
+
+
 def _split_key_value_first_eq(s: str) -> tuple[str | None, str | None, str | None]:
     """Split on first '='; return (error, key, value) where error is set if invalid."""
-    s = s.strip()
+    s = s.strip().rstrip(",").strip()
     if not s:
         return ("Empty entry", None, None)
     if "=" not in s:
         return (f"Expected KEY=value, got: {s!r}", None, None)
     k, _, v = s.partition("=")
+    k, v = _strip_kv_json_line_artifacts(k, v)
     kn = normalize_env_key(k)
     if not kn:
         return ("Empty key is not allowed", None, None)
@@ -226,6 +252,8 @@ def _parse_dotenv_lines(raw: str) -> tuple[list[tuple[str, str, bool]], str | No
     for line in raw.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
+            continue
+        if _DOTENV_JSON_FRAME_LINE.fullmatch(line):
             continue
         err, kn, v = _split_key_value_first_eq(line)
         if err:

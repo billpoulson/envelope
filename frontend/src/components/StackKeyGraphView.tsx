@@ -58,8 +58,8 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
   const rows = data.rows ?? [];
   const filteredRows = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => r.key.toLowerCase().includes(q));
+    const list = !q ? rows : rows.filter((r) => r.key.toLowerCase().includes(q));
+    return [...list].sort((a, b) => a.key.localeCompare(b.key, undefined, { sensitivity: "base" }));
   }, [rows, filter]);
 
   const [ctx, setCtx] = useState<
@@ -176,13 +176,13 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
         <table className="min-w-full border-collapse text-left text-xs">
           <thead>
             <tr className="border-b border-border/60 bg-white/[0.03]">
-              <th className="sticky left-0 z-10 min-w-[8rem] bg-[#121820] px-2 py-2 font-medium text-slate-400">
+              <th className="sticky left-0 z-10 min-w-[10rem] bg-[#121820] px-2 py-2 font-medium text-slate-400">
                 Variable
               </th>
               {data.layers.map((L, li) => (
                 <th
                   key={L.position}
-                  className={`border-l border-border/40 px-1 py-1 align-bottom transition-[width] ${collapsed[li] ? "max-w-[3.5rem]" : "min-w-[10rem]"}`}
+                  className={`border-l border-border/40 px-1 py-1 align-bottom transition-[width] ${collapsed[li] ? "max-w-[3.5rem]" : "min-w-[12rem] w-[14rem]"}`}
                 >
                   <div className="flex flex-col gap-1">
                     <div className="flex items-start gap-1">
@@ -209,7 +209,7 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
                   </div>
                 </th>
               ))}
-              <th className="min-w-[12rem] border-l border-border/40 px-2 py-2 text-slate-300">
+              <th className="min-w-[14rem] w-[16rem] border-l border-border/40 px-2 py-2 text-slate-300">
                 <div className="font-medium">Merged export</div>
                 <div className="text-[10px] font-normal text-slate-500">Final value after layers</div>
               </th>

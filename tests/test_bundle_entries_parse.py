@@ -89,6 +89,22 @@ class DotenvLinesKindTests(unittest.TestCase):
         self.assertIsNotNone(err)
         self.assertEqual(rows, [])
 
+    def test_json_array_shape_as_dotenv_strips_quotes(self) -> None:
+        """Pasting JSON array lines into dotenv mode leaves stray quotes on KEY=value without this fix."""
+        raw = '[\n\t\t\t"NODE_VERSION=20.20.2",\n\t\t\t"YARN_VERSION=1.22.22",\n\t\t]'
+        rows, err = parse_bundle_initial_paste(raw, "dotenv_lines")
+        self.assertIsNone(err)
+        self.assertEqual(
+            {(r[0], r[1]) for r in rows},
+            {("NODE_VERSION", "20.20.2"), ("YARN_VERSION", "1.22.22")},
+        )
+
+    def test_plain_dotenv_unchanged(self) -> None:
+        rows, err = parse_bundle_initial_paste("FOO=bar\"", "dotenv_lines")
+        self.assertIsNone(err)
+        # Without leading " on key we do not strip trailing " from value (avoid eating real quotes).
+        self.assertEqual(rows[0], ("FOO", 'bar"', True))
+
 
 if __name__ == "__main__":
     unittest.main()
