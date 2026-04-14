@@ -1,12 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useLayoutEffect, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { createBundle, type ImportKind } from "@/api/bundles";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
 export default function NewBundlePage() {
   const { projectSlug = "" } = useParams<{ projectSlug: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState("");
@@ -14,15 +15,25 @@ export default function NewBundlePage() {
   const [initialPaste, setInitialPaste] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // Same route element is reused when only :projectSlug changes (or on return navigation); clear stale paste/import.
+  useLayoutEffect(() => {
+    setName("");
+    setImportKind("skip");
+    setInitialPaste("");
+    setError(null);
+  }, [projectSlug, location.key]);
+
   const m = useMutation({
     mutationFn: async () => {
       setError(null);
+      const trimmedPaste = initialPaste.trim();
+      const skipImport = importKind === "skip" || !trimmedPaste;
       await createBundle({
         name: name.trim(),
         project_slug: projectSlug,
-        ...(importKind === "skip" || !initialPaste.trim()
-          ? {}
-          : { initial_paste: initialPaste, import_kind: importKind }),
+        ...(skipImport
+          ? { import_kind: "skip" as const }
+          : { import_kind: importKind, initial_paste: initialPaste }),
       });
     },
     onSuccess: async () => {
@@ -69,7 +80,10 @@ export default function NewBundlePage() {
               type="radio"
               name="ik"
               checked={importKind === "skip"}
-              onChange={() => setImportKind("skip")}
+              onChange={() => {
+                setImportKind("skip");
+                setInitialPaste("");
+              }}
             />
             Skip
           </label>
