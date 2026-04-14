@@ -692,6 +692,7 @@ class StackKeyGraphApiTests(unittest.TestCase):
         self.assertIn("rows", j)
         self.assertIsInstance(j["layers"], list)
         self.assertIsInstance(j["rows"], list)
+        self.assertIs(j.get("secret_values_included"), False)
 
 
 if __name__ == "__main__":

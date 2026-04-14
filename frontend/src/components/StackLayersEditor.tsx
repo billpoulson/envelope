@@ -58,6 +58,26 @@ async function unionForwardedKeyNames(
   return [...out].sort((a, b) => a.localeCompare(b));
 }
 
+/** Bundles not used on other layers; always includes this row's current bundle if set. */
+function bundleNamesForLayerSelect(
+  allNames: string[],
+  layers: LayerEditorState[],
+  layerIndex: number,
+): string[] {
+  const current = layers[layerIndex]?.bundle.trim() ?? "";
+  const usedElsewhere = new Set<string>();
+  for (let j = 0; j < layers.length; j++) {
+    if (j === layerIndex) continue;
+    const b = layers[j]?.bundle.trim() ?? "";
+    if (b) usedElsewhere.add(b);
+  }
+  let out = allNames.filter((n) => !usedElsewhere.has(n) || n === current);
+  if (current && !out.includes(current)) {
+    out = [...out, current];
+  }
+  return [...out].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
 async function loadPickKeyData(
   layers: LayerEditorState[],
   index: number,
@@ -165,18 +185,17 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
     onChange(layers.filter((_, i) => i !== index));
   };
 
-  const opts = bundleNames.length
-    ? bundleNames
-    : [];
+  const opts = bundleNames.length ? bundleNames : [];
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-400">
         Choose a bundle per layer, then <strong className="text-slate-300">all keys</strong> or{" "}
         <strong className="text-slate-300">selected keys</strong>. Bottom layer first; top layer wins on
-        duplicates.
+        duplicates. Each list only shows bundles not already used on another layer in this stack.
       </p>
       {layers.map((layer, index) => {
+        const rowBundleOpts = bundleNamesForLayerSelect(opts, layers, index);
         const badge =
           (layer.label || "").trim() ||
           `Layer ${index + 1}`;
@@ -260,9 +279,13 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
                 }
               >
                 <option value="">
-                  {opts.length ? "Select a bundle…" : "No bundles in this project"}
+                  {!opts.length
+                    ? "No bundles in this project"
+                    : rowBundleOpts.length || layer.bundle.trim()
+                      ? "Select a bundle…"
+                      : "No unused bundles — remove or change a layer first"}
                 </option>
-                {opts.map((n) => (
+                {rowBundleOpts.map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>

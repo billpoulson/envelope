@@ -203,11 +203,17 @@ def stack_key_graph_payload(
     layer_bundle_names: list[str],
     layer_bundle_edit_paths: list[str] | None = None,
     layer_display_labels: list[str | None] | None = None,
+    *,
+    include_secret_values: bool = True,
 ) -> dict[str, Any]:
-    """JSON-ready data for the admin UI: keys, per-layer values, secret flags, winner index."""
+    """JSON-ready data for the admin UI: keys, per-layer values, secret flags, winner index.
+
+    When ``include_secret_values`` is False, secret plaintext is omitted from ``cells`` and
+    ``merged``; use ``cells_value_present``, ``cells_secret_redacted``, and ``merged_value_redacted``.
+    """
     n = len(layer_entry_maps)
     if n == 0 or n != len(layer_bundle_names):
-        return {"layers": [], "rows": []}
+        return {"layers": [], "rows": [], "secret_values_included": include_secret_values}
 
     all_keys: set[str] = set()
     for m in layer_entry_maps:
@@ -217,15 +223,18 @@ def stack_key_graph_payload(
     for key in sorted(all_keys):
         cells: list[str | None] = []
         cell_secrets: list[bool | None] = []
+        cells_value_present: list[bool | None] = []
         for i in range(n):
             ent = layer_entry_maps[i].get(key)
             if ent is None:
                 cells.append(None)
                 cell_secrets.append(None)
+                cells_value_present.append(None)
             else:
                 val, is_sec = ent
                 cells.append(val)
                 cell_secrets.append(bool(is_sec))
+                cells_value_present.append(True)
         win_idx: int | None = None
         for i in range(n - 1, -1, -1):
             if _effective_key_graph_value(cells[i]) is not None:
@@ -235,16 +244,44 @@ def stack_key_graph_payload(
         merged_secret: bool | None = (
             cell_secrets[win_idx] if win_idx is not None else None
         )
-        rows.append(
-            {
-                "key": key,
-                "cells": cells,
-                "cell_secrets": cell_secrets,
-                "winner_layer_index": win_idx,
-                "merged": merged_val,
-                "merged_secret": merged_secret,
-            }
-        )
+        merged_plain_effective = _effective_key_graph_value(merged_val)
+
+        cells_secret_redacted: list[bool | None]
+        merged_value_redacted: bool
+        if include_secret_values:
+            cells_secret_redacted = [
+                None if cells_value_present[i] is None else False for i in range(n)
+            ]
+            merged_value_redacted = False
+        else:
+            cells_secret_redacted = [None] * n
+            merged_value_redacted = False
+            for i in range(n):
+                if cell_secrets[i] is True and cells_value_present[i] is True:
+                    cells[i] = None
+                    cells_secret_redacted[i] = True
+                elif cells_value_present[i] is True:
+                    cells_secret_redacted[i] = False
+            if (
+                win_idx is not None
+                and merged_secret is True
+                and merged_plain_effective is not None
+            ):
+                merged_val = None
+                merged_value_redacted = True
+
+        row_out: dict[str, Any] = {
+            "key": key,
+            "cells": cells,
+            "cell_secrets": cell_secrets,
+            "cells_value_present": cells_value_present,
+            "cells_secret_redacted": cells_secret_redacted,
+            "winner_layer_index": win_idx,
+            "merged": merged_val,
+            "merged_secret": merged_secret,
+            "merged_value_redacted": merged_value_redacted,
+        }
+        rows.append(row_out)
 
     layers_meta: list[dict[str, Any]] = []
     for i in range(n):
@@ -272,16 +309,23 @@ def stack_key_graph_payload(
             }
         )
 
-    return {"layers": layers_meta, "rows": rows}
+    return {
+        "layers": layers_meta,
+        "rows": rows,
+        "secret_values_included": include_secret_values,
+    }
 
 
 async def stack_key_graph_payload_for_stack(
-    session: AsyncSession, stack: BundleStack
+    session: AsyncSession,
+    stack: BundleStack,
+    *,
+    include_secret_values: bool = True,
 ) -> dict[str, Any]:
     """Layer maps + graph payload for a stack (admin UI)."""
     layers_sorted = sorted(stack.layers, key=lambda L: L.position)
     if not layers_sorted:
-        return {"layers": [], "rows": []}
+        return {"layers": [], "rows": [], "secret_values_included": include_secret_values}
     maps = await load_stack_layer_entry_maps(session, stack)
     names = [L.bundle.name for L in layers_sorted]
     edit_paths: list[str] = []
@@ -297,7 +341,9 @@ async def stack_key_graph_payload_for_stack(
             edit_paths.append(url_path(f"/bundles/{b.name}/edit"))
         raw = getattr(L, "layer_label", None)
         labels.append(raw.strip() if isinstance(raw, str) and raw.strip() else None)
-    return stack_key_graph_payload(maps, names, edit_paths, labels)
+    return stack_key_graph_payload(
+        maps, names, edit_paths, labels, include_secret_values=include_secret_values
+    )
 
 
 async def replace_stack_layers(

@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getStack, getStackKeyGraph } from "@/api/stacks";
 import { StackKeyGraphView } from "@/components/StackKeyGraphView";
@@ -10,14 +11,15 @@ export default function StackKeyGraphPage() {
     stackName: string;
   }>();
   const qc = useQueryClient();
+  const [showSecrets, setShowSecrets] = useState(false);
   const stackQ = useQuery({
     queryKey: ["stack", stackName],
     queryFn: () => getStack(stackName),
     enabled: !!stackName,
   });
   const q = useQuery({
-    queryKey: ["stack-key-graph", stackName],
-    queryFn: () => getStackKeyGraph(stackName),
+    queryKey: ["stack-key-graph", stackName, showSecrets],
+    queryFn: () => getStackKeyGraph(stackName, showSecrets),
     enabled: !!stackName,
   });
 
@@ -54,6 +56,8 @@ export default function StackKeyGraphPage() {
       </p>
       <StackKeyGraphView
         data={data}
+        showSecrets={showSecrets}
+        onShowSecretsChange={setShowSecrets}
         onRefetch={() => {
           void qc.invalidateQueries({ queryKey: ["stack-key-graph", stackName] });
         }}

@@ -56,3 +56,22 @@ export function hasProvidedCellValue(v: string | null | undefined): boolean {
   if (typeof v === "string" && v.trim() === "") return false;
   return true;
 }
+
+/** True if the layer cell defines this key for the graph (including redacted secrets). */
+export function graphCellHasValue(
+  raw: string | null | undefined,
+  cellsSecretRedacted?: boolean | null,
+): boolean {
+  if (cellsSecretRedacted === true) return true;
+  return hasProvidedCellValue(raw);
+}
+
+/** True if merged export has a value for display (including redacted winning secret). */
+export function graphMergedHasValue(
+  merged: string | null | undefined,
+  mergedSecret: boolean | null | undefined,
+  mergedValueRedacted?: boolean,
+): boolean {
+  if (mergedValueRedacted === true && mergedSecret === true) return true;
+  return hasProvidedCellValue(merged);
+}

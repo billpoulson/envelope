@@ -12,11 +12,17 @@ import { deleteSecret, upsertSecret } from "@/api/bundles";
 import type { StackKeyGraphPayload } from "@/api/stacks";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
-import { hasProvidedCellValue, tryPrettyJson } from "@/util/keyGraphDisplay";
+import {
+  graphCellHasValue,
+  graphMergedHasValue,
+  hasProvidedCellValue,
+  tryPrettyJson,
+} from "@/util/keyGraphDisplay";
 
 function moveTargetsForCell(
   layers: StackKeyGraphPayload["layers"],
   cells: (string | null)[],
+  cellsSecretRedacted: (boolean | null)[] | undefined,
   sourceLi: number,
 ): { layerIndex: number; label: string; bundle: string }[] {
   const bundleAt = (i: number) => String(layers[i]?.bundle || "");
@@ -28,7 +34,7 @@ function moveTargetsForCell(
         layerIndex !== sourceLi &&
         !!bundle &&
         bundle !== srcB &&
-        !hasProvidedCellValue(cells[layerIndex]),
+        !graphCellHasValue(cells[layerIndex], cellsSecretRedacted?.[layerIndex]),
     );
 }
 
@@ -47,12 +53,13 @@ function isValidDropTarget(
   targetLi: number,
   cells: (string | null)[],
   layers: StackKeyGraphPayload["layers"],
+  cellsSecretRedacted: (boolean | null)[] | undefined,
 ): boolean {
   if (drag.key !== rowKey) return false;
   if (targetLi === drag.sourceLi) return false;
   const tgtBundle = String(layers[targetLi]?.bundle || "");
   if (!tgtBundle || tgtBundle === drag.sourceBundle) return false;
-  return !hasProvidedCellValue(cells[targetLi]);
+  return !graphCellHasValue(cells[targetLi], cellsSecretRedacted?.[targetLi]);
 }
 
 function DragHandle() {
@@ -70,6 +77,8 @@ function DragHandle() {
 
 type Props = {
   data: StackKeyGraphPayload;
+  showSecrets: boolean;
+  onShowSecretsChange: (next: boolean) => void;
   onRefetch: () => void;
 };
 
@@ -77,16 +86,18 @@ function CellValue({
   raw,
   isSecret,
   showSecrets,
+  redactedFromApi = false,
   className = "",
 }: {
   raw: string;
   isSecret: boolean;
   showSecrets: boolean;
+  redactedFromApi?: boolean;
   className?: string;
 }) {
-  if (isSecret && !showSecrets) {
+  if (isSecret && (!showSecrets || redactedFromApi)) {
     return (
-      <span className="text-slate-500" title="Enable “Show secret values” or use the cell menu">
+      <span className="text-slate-500" title="Enable “Show secret values” to load plaintext from the server">
         (secret)
       </span>
     );
@@ -104,9 +115,8 @@ function CellValue({
   return <div className={`font-mono text-[11px] text-slate-200 ${className}`}>{pj.text}</div>;
 }
 
-export function StackKeyGraphView({ data, onRefetch }: Props) {
+export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRefetch }: Props) {
   const [filter, setFilter] = useState("");
-  const [showSecrets, setShowSecrets] = useState(false);
   const n = data.layers.length;
   const [collapsed, setCollapsed] = useState<boolean[]>(() => Array.from({ length: n }, () => true));
 
@@ -266,9 +276,9 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
             vs the layer above for this key.
           </li>
           <li>
-            <strong className="text-slate-300">Merged export</strong> is the final value. Secrets show as{" "}
-            <code className="text-slate-300">(secret)</code> until you enable “Show secret values” or open the cell
-            menu.
+            <strong className="text-slate-300">Merged export</strong> is the final value. Secret plaintext is not
+            loaded until you enable <strong className="text-slate-300">Show secret values</strong> (the page refetches);
+            until then values appear as <code className="text-slate-300">(secret)</code>.
           </li>
           <li>
             <strong className="text-slate-300">Drag</strong> using the grip beside a value onto another layer’s{" "}
@@ -295,7 +305,7 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
           <input
             type="checkbox"
             checked={showSecrets}
-            onChange={(e) => setShowSecrets(e.target.checked)}
+            onChange={(e) => onShowSecretsChange(e.target.checked)}
           />
           Show secret values
         </label>
@@ -356,18 +366,21 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
                 const key = row.key;
                 const cells = row.cells;
                 const cellSecrets = row.cell_secrets;
+                const cellsSecretRedacted = row.cells_secret_redacted;
                 const win = row.winner_layer_index;
-                const merged =
+                const mergedRaw =
                   row.merged !== undefined && row.merged !== null
                     ? row.merged
                     : win != null
                       ? cells[win]
                       : null;
                 const mergedSecret = row.merged_secret === true;
+                const mergedValueRedacted = row.merged_value_redacted === true;
+                const mergedHasVal = graphMergedHasValue(mergedRaw, row.merged_secret, row.merged_value_redacted);
 
                 let rowNoValueAnywhere = true;
                 for (let ri = 0; ri < n; ri++) {
-                  if (hasProvidedCellValue(cells[ri])) {
+                  if (graphCellHasValue(cells[ri], cellsSecretRedacted?.[ri])) {
                     rowNoValueAnywhere = false;
                     break;
                   }
@@ -386,9 +399,10 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
                       const layerMeta = data.layers[li]!;
                       const editBase = (layerMeta.bundle_edit_path || "").trim();
                       const bundleName = String(layerMeta.bundle || "");
-                      const hasVal = hasProvidedCellValue(v);
-                      const overriddenByNext =
-                        li < n - 1 && hasVal && hasProvidedCellValue(cells[li + 1]);
+                      const redacted = cellsSecretRedacted?.[li] === true;
+                      const hasVal = graphCellHasValue(v, cellsSecretRedacted?.[li]);
+                      const nextHasVal = graphCellHasValue(cells[li + 1], cellsSecretRedacted?.[li + 1]);
+                      const overriddenByNext = li < n - 1 && hasVal && nextHasVal;
                       const notOverriddenByNext = hasVal && !overriddenByNext;
                       const isSec = cellSecrets[li] === true;
 
@@ -396,7 +410,7 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
                         hasVal && editBase ? `${editBase}?key=${encodeURIComponent(key)}` : "";
 
                       const moveTargets = hasVal
-                        ? moveTargetsForCell(data.layers, cells, li)
+                        ? moveTargetsForCell(data.layers, cells, cellsSecretRedacted, li)
                         : [];
                       const movePayload =
                         hasVal && v != null && moveTargets.length > 0
@@ -414,7 +428,7 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
                         e.preventDefault();
                         e.stopPropagation();
                         const viewSecretPayload =
-                          hasVal && isSec && v != null
+                          hasVal && isSec && hasProvidedCellValue(v)
                             ? { raw: String(v), title: `${key} · ${bundleName}` }
                             : undefined;
                         const canDefine = rowNoValueAnywhere && !!bundleName && !!editBase;
@@ -448,7 +462,9 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
 
                       const onCellDragOver = (e: DragEvent<HTMLTableCellElement>) => {
                         if (!dragMove || moveBusy) return;
-                        if (!isValidDropTarget(dragMove, key, li, cells, data.layers)) {
+                        if (
+                          !isValidDropTarget(dragMove, key, li, cells, data.layers, cellsSecretRedacted)
+                        ) {
                           e.dataTransfer.dropEffect = "none";
                           return;
                         }
@@ -466,7 +482,8 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
                       const onCellDrop = async (e: DragEvent<HTMLTableCellElement>) => {
                         e.preventDefault();
                         if (!dragMove || moveBusy) return;
-                        if (!isValidDropTarget(dragMove, key, li, cells, data.layers)) return;
+                        if (!isValidDropTarget(dragMove, key, li, cells, data.layers, cellsSecretRedacted))
+                          return;
                         const tgtBundle = String(data.layers[li]!.bundle);
                         await executeMoveToBundle(
                           {
@@ -483,7 +500,7 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
                         dragMove &&
                         dragOverDrop?.key === key &&
                         dragOverDrop?.li === li &&
-                        isValidDropTarget(dragMove, key, li, cells, data.layers);
+                        isValidDropTarget(dragMove, key, li, cells, data.layers, cellsSecretRedacted);
 
                       return (
                         <td
@@ -520,7 +537,7 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
                             <div
                               className={`min-h-[1.5rem] ${collapsed[li] ? "hidden" : "block"}`}
                             >
-                              {hasVal && v != null ? (
+                              {hasVal && (v != null || redacted) ? (
                                 <div className="flex gap-1.5">
                                   {canDrag && dragPayload ? (
                                     <span
@@ -542,9 +559,10 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
                                   ) : null}
                                   <div className="min-w-0 flex-1">
                                     <CellValue
-                                      raw={String(v)}
+                                      raw={v != null ? String(v) : ""}
                                       isSecret={isSec}
                                       showSecrets={showSecrets}
+                                      redactedFromApi={redacted}
                                     />
                                   </div>
                                 </div>
@@ -599,24 +617,28 @@ export function StackKeyGraphView({ data, onRefetch }: Props) {
                     <td
                       className="border-l border-border/40 px-2 py-1 align-top text-slate-200"
                       onContextMenu={(e) => {
-                        if (!hasProvidedCellValue(merged)) return;
+                        if (!mergedHasVal) return;
                         e.preventDefault();
                         e.stopPropagation();
-                        if (!mergedSecret || merged == null) return;
+                        if (!mergedSecret || !hasProvidedCellValue(mergedRaw)) return;
                         setTimeout(() => {
                           setCtx({
                             x: e.clientX,
                             y: e.clientY,
-                            viewSecret: { raw: String(merged), title: `${key} · merged export` },
+                            viewSecret: {
+                              raw: String(mergedRaw),
+                              title: `${key} · merged export`,
+                            },
                           });
                         }, 0);
                       }}
                     >
-                      {hasProvidedCellValue(merged) && merged != null ? (
+                      {mergedHasVal ? (
                         <CellValue
-                          raw={String(merged)}
+                          raw={mergedRaw != null ? String(mergedRaw) : ""}
                           isSecret={mergedSecret}
                           showSecrets={showSecrets}
+                          redactedFromApi={mergedValueRedacted}
                           className="text-slate-100"
                         />
                       ) : (

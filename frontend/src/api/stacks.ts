@@ -68,14 +68,25 @@ export type StackKeyGraphPayload = {
     key: string;
     cells: (string | null)[];
     cell_secrets: (boolean | null)[];
+    cells_value_present?: (boolean | null)[];
+    cells_secret_redacted?: (boolean | null)[];
     winner_layer_index: number | null;
     merged: string | null;
     merged_secret: boolean | null;
+    merged_value_redacted?: boolean;
   }[];
+  secret_values_included?: boolean;
 };
 
-export async function getStackKeyGraph(name: string): Promise<StackKeyGraphPayload> {
-  return apiFetch(`/stacks/${encodeURIComponent(name)}/key-graph`, { method: "GET" });
+export async function getStackKeyGraph(
+  name: string,
+  includeSecretValues = false,
+): Promise<StackKeyGraphPayload> {
+  const q =
+    includeSecretValues === true
+      ? "?include_secret_values=true"
+      : "?include_secret_values=false";
+  return apiFetch(`/stacks/${encodeURIComponent(name)}/key-graph${q}`, { method: "GET" });
 }
 
 export type StackEnvLinkRow = {

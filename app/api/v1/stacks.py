@@ -314,6 +314,10 @@ async def get_stack(
 @router.get("/stacks/{name}/key-graph")
 async def get_stack_key_graph(
     name: str,
+    include_secret_values: bool = Query(
+        False,
+        description="Include plaintext for secret keys (default false).",
+    ),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -331,7 +335,9 @@ async def get_stack_key_graph(
         project_slug=ps,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this stack")
-    return await stack_key_graph_payload_for_stack(session, st)
+    return await stack_key_graph_payload_for_stack(
+        session, st, include_secret_values=include_secret_values
+    )
 
 
 @router.patch("/stacks/{name}")
