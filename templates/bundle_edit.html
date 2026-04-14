@@ -1,20 +1,12 @@
 {% extends "base.html" %}
+{% block main_class %}container container-stack-detail{% endblock %}
 {% block title %}{{ bundle_name }} — Envelope{% endblock %}
 {% block nav %}
-<nav class="nav">
-  <a href="{{ url_path('/bundles') }}">Bundles</a>
-  <a href="{{ url_path('/projects') }}">Projects</a>
-  <a href="{{ url_path('/backup') }}">Backup</a>
-  <a href="{{ url_path('/keys') }}">API keys</a>
-  <a href="{{ url_path('/certificates') }}">Certificates</a>
-  <form method="post" action="{{ url_path('/logout') }}" class="inline-form">
-    <input type="hidden" name="csrf" value="{{ csrf_token }}">
-    <button type="submit" class="link">Log out</button>
-  </form>
-</nav>
+{% include "partials/nav_admin.html" %}
 {% endblock %}
 {% block content %}
-<div id="bundle-edit-root" data-secret-values-url="{{ secret_values_json_url }}"></div>
+<div class="bundle-edit-page" id="bundle-edit-page">
+<div id="bundle-edit-root" data-secret-values-url="{{ secret_values_json_url }}" data-bundle-route-base="{{ bundle_route_base }}"></div>
 <h1>{{ bundle_name }}</h1>
 {% include "bundle_subnav.html" %}
 
@@ -27,24 +19,23 @@
     </label>
     <span class="muted small" id="bundle-secret-hint" hidden>Fetched on demand; turn off to clear them from this page.</span>
   </div>
-  {% if not editing %}
   <button type="button" class="secondary" id="bundle-add-entry-open">Add entry</button>
-  {% endif %}
 </div>
-<p class="muted">Values marked <strong>encrypted</strong> are stored with Fernet; <strong>plain</strong> are stored as UTF-8 text (suitable for non-sensitive config). For plain rows, use <strong>Encrypt</strong> to re-store the same value as ciphertext without retyping. Encrypted values are not loaded until you enable <strong>Show secret values</strong>.</p>
-{% if edit_error %}
+<p class="muted">Values marked <strong>encrypted</strong> are stored with Fernet; <strong>plain</strong> are stored as UTF-8 text (suitable for non-sensitive config). For plain rows, use <strong>Encrypt</strong> to re-store the same value as ciphertext without retyping. For encrypted rows, <strong>Declassify</strong> stores the decrypted value as plain text (visible in exports and the list without unlocking secrets). Encrypted values are not loaded until you enable <strong>Show secret values</strong>.</p>
+{% if edit_error and not editing %}
 <p class="error">{{ edit_error }}</p>
 {% endif %}
-<table class="table">
+<div class="bundle-vars-table-wrap">
+<table class="table bundle-vars-table">
   <thead>
     <tr><th>Key</th><th>Storage</th><th>Value</th><th class="actions-col">Actions</th></tr>
   </thead>
   <tbody>
     {% for k, v, is_sec in secrets %}
-    <tr{% if editing and editing.key == k %} class="highlight-row"{% endif %}>
-      <td><code>{{ k }}</code></td>
-      <td>{% if is_sec %}<span class="tag">encrypted</span>{% else %}<span class="tag muted">plain</span>{% endif %}</td>
-      <td class="mono bundle-value-cell{% if is_sec %} bundle-value-secret{% endif %}" data-key="{{ k }}">
+    <tr class="bundle-var-row{% if highlight_key is not none and highlight_key == k %} highlight-row{% endif %}" title="Double-click to edit">
+      <td class="bundle-var-key" data-label="Key"><code>{{ k }}</code></td>
+      <td class="bundle-var-storage" data-label="Storage">{% if is_sec %}<span class="tag">encrypted</span>{% else %}<span class="tag muted">plain</span>{% endif %}</td>
+      <td class="mono bundle-var-value bundle-value-cell{% if is_sec %} bundle-value-secret{% endif %}" data-label="Value" data-key="{{ k }}">
         {% if is_sec %}
         <span class="secret-masked" aria-label="Value hidden">— hidden —</span>
         <span class="secret-revealed mono" hidden></span>
@@ -52,52 +43,71 @@
         {{ v }}
         {% endif %}
       </td>
-      <td class="row-actions">
-        <form method="get" action="{{ bundle_route_base }}/edit" class="inline-form">
-          <input type="hidden" name="key" value="{{ k }}">
-          <button type="submit" class="link small">Edit</button>
-        </form>
-        {% if not is_sec %}
-        <form method="post" action="{{ bundle_route_base }}/secrets/encrypt" class="inline-form" title="Encrypt with Fernet (no need to retype the value)">
-          <input type="hidden" name="csrf" value="{{ csrf_token }}">
-          <input type="hidden" name="key_name" value="{{ k }}">
-          <button type="submit" class="small secondary">Encrypt</button>
-        </form>
-        {% endif %}
-        <form method="post" action="{{ bundle_route_base }}/secrets/delete" class="inline-form">
-          <input type="hidden" name="csrf" value="{{ csrf_token }}">
-          <input type="hidden" name="key_name" value="{{ k }}">
-          <button type="submit" class="danger small">Remove</button>
-        </form>
+      <td class="bundle-var-actions" data-label="Actions">
+        <details class="bundle-var-actions-menu">
+          <summary class="bundle-var-actions-menu__summary" aria-label="Actions for {{ k|e }}">Actions</summary>
+          <div class="bundle-var-actions-menu__panel" role="group" aria-label="Actions for {{ k|e }}">
+            <form method="get" action="{{ bundle_route_base }}/edit" class="bundle-var-actions-menu__form inline-form">
+              <input type="hidden" name="key" value="{{ k }}">
+              <button type="submit" class="bundle-var-actions-menu__option">Edit</button>
+            </form>
+            {% if not is_sec %}
+            <form method="post" action="{{ bundle_route_base }}/secrets/encrypt" class="bundle-var-actions-menu__form inline-form" title="Encrypt with Fernet (no need to retype the value)">
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="key_name" value="{{ k }}">
+              <button type="submit" class="bundle-var-actions-menu__option">Encrypt</button>
+            </form>
+            {% else %}
+            <form method="post" action="{{ bundle_route_base }}/secrets/declassify" class="bundle-var-actions-menu__form inline-form" title="Store decrypted value as plain text" onsubmit="return confirm('Declassify this variable?\n\nThe value will be stored as plain text and will appear in exports and this list without using Show secret values.');">
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="key_name" value="{{ k }}">
+              <button type="submit" class="bundle-var-actions-menu__option">Declassify</button>
+            </form>
+            {% endif %}
+            <form method="post" action="{{ bundle_route_base }}/secrets/delete" class="bundle-var-actions-menu__form inline-form" onsubmit="return confirm('Remove this variable from the bundle?\n\nThis cannot be undone.');">
+              <input type="hidden" name="csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="key_name" value="{{ k }}">
+              <button type="submit" class="bundle-var-actions-menu__option bundle-var-actions-menu__option--danger">Remove</button>
+            </form>
+          </div>
+        </details>
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="4" class="muted">No variables yet.</td></tr>
+    <tr class="bundle-var-row bundle-var-row--empty"><td colspan="4" class="muted">No variables yet.</td></tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 
 {% if editing %}
-<h2 class="h3">Edit entry</h2>
-<p class="muted">Key cannot be renamed here (remove and add a new entry to change the name). To add another key, <a href="{{ bundle_route_base }}/edit">cancel</a> editing first.</p>
-<form method="post" action="{{ bundle_route_base }}/secrets/add" class="stack">
-  <input type="hidden" name="csrf" value="{{ csrf_token }}">
-  <label for="key_name">Key</label>
-  <input id="key_name" name="key_name" required maxlength="512" readonly value="{{ editing.key }}">
-  <label for="is_secret">Storage</label>
-  <select id="is_secret" name="is_secret">
-    <option value="1"{% if editing.is_secret %} selected{% endif %}>Encrypted (secret)</option>
-    <option value="0"{% if not editing.is_secret %} selected{% endif %}>Plain (not encrypted)</option>
-  </select>
-  <label for="value">Value</label>
-  <textarea id="value" name="value" rows="5" placeholder="value">{{ editing.value }}</textarea>
-  <p class="form-actions">
-    <button type="submit">Save changes</button>
-    <a href="{{ bundle_route_base }}/edit" class="button secondary-outline">Cancel</a>
-  </p>
-</form>
-{% else %}
-<dialog id="bundle-add-entry-modal" class="modal-dialog" aria-labelledby="bundle-add-entry-title">
+<dialog id="bundle-edit-entry-modal" class="modal-dialog" aria-labelledby="bundle-edit-entry-title" aria-modal="true">
+  <form method="post" action="{{ bundle_route_base }}/secrets/add" class="stack modal-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <input type="hidden" name="previous_key_name" value="{{ editing.key }}">
+    <h2 id="bundle-edit-entry-title" class="h3 modal-title">Edit entry</h2>
+    <p class="muted small">Change the key, storage, or value. Renaming a key does not update references in stack layer key pick-lists—adjust those separately if needed.</p>
+    {% if edit_error %}
+    <p class="error">{{ edit_error }}</p>
+    {% endif %}
+    <label for="key_name_edit">Key</label>
+    <input id="key_name_edit" name="key_name" required maxlength="512" value="{{ editing.key }}" autocomplete="off" spellcheck="false">
+    <label for="is_secret_edit">Storage</label>
+    <select id="is_secret_edit" name="is_secret">
+      <option value="1"{% if editing.is_secret %} selected{% endif %}>Encrypted (secret)</option>
+      <option value="0"{% if not editing.is_secret %} selected{% endif %}>Plain (not encrypted)</option>
+    </select>
+    <label for="value_edit">Value</label>
+    <textarea id="value_edit" name="value" rows="5" placeholder="value">{{ editing.value }}</textarea>
+    <p class="form-actions">
+      <button type="submit">Save changes</button>
+      <a href="{{ bundle_route_base }}/edit" class="button secondary-outline" id="bundle-edit-entry-cancel">Cancel</a>
+    </p>
+  </form>
+</dialog>
+{% endif %}
+
+<dialog id="bundle-add-entry-modal" class="modal-dialog" aria-labelledby="bundle-add-entry-title" aria-modal="true">
   <form method="post" action="{{ bundle_route_base }}/secrets/add" class="stack modal-form">
     <input type="hidden" name="csrf" value="{{ csrf_token }}">
     <h2 id="bundle-add-entry-title" class="h3 modal-title">Add entry</h2>
@@ -117,11 +127,11 @@
     </p>
   </form>
 </dialog>
-{% endif %}
 
-<form method="post" action="{{ bundle_route_base }}/delete" class="stack danger-zone" onsubmit="return confirm('Delete this bundle and all variables?');">
+<form method="post" action="{{ bundle_route_base }}/delete" class="stack danger-zone" data-delete-name="{{ bundle_name|e }}" data-delete-kind="bundle" onsubmit="return envelopeConfirmTypedName(this);">
   <input type="hidden" name="csrf" value="{{ csrf_token }}">
   <button type="submit" class="danger">Delete bundle</button>
 </form>
+</div>
 <script src="{{ url_path('/static/bundle-edit-secrets.js') }}" defer></script>
 {% endblock %}

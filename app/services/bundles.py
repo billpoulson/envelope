@@ -235,6 +235,98 @@ async def encrypt_plain_entry(
     row.is_secret = True
 
 
+async def upsert_bundle_secret_entry(
+    session: AsyncSession,
+    bundle_id: int,
+    *,
+    key_name_input: str,
+    value: str,
+    is_secret: bool,
+    previous_key_name: str | None,
+) -> str:
+    """Insert or update a bundle variable. With ``previous_key_name``, update that row (rename allowed).
+
+    Returns the stored key name (normalized) for redirects. Raises ``ValueError`` on user-facing errors.
+    """
+    fernet = get_fernet()
+    prev = (previous_key_name or "").strip()
+    nk = normalize_env_key(key_name_input)
+    if not nk:
+        raise ValueError("Enter a key name.")
+
+    stored = encode_stored_value(fernet, value, is_secret)
+
+    if not prev:
+        r = await session.execute(
+            select(Secret).where(Secret.bundle_id == bundle_id, Secret.key_name == nk)
+        )
+        row = r.scalar_one_or_none()
+        if row:
+            row.value_ciphertext = stored
+            row.is_secret = is_secret
+        else:
+            session.add(
+                Secret(
+                    bundle_id=bundle_id,
+                    key_name=nk,
+                    value_ciphertext=stored,
+                    is_secret=is_secret,
+                )
+            )
+        return nk
+
+    r = await session.execute(
+        select(Secret).where(Secret.bundle_id == bundle_id, Secret.key_name == prev)
+    )
+    row = r.scalar_one_or_none()
+    if row is None:
+        raise ValueError("That entry no longer exists. Cancel and try again.")
+
+    prev_norm = normalize_env_key(prev)
+    if nk == prev_norm:
+        row.value_ciphertext = stored
+        row.is_secret = is_secret
+        return nk
+
+    r2 = await session.execute(
+        select(Secret.id).where(Secret.bundle_id == bundle_id, Secret.key_name == nk)
+    )
+    if r2.scalar_one_or_none() is not None:
+        raise ValueError("Another variable already uses that name.")
+
+    row.key_name = nk
+    row.value_ciphertext = stored
+    row.is_secret = is_secret
+    return nk
+
+
+async def declassify_secret_entry(
+    session: AsyncSession, bundle_name: str, key_name: str
+) -> None:
+    """Re-store a Fernet-encrypted row as UTF-8 plaintext (same logical value)."""
+    validate_bundle_name(bundle_name)
+    kn = key_name.strip()
+    if not kn:
+        raise HTTPException(status_code=400, detail="key_name required")
+    r = await session.execute(
+        select(Secret)
+        .join(Bundle, Secret.bundle_id == Bundle.id)
+        .where(Bundle.name == bundle_name, Secret.key_name == kn)
+    )
+    row = r.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Secret not found")
+    if not row.is_secret:
+        return
+    fernet = get_fernet()
+    try:
+        plain = decode_stored_value(fernet, row.value_ciphertext, True)
+    except CryptoError:
+        raise HTTPException(status_code=500, detail="Failed to decrypt secret") from None
+    row.value_ciphertext = encode_stored_value(fernet, plain, False)
+    row.is_secret = False
+
+
 async def load_bundle_entries(
     session: AsyncSession, name: str
 ) -> tuple[Bundle, dict[str, tuple[str, bool]]]:
@@ -313,3 +405,15 @@ async def load_bundle_secrets(
 ) -> tuple[Bundle, dict[str, str]]:
     bundle, ent = await load_bundle_entries(session, name)
     return bundle, {k: v[0] for k, v in ent.items()}
+
+
+async def list_bundle_secret_key_names(session: AsyncSession, name: str) -> list[str]:
+    """Sorted key names from `secrets` rows only (not sealed secrets)."""
+    validate_bundle_name(name)
+    r = await session.execute(
+        select(Secret.key_name)
+        .join(Bundle, Secret.bundle_id == Bundle.id)
+        .where(Bundle.name == name)
+        .order_by(Secret.key_name)
+    )
+    return [row[0] for row in r.all()]

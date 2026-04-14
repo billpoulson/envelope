@@ -30,8 +30,10 @@ from app.services.bundles import (
     coerce_value_to_string,
     dedupe_entry_rows,
     encode_stored_value,
+    declassify_secret_entry,
     encrypt_plain_entry,
     format_secrets_dotenv,
+    list_bundle_secret_key_names,
     load_bundle_entries,
     load_bundle_secrets,
     normalize_env_key,
@@ -321,6 +323,35 @@ async def get_bundle_decrypted(
     }
 
 
+@router.get("/bundles/{name}/key-names")
+async def get_bundle_key_names(
+    name: str,
+    key: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, list[str]]:
+    """Sorted key names from bundle secrets (not sealed secrets); for stack layer UI and automation."""
+    validate_bundle_name(name)
+    r = await session.execute(
+        select(Bundle).where(Bundle.name == name).options(selectinload(Bundle.group))
+    )
+    bundle = r.scalar_one_or_none()
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    scopes = parse_scopes_json(key.scopes)
+    pn = bundle.group.name if bundle.group else None
+    pslug = _pslug(bundle.group)
+    if not can_read_bundle(
+        scopes,
+        bundle_name=bundle.name,
+        group_id=bundle.group_id,
+        project_name=pn,
+        project_slug=pslug,
+    ):
+        raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
+    keys = await list_bundle_secret_key_names(session, name)
+    return {"keys": keys}
+
+
 @router.get("/bundles/{name}/export")
 @limiter.limit("120/minute")
 async def export_bundle(
@@ -577,6 +608,30 @@ async def encrypt_plain_secret(
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
     await encrypt_plain_entry(session, name, key_name)
+    await session.commit()
+    return Response(status_code=204)
+
+
+@router.post("/bundles/{name}/secrets/declassify", status_code=204)
+async def declassify_encrypted_secret(
+    name: str,
+    key_name: str = Query(..., min_length=1, max_length=512),
+    auth: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    bundle, _ = await load_bundle_secrets(session, name)
+    scopes = parse_scopes_json(auth.scopes)
+    pn = bundle.group.name if bundle.group else None
+    pslug = _pslug(bundle.group)
+    if not can_write_bundle(
+        scopes,
+        bundle_name=bundle.name,
+        group_id=bundle.group_id,
+        project_name=pn,
+        project_slug=pslug,
+    ):
+        raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
+    await declassify_secret_entry(session, name, key_name)
     await session.commit()
     return Response(status_code=204)
 

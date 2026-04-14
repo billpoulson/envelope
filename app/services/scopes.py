@@ -17,6 +17,8 @@ _TERRAFORM_HTTP_STATE = "terraform:http_state"
 _LEGACY_PULUMI_STATE_SCOPE = "pulumi:state"
 _READ_BUNDLE = "read:bundle:"
 _WRITE_BUNDLE = "write:bundle:"
+_READ_STACK = "read:stack:"
+_WRITE_STACK = "write:stack:"
 _READ_PROJECT = "read:project:"
 _WRITE_PROJECT = "write:project:"
 
@@ -77,6 +79,14 @@ def validate_scopes_list(scopes: list[str]) -> None:
             if len(s) <= len(_WRITE_BUNDLE):
                 raise HTTPException(status_code=400, detail=f"Invalid scope: {s!r}")
             continue
+        if s.startswith(_READ_STACK):
+            if len(s) <= len(_READ_STACK):
+                raise HTTPException(status_code=400, detail=f"Invalid scope: {s!r}")
+            continue
+        if s.startswith(_WRITE_STACK):
+            if len(s) <= len(_WRITE_STACK):
+                raise HTTPException(status_code=400, detail=f"Invalid scope: {s!r}")
+            continue
         if s.startswith(_READ_PROJECT):
             if len(s) <= len(_READ_PROJECT):
                 raise HTTPException(status_code=400, detail=f"Invalid scope: {s!r}")
@@ -89,7 +99,8 @@ def validate_scopes_list(scopes: list[str]) -> None:
             status_code=400,
             detail=(
                 f"Unknown scope: {s!r}. Use admin, terraform:http_state, read:bundle:..., write:bundle:..., "
-                "read:project:..., write:project:... (wildcards: * ?; use slug:my-app for a project slug)"
+                "read:stack:..., write:stack:..., read:project:..., write:project:... "
+                "(wildcards: * ?; use slug:my-app for a project slug)"
             ),
         )
 
@@ -156,6 +167,81 @@ def can_write_bundle(
             suf = s[len(_WRITE_PROJECT) :]
             if suf and _project_suffix_match(suf, group_id, project_name, project_slug):
                 return True
+    return False
+
+
+def can_read_stack(
+    scopes: list[str],
+    *,
+    stack_name: str,
+    group_id: int | None,
+    project_name: str | None,
+    project_slug: str | None = None,
+) -> bool:
+    if scopes_allow_admin(scopes):
+        return True
+    for s in scopes:
+        if s.startswith(_READ_STACK):
+            pat = s[len(_READ_STACK) :]
+            if pat and _glob_match(pat, stack_name):
+                return True
+        if group_id is not None and project_name is not None and s.startswith(_READ_PROJECT):
+            suf = s[len(_READ_PROJECT) :]
+            if suf and _project_suffix_match(suf, group_id, project_name, project_slug):
+                return True
+    return False
+
+
+def can_write_stack(
+    scopes: list[str],
+    *,
+    stack_name: str,
+    group_id: int | None,
+    project_name: str | None,
+    project_slug: str | None = None,
+) -> bool:
+    if scopes_allow_admin(scopes):
+        return True
+    for s in scopes:
+        if s.startswith(_WRITE_STACK):
+            pat = s[len(_WRITE_STACK) :]
+            if pat and _glob_match(pat, stack_name):
+                return True
+        if group_id is not None and project_name is not None and s.startswith(_WRITE_PROJECT):
+            suf = s[len(_WRITE_PROJECT) :]
+            if suf and _project_suffix_match(suf, group_id, project_name, project_slug):
+                return True
+    return False
+
+
+def can_create_stack(
+    scopes: list[str],
+    *,
+    stack_name: str,
+    group_id: int | None,
+    project_name: str | None,
+    project_slug: str | None = None,
+) -> bool:
+    """Ungrouped stack: write:stack match; grouped: project write or matching write:stack."""
+    if scopes_allow_admin(scopes):
+        return True
+    name_ok = any(
+        s.startswith(_WRITE_STACK)
+        and s[len(_WRITE_STACK) :]
+        and _glob_match(s[len(_WRITE_STACK) :], stack_name)
+        for s in scopes
+    )
+    if group_id is None:
+        return name_ok
+    if project_name is None or group_id is None or project_slug is None:
+        return False
+    if can_write_project(
+        scopes,
+        project_id=group_id,
+        project_name=project_name,
+        project_slug=project_slug,
+    ):
+        return True
     return False
 
 

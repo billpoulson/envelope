@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -22,6 +22,7 @@ class BundleGroup(Base):
     )
 
     bundles: Mapped[list["Bundle"]] = relationship(back_populates="group")
+    stacks: Mapped[list["BundleStack"]] = relationship(back_populates="group")
 
 
 class BundleEnvLink(Base):
@@ -63,6 +64,79 @@ class Bundle(Base):
     env_links: Mapped[list["BundleEnvLink"]] = relationship(
         back_populates="bundle", cascade="all, delete-orphan"
     )
+    stack_layers: Mapped[list["BundleStackLayer"]] = relationship(back_populates="bundle")
+
+
+class BundleStack(Base):
+    """Ordered list of bundles merged into one composite env (later layers overwrite keys)."""
+
+    __tablename__ = "bundle_stacks"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bundle_groups.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    group: Mapped["BundleGroup | None"] = relationship(back_populates="stacks")
+    layers: Mapped[list["BundleStackLayer"]] = relationship(
+        back_populates="stack",
+        cascade="all, delete-orphan",
+        order_by="BundleStackLayer.position",
+    )
+    env_links: Mapped[list["StackEnvLink"]] = relationship(
+        back_populates="stack", cascade="all, delete-orphan"
+    )
+
+
+class BundleStackLayer(Base):
+    __tablename__ = "bundle_stack_layers"
+    __table_args__ = (
+        UniqueConstraint("stack_id", "position", name="uq_stack_layer_position"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    stack_id: Mapped[int] = mapped_column(
+        ForeignKey("bundle_stacks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    bundle_id: Mapped[int] = mapped_column(
+        ForeignKey("bundles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # "all" = include every key from the bundle; "pick" = only keys in selected_keys_json
+    keys_mode: Mapped[str] = mapped_column(String(16), default="all")
+    selected_keys_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Optional display name for this row in the UI (bundle reference unchanged).
+    layer_label: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+    stack: Mapped["BundleStack"] = relationship(back_populates="layers")
+    bundle: Mapped["Bundle"] = relationship(back_populates="stack_layers")
+
+
+class StackEnvLink(Base):
+    """Opaque URL token → merged stack export (dotenv/json). Raw token is never stored.
+
+    Optional ``through_layer_position`` limits the merge to layers from the bottom through
+    that layer position (prefix slice); ``None`` means merge all layers.
+    """
+
+    __tablename__ = "stack_env_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    stack_id: Mapped[int] = mapped_column(
+        ForeignKey("bundle_stacks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    # None = merge all layers; else merge layers with position <= this value (prefix slice).
+    through_layer_position: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
+    stack: Mapped["BundleStack"] = relationship(back_populates="env_links")
 
 
 class Secret(Base):

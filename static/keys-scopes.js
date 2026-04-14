@@ -14,8 +14,10 @@
   var addBtn = document.getElementById("scope-add-btn");
   var addPatternBtn = document.getElementById("scope-add-pattern-btn");
   var wrapBundle = document.getElementById("scope-wrap-bundle");
+  var wrapStack = document.getElementById("scope-wrap-stack");
   var wrapProject = document.getElementById("scope-wrap-project");
   var targetBundle = document.getElementById("scope-target-bundle");
+  var targetStack = document.getElementById("scope-target-stack");
   var targetProject = document.getElementById("scope-target-project");
   var chipsEl = document.getElementById("scope-chips");
   var advanced = document.getElementById("scopes-advanced");
@@ -68,6 +70,43 @@
     renderSummary(list);
   }
 
+  /** Merge Advanced JSON into the form and refresh hidden field. Returns false if JSON is invalid. */
+  function prepareForSubmit() {
+    if (advanced && advanced.open && advancedTa && advancedTa.value.trim()) {
+      if (!loadFromJson(advancedTa.value.trim())) {
+        return false;
+      }
+    } else {
+      syncHidden();
+    }
+    return true;
+  }
+
+  function validateScopes() {
+    if (!prepareForSubmit()) {
+      return { ok: false, message: "Invalid JSON in Advanced — fix or close that section." };
+    }
+    var list;
+    try {
+      list = JSON.parse(hidden.value);
+    } catch (err) {
+      return { ok: false, message: "Invalid scopes data." };
+    }
+    if (!Array.isArray(list)) {
+      return { ok: false, message: "Scopes must be a JSON array." };
+    }
+    if (list.length === 1 && list[0] === "admin") {
+      return { ok: true };
+    }
+    if (list.length === 0) {
+      return {
+        ok: false,
+        message: "Choose at least one access rule or Administrator.",
+      };
+    }
+    return { ok: true };
+  }
+
   function renderSummary(list) {
     if (!summaryEl) return;
     summaryEl.classList.remove("error");
@@ -87,6 +126,8 @@
       else if (s === "write:bundle:*") bits.push("change any bundle");
       else if (s === "read:project:*") bits.push("read bundles in any project");
       else if (s === "write:project:*") bits.push("manage all projects");
+      else if (s === "read:stack:*") bits.push("read any stack");
+      else if (s === "write:stack:*") bits.push("change any stack");
       else if (s === "terraform:http_state") bits.push("Terraform flat keys only (legacy)");
       else if (s === "pulumi:state") bits.push("Terraform flat keys (legacy)");
       else bits.push(s);
@@ -125,11 +166,24 @@
     return k === "read:bundle:" || k === "write:bundle:";
   }
 
+  function isStackKind() {
+    var k = kindSelect && kindSelect.value;
+    return k === "read:stack:" || k === "write:stack:";
+  }
+
+  function isProjectKind() {
+    var k = kindSelect && kindSelect.value;
+    return k === "read:project:" || k === "write:project:";
+  }
+
   function syncKindUI() {
-    if (!wrapBundle || !wrapProject) return;
-    var bundle = isBundleKind();
-    wrapBundle.hidden = !bundle;
-    wrapProject.hidden = bundle;
+    if (!wrapBundle || !wrapProject || !wrapStack) return;
+    var b = isBundleKind();
+    var s = isStackKind();
+    var p = isProjectKind();
+    wrapBundle.hidden = !b;
+    wrapStack.hidden = !s;
+    wrapProject.hidden = !p;
   }
 
   function addFromDropdown() {
@@ -145,6 +199,15 @@
       }
       full = kind + bn;
       targetBundle.value = "";
+    } else if (isStackKind()) {
+      if (!targetStack) return;
+      var sn = (targetStack.value || "").trim();
+      if (!sn) {
+        targetStack.focus();
+        return;
+      }
+      full = kind + sn;
+      targetStack.value = "";
     } else {
       if (!targetProject) return;
       var slug = (targetProject.value || "").trim();
@@ -297,12 +360,20 @@
     });
   }
 
-  form.addEventListener("submit", function () {
-    if (advanced && advanced.open && advancedTa && advancedTa.value.trim()) {
-      loadFromJson(advancedTa.value);
+  form.addEventListener("submit", function (e) {
+    var v = validateScopes();
+    if (!v.ok) {
+      e.preventDefault();
+      if (v.message) {
+        window.alert(v.message);
+      }
     }
-    syncHidden();
   });
+
+  window.envelopeKeysScopes = {
+    sync: syncHidden,
+    validate: validateScopes,
+  };
 
   (function init() {
     var initial = (hidden && hidden.value) ? hidden.value : '["read:bundle:*"]';

@@ -4,6 +4,20 @@
   var root = document.getElementById("bundle-edit-root");
   if (!root) return;
 
+  (function scrollHighlightRowIntoView() {
+    var row = document.querySelector("table.bundle-vars-table tbody tr.highlight-row");
+    if (!row) return;
+
+    function scroll() {
+      row.scrollIntoView({ block: "center", behavior: "auto" });
+    }
+
+    /* Re-run after full layout: first scrollIntoView can run before fonts/images settle. */
+    window.addEventListener("load", scroll, { once: true });
+    setTimeout(scroll, 0);
+    setTimeout(scroll, 350);
+  })();
+
   (function initAddEntryModal() {
     var dlg = document.getElementById("bundle-add-entry-modal");
     var openBtn = document.getElementById("bundle-add-entry-open");
@@ -28,6 +42,41 @@
         if (dlg.open) dlg.close();
       });
     }
+  })();
+
+  (function initEditEntryModal() {
+    var dlg = document.getElementById("bundle-edit-entry-modal");
+    if (!dlg || typeof dlg.showModal !== "function") return;
+
+    dlg.showModal();
+    var keyInput = document.getElementById("key_name_edit");
+    if (keyInput) keyInput.focus();
+  })();
+
+  (function initBundleRowDblClickEdit() {
+    var base = root.getAttribute("data-bundle-route-base");
+    if (!base) return;
+    document.querySelectorAll("table.bundle-vars-table tbody tr.bundle-var-row:not(.bundle-var-row--empty)").forEach(function (row) {
+      row.addEventListener("dblclick", function (e) {
+        if (e.target.closest("a, button, input, textarea, select, summary, label")) return;
+        if (e.target.closest(".bundle-var-actions")) return;
+        var cell = row.querySelector(".bundle-value-cell[data-key]");
+        var k = cell && cell.getAttribute("data-key");
+        if (!k) return;
+        window.location.href = base + "/edit?key=" + encodeURIComponent(k);
+      });
+    });
+  })();
+
+  (function initBundleVarActionMenus() {
+    document.querySelectorAll(".bundle-var-actions-menu").forEach(function (d) {
+      d.addEventListener("toggle", function () {
+        if (!d.open) return;
+        document.querySelectorAll(".bundle-var-actions-menu[open]").forEach(function (o) {
+          if (o !== d) o.open = false;
+        });
+      });
+    });
   })();
 
   var url = root.dataset.secretValuesUrl;

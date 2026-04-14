@@ -1,0 +1,10 @@
+{% extends "help_base.html" %}
+{% block help_title %}Pulumi state{% endblock %}
+{% block help_body %}
+<h1>Pulumi state (not the same HTTP API)</h1>
+<p>Envelope’s <code>/tfstate/…</code> endpoints implement the <strong>Terraform HTTP backend</strong> contract. The <strong>Pulumi CLI</strong> does not use that protocol for <code>pulumi login</code> — it supports backends such as <strong>PostgreSQL</strong>, <strong>S3</strong>, Azure Blob, GCS, and file.</p>
+<p><strong>Practical setup:</strong> run Pulumi against a <a href="https://www.pulumi.com/docs/concepts/state/">supported backend</a>, and keep the connection URL or cloud credentials in an Envelope <strong>bundle</strong> (or inject them in CI after exporting from Envelope). Example for Postgres:</p>
+<pre class="doc-pre wrap" role="region" aria-label="Pulumi login with Postgres URL from env"># Export vars from Envelope (or CI secrets), then:
+pulumi login postgres://user:pass@host:5432/pulumi</pre>
+<p class="muted">The legacy API scope name <code>pulumi:state</code> only applies to flat <code>/tfstate/blobs/…</code> keys — it does not make the stock Pulumi CLI speak Envelope’s HTTP API. Prefer Postgres/S3 state plus secrets from Envelope for Pulumi.</p>
+{% endblock %}

@@ -156,6 +156,50 @@ def _migrate_sqlite_bundles_group_id(sync_conn) -> None:
     )
 
 
+def _migrate_sqlite_bundle_stack_layer_keys(sync_conn) -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    if "bundle_stack_layers" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("bundle_stack_layers")}
+    if "keys_mode" not in cols:
+        sync_conn.execute(
+            text(
+                "ALTER TABLE bundle_stack_layers ADD COLUMN keys_mode VARCHAR(16) "
+                "NOT NULL DEFAULT 'all'"
+            )
+        )
+    if "selected_keys_json" not in cols:
+        sync_conn.execute(
+            text("ALTER TABLE bundle_stack_layers ADD COLUMN selected_keys_json TEXT")
+        )
+    if "layer_label" not in cols:
+        sync_conn.execute(
+            text("ALTER TABLE bundle_stack_layers ADD COLUMN layer_label VARCHAR(256)")
+        )
+
+
+def _migrate_sqlite_stack_env_links_slice(sync_conn) -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    if "stack_env_links" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("stack_env_links")}
+    if "through_layer_position" in cols:
+        return
+    sync_conn.execute(
+        text("ALTER TABLE stack_env_links ADD COLUMN through_layer_position INTEGER")
+    )
+    sync_conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_stack_env_links_through_layer_position "
+            "ON stack_env_links(through_layer_position)"
+        )
+    )
+
+
 async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
@@ -165,3 +209,5 @@ async def init_db() -> None:
             await conn.run_sync(_migrate_sqlite_bundles_group_id)
             await conn.run_sync(_migrate_sqlite_api_keys_scopes)
             await conn.run_sync(_migrate_sqlite_bundle_groups_slug)
+            await conn.run_sync(_migrate_sqlite_bundle_stack_layer_keys)
+            await conn.run_sync(_migrate_sqlite_stack_env_links_slice)

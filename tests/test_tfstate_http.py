@@ -1,5 +1,6 @@
 """Integration tests for /tfstate, system backup/restore, and sealed secrets/certificates."""
 
+import json
 import os
 import tempfile
 import unittest
@@ -289,6 +290,336 @@ class TfstateHttpTests(unittest.TestCase):
                 headers=h_admin,
             )
         self.assertEqual(up.status_code, 400)
+
+
+class StacksHttpTests(unittest.TestCase):
+    """Bundle stacks: layered bundles merged into one export."""
+
+    _token = "tfstate-http-test-admin-key"
+
+    def test_stack_merge_last_layer_wins(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"stkproj-{nonce}"
+        with TestClient(app) as client:
+            client.post(
+                "/api/v1/projects",
+                json={"name": f"Stack Proj {nonce}", "slug": slug},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={
+                    "name": f"stack-base-{nonce}",
+                    "project_slug": slug,
+                    "entries": {"FOO": "from-base", "ONLY_BASE": "yes"},
+                },
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={
+                    "name": f"stack-top-{nonce}",
+                    "project_slug": slug,
+                    "entries": {"FOO": "from-top", "ONLY_TOP": "yes"},
+                },
+                headers=hj,
+            )
+            cr = client.post(
+                "/api/v1/stacks",
+                json={
+                    "name": f"merge-stack-{nonce}",
+                    "project_slug": slug,
+                    "layers": [f"stack-base-{nonce}", f"stack-top-{nonce}"],
+                },
+                headers=hj,
+            )
+            self.assertEqual(cr.status_code, 201, cr.text)
+            er = client.get(f"/api/v1/stacks/merge-stack-{nonce}/export?format=json", headers=h)
+            self.assertEqual(er.status_code, 200, er.text)
+            data = json.loads(er.text)
+            self.assertEqual(data["FOO"], "from-top")
+            self.assertEqual(data["ONLY_BASE"], "yes")
+            self.assertEqual(data["ONLY_TOP"], "yes")
+
+    def test_stack_selected_keys_partial_merge(self) -> None:
+        """Top layer with selected keys only merges those keys; other keys stay from lower layers."""
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"pickproj-{nonce}"
+        with TestClient(app) as client:
+            client.post(
+                "/api/v1/projects",
+                json={"name": f"Pick Proj {nonce}", "slug": slug},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={
+                    "name": f"sb-{nonce}",
+                    "project_slug": slug,
+                    "entries": {"FOO": "from-base-foo", "BAR": "from-base-bar"},
+                },
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={
+                    "name": f"st-{nonce}",
+                    "project_slug": slug,
+                    "entries": {"FOO": "from-top-foo", "ONLY_TOP": "yes"},
+                },
+                headers=hj,
+            )
+            cr = client.post(
+                "/api/v1/stacks",
+                json={
+                    "name": f"pick-stack-{nonce}",
+                    "project_slug": slug,
+                    "layers": [
+                        {"bundle": f"sb-{nonce}", "keys": "*"},
+                        {"bundle": f"st-{nonce}", "keys": ["FOO"]},
+                    ],
+                },
+                headers=hj,
+            )
+            self.assertEqual(cr.status_code, 201, cr.text)
+            er = client.get(f"/api/v1/stacks/pick-stack-{nonce}/export?format=json", headers=h)
+            self.assertEqual(er.status_code, 200, er.text)
+            data = json.loads(er.text)
+            self.assertEqual(data["FOO"], "from-top-foo")
+            self.assertEqual(data["BAR"], "from-base-bar")
+            self.assertNotIn("ONLY_TOP", data)
+
+    def test_stack_export_403_when_layer_bundle_unreadable(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"scproj-{nonce}"
+        with TestClient(app) as client:
+            client.post(
+                "/api/v1/projects",
+                json={"name": f"Scope Proj {nonce}", "slug": slug},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={"name": f"scope-a-{nonce}", "project_slug": slug, "entries": {"K": "a"}},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={"name": f"scope-b-{nonce}", "project_slug": slug, "entries": {"K": "b"}},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/stacks",
+                json={
+                    "name": f"scope-stack-{nonce}",
+                    "project_slug": slug,
+                    "layers": [f"scope-a-{nonce}", f"scope-b-{nonce}"],
+                },
+                headers=hj,
+            )
+            kr = client.post(
+                "/api/v1/api-keys",
+                json={
+                    "name": f"narrow-{nonce}",
+                    "scopes": [
+                        f"read:stack:scope-stack-{nonce}",
+                        f"read:bundle:scope-a-{nonce}",
+                    ],
+                },
+                headers=hj,
+            )
+            self.assertEqual(kr.status_code, 201, kr.text)
+            plain = kr.json()["plain_key"]
+            hn = {"Authorization": f"Bearer {plain}"}
+            bad = client.get(f"/api/v1/stacks/scope-stack-{nonce}/export", headers=hn)
+            self.assertEqual(bad.status_code, 403)
+
+    def test_stack_crud_and_patch_layers(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"crud-{nonce}"
+        with TestClient(app) as client:
+            client.post(
+                "/api/v1/projects",
+                json={"name": f"CRUD Proj {nonce}", "slug": slug},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={"name": f"c1-{nonce}", "project_slug": slug, "entries": {"X": "1"}},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={"name": f"c2-{nonce}", "project_slug": slug, "entries": {"X": "2"}},
+                headers=hj,
+            )
+            cr = client.post(
+                "/api/v1/stacks",
+                json={
+                    "name": f"crud-s-{nonce}",
+                    "project_slug": slug,
+                    "layers": [f"c1-{nonce}"],
+                },
+                headers=hj,
+            )
+            self.assertEqual(cr.status_code, 201)
+            gr = client.get(f"/api/v1/stacks/crud-s-{nonce}", headers=h)
+            self.assertEqual(gr.status_code, 200)
+            self.assertEqual(
+                gr.json()["layers"],
+                [{"bundle": f"c1-{nonce}", "keys": "*"}],
+            )
+            pr = client.patch(
+                f"/api/v1/stacks/crud-s-{nonce}",
+                json={"layers": [f"c1-{nonce}", f"c2-{nonce}"]},
+                headers=hj,
+            )
+            self.assertEqual(pr.status_code, 200)
+            gr2 = client.get(f"/api/v1/stacks/crud-s-{nonce}", headers=h)
+            self.assertEqual(
+                gr2.json()["layers"],
+                [
+                    {"bundle": f"c1-{nonce}", "keys": "*"},
+                    {"bundle": f"c2-{nonce}", "keys": "*"},
+                ],
+            )
+            pr_label = client.patch(
+                f"/api/v1/stacks/crud-s-{nonce}",
+                json={
+                    "layers": [
+                        {"bundle": f"c1-{nonce}", "keys": "*", "label": "base"},
+                        {"bundle": f"c2-{nonce}", "keys": "*"},
+                    ]
+                },
+                headers=hj,
+            )
+            self.assertEqual(pr_label.status_code, 200)
+            gr_lab = client.get(f"/api/v1/stacks/crud-s-{nonce}", headers=h)
+            self.assertEqual(
+                gr_lab.json()["layers"],
+                [
+                    {"bundle": f"c1-{nonce}", "keys": "*", "label": "base"},
+                    {"bundle": f"c2-{nonce}", "keys": "*"},
+                ],
+            )
+            rn = client.patch(
+                f"/api/v1/stacks/crud-s-{nonce}",
+                json={"name": f"crud-s2-{nonce}"},
+                headers=hj,
+            )
+            self.assertEqual(rn.status_code, 200)
+            grn = client.get(f"/api/v1/stacks/crud-s2-{nonce}", headers=h)
+            self.assertEqual(grn.status_code, 200)
+            self.assertEqual(grn.json()["name"], f"crud-s2-{nonce}")
+            ex = client.get(f"/api/v1/stacks/crud-s2-{nonce}/export?format=json", headers=h)
+            self.assertEqual(json.loads(ex.text)["X"], "2")
+            dr = client.delete(f"/api/v1/stacks/crud-s2-{nonce}", headers=h)
+            self.assertEqual(dr.status_code, 204)
+            g1 = client.get(f"/api/v1/bundles/c1-{nonce}", headers=h)
+            self.assertEqual(g1.status_code, 200)
+
+    def test_stack_env_link_downloads_merged_env(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"envp-{nonce}"
+        with TestClient(app) as client:
+            client.post(
+                "/api/v1/projects",
+                json={"name": f"Env Proj {nonce}", "slug": slug},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={"name": f"e1-{nonce}", "project_slug": slug, "entries": {"Z": "1"}},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={"name": f"e2-{nonce}", "project_slug": slug, "entries": {"Z": "2"}},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/stacks",
+                json={
+                    "name": f"env-stack-{nonce}",
+                    "project_slug": slug,
+                    "layers": [f"e1-{nonce}", f"e2-{nonce}"],
+                },
+                headers=hj,
+            )
+            lr = client.post(f"/api/v1/stacks/env-stack-{nonce}/env-links", headers=h)
+            self.assertEqual(lr.status_code, 201, lr.text)
+            url = lr.json()["url"]
+            path = url.split("/env/")[-1].split("?")[0]
+            nr = client.get(f"/env/{path}?format=json")
+            self.assertEqual(nr.status_code, 200)
+            self.assertEqual(json.loads(nr.text)["Z"], "2")
+
+    def test_stack_env_link_prefix_slice(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"slip-{nonce}"
+        with TestClient(app) as client:
+            client.post(
+                "/api/v1/projects",
+                json={"name": f"Slice Proj {nonce}", "slug": slug},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={"name": f"s1-{nonce}", "project_slug": slug, "entries": {"Z": "bottom"}},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/bundles",
+                json={"name": f"s2-{nonce}", "project_slug": slug, "entries": {"Z": "top"}},
+                headers=hj,
+            )
+            client.post(
+                "/api/v1/stacks",
+                json={
+                    "name": f"slice-stack-{nonce}",
+                    "project_slug": slug,
+                    "layers": [f"s1-{nonce}", f"s2-{nonce}"],
+                },
+                headers=hj,
+            )
+            lr_full = client.post(
+                f"/api/v1/stacks/slice-stack-{nonce}/env-links", headers=hj, json={}
+            )
+            self.assertEqual(lr_full.status_code, 201)
+            path_full = lr_full.json()["url"].split("/env/")[-1].split("?")[0]
+            self.assertEqual(
+                json.loads(client.get(f"/env/{path_full}?format=json").text)["Z"],
+                "top",
+            )
+            lr_slice = client.post(
+                f"/api/v1/stacks/slice-stack-{nonce}/env-links",
+                headers=hj,
+                json={"through_layer_position": 0},
+            )
+            self.assertEqual(lr_slice.status_code, 201, lr_slice.text)
+            path_slice = lr_slice.json()["url"].split("/env/")[-1].split("?")[0]
+            self.assertEqual(
+                json.loads(client.get(f"/env/{path_slice}?format=json").text)["Z"],
+                "bottom",
+            )
+            lst = client.get(f"/api/v1/stacks/slice-stack-{nonce}/env-links", headers=h)
+            self.assertEqual(lst.status_code, 200)
+            rows = lst.json()
+            slice_rows = [x for x in rows if x.get("through_layer_position") == 0]
+            self.assertEqual(len(slice_rows), 1)
+            self.assertEqual(slice_rows[0]["slice_label"], f"s1-{nonce}")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,8 @@ Self-hosted **secure environment bundle** manager: named groups of secrets (like
 - **Fernet (AES)** encryption of secret values in SQLite using `ENVELOPE_MASTER_KEY`
 - **API keys** (bcrypt-hashed): `read` (export bundles) and `admin` (manage bundles and keys)
 - **Export** for pipelines: `GET /api/v1/bundles/{name}/export?format=dotenv|json` with `Authorization: Bearer …`
-- **Opaque env URLs**: download a bundle as `.env` or JSON via `GET /env/{secret-token}` — the path is a random token only (no project or bundle name). Create links from the bundle’s **Secret env URL** page in the web UI (`…/bundles/{name}/env-links`, or under **Projects**) or `POST /api/v1/bundles/{name}/env-links` (API key with write access to that bundle).
+- **Bundle stacks** — ordered layers of existing bundles merged into one composite `.env` / JSON (`GET /api/v1/stacks/{name}/export`). Later layers **overwrite** duplicate keys from earlier layers. Scopes: `read:stack:…`, `write:stack:…` (and project scopes for stacks in a project). Web: **Stacks**; same opaque `/env/{token}` links as bundles (`POST /api/v1/stacks/{name}/env-links`). Stack links can optionally be a **prefix slice**: merge from the bottom through a chosen layer only (`POST` body `{"through_layer_position": <n>}` matching a layer position).
+- **Opaque env URLs**: download a bundle **or merged stack** (full or prefix slice) as `.env` or JSON via `GET /env/{secret-token}` — the path is a random token only (no project, bundle, or stack name). Create links from a bundle’s or stack’s **Secret env URL** page (`…/bundles/{name}/env-links`, `…/stacks/{name}/env-links`) or the matching `POST /api/v1/…/env-links` API (API key with write access).
 - **Backups**: full SQLite snapshots and passphrase-encrypted files (admin); per-bundle JSON/encrypted export and merge import (scoped API keys)
 - **Rate limits** on sensitive routes (export, web login)
 - **Certificate-backed sealed secrets** (zero-knowledge path): store client-encrypted ciphertext + wrapped data keys per recipient certificate; server does not need private keys to decrypt
@@ -238,6 +239,13 @@ API docs: `http://localhost:8080/docs`
 | GET | `/api/v1/bundles/{name}/env-links` | write scope for bundle — list link ids (not full URLs) |
 | POST | `/api/v1/bundles/{name}/env-links` | write — returns `{ "url": "…/env/<token>" }` once |
 | DELETE | `/api/v1/bundles/{name}/env-links/{id}` | write — revoke |
+| GET | `/api/v1/stacks` | list stack names (scoped) |
+| POST | `/api/v1/stacks` | create — body `name`, `layers` (bundle names, bottom→top), `project_slug` or `group_id` |
+| GET | `/api/v1/stacks/{name}` | read stack — metadata + ordered `layers` |
+| PATCH | `/api/v1/stacks/{name}` | write — optional `layers`, `project_slug` / `group_id` |
+| DELETE | `/api/v1/stacks/{name}` | write — deletes stack only (bundles unchanged) |
+| GET | `/api/v1/stacks/{name}/export?format=dotenv` or `format=json` | read stack **and** read every layer bundle |
+| GET/POST/DELETE | `/api/v1/stacks/{name}/env-links` | write — list links (with optional `through_layer_position` / `slice_label`); POST optional JSON `{"through_layer_position": n}` for a prefix slice; merged export at `/env/{token}` |
 | GET | `/api/v1/certificates` | admin — list recipient certificates |
 | POST | `/api/v1/certificates` | admin — body `{"name":"…","certificate_pem":"-----BEGIN CERTIFICATE-----..."}` |
 | DELETE | `/api/v1/certificates/{id}` | admin — delete certificate (fails if in use) |

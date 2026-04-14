@@ -1,0 +1,54 @@
+{% extends "help_base.html" %}
+{% block help_title %}Terraform remote state{% endblock %}
+{% block help_body %}
+<h1>Terraform HTTP remote state</h1>
+<p>Envelope can serve a <strong>Terraform HTTP backend</strong> API under <code>/tfstate/…</code> (<code>GET</code>/<code>POST</code>/<code>DELETE</code> and optional <code>LOCK</code>/<code>UNLOCK</code>), so Terraform stores state in the same SQLite database as the app.</p>
+
+<section class="doc-section">
+  <h2 class="h3">How state is stored</h2>
+  <ul class="doc-list">
+    <li>State file bytes live in table <code>pulumi_state_blobs</code> (name is historical): a string <strong>key</strong> and raw binary <strong>body</strong>.</li>
+    <li>Locks use <code>pulumi_state_locks</code>, one row per state key, with JSON lock data in <code>lock_body</code>.</li>
+    <li>Unlike bundle secrets, Terraform state is <strong>not</strong> Fernet-encrypted with <code>ENVELOPE_MASTER_KEY</code> — it is stored as raw bytes. Protect database backups and disk accordingly.</li>
+  </ul>
+</section>
+
+<section class="doc-section">
+  <h2 class="h3">Per-project URLs (recommended)</h2>
+  <pre class="doc-pre" role="region" aria-label="Per-project state URL pattern">/tfstate/projects/&lt;project_slug&gt;/&lt;path-to-statefile&gt;</pre>
+  <p>Example: <code>/tfstate/projects/my-proj/default.tfstate</code>. Authenticate with <code>Authorization: Bearer …</code> or HTTP Basic (password = API key).</p>
+  <ul class="doc-list">
+    <li><code>GET</code> needs <code>read:project:…</code> for that project (or <code>read:project:*</code>), or <strong>admin</strong>.</li>
+    <li><code>POST</code>, <code>DELETE</code>, <code>LOCK</code>, <code>UNLOCK</code> need <code>write:project:…</code> for that project, or <strong>admin</strong>.</li>
+  </ul>
+</section>
+
+<section class="doc-section">
+  <h2 class="h3">Legacy <code>/tfstate/blobs/…</code></h2>
+  <p>Flat keys under <code>/tfstate/blobs/&lt;key&gt;</code> require scope <code>terraform:http_state</code> or <code>pulumi:state</code>, or <strong>admin</strong>. Prefer per-project URLs for new setups.</p>
+</section>
+
+<section class="doc-section">
+  <h2 class="h3">Enable / prefix</h2>
+  <ul class="doc-list">
+    <li>Endpoints are mounted when <code>ENVELOPE_PULUMI_STATE_ENABLED=true</code> (default on). Set <code>false</code> to disable <code>/tfstate</code>.</li>
+    <li>Behind a reverse proxy with a path prefix, set <code>ENVELOPE_ROOT_PATH</code> and use the same prefix in Terraform backend URLs.</li>
+  </ul>
+</section>
+
+<section class="doc-section">
+  <h2 class="h3">Terraform example</h2>
+  <p>Do <strong>not</strong> put the Envelope API key in <code>.tf</code> files — Terraform can copy backend secrets into <code>.terraform/</code> and plans. Set <code>TF_HTTP_PASSWORD</code> (and optionally <code>TF_HTTP_USERNAME</code>) in the environment instead.</p>
+  <pre class="doc-pre wrap" role="region" aria-label="Terraform backend block">terraform {
+  backend "http" {
+    address        = "https://envelope.example.com/tfstate/projects/my-proj/default.tfstate"
+    lock_address   = "https://envelope.example.com/tfstate/projects/my-proj/default.tfstate"
+    unlock_address = "https://envelope.example.com/tfstate/projects/my-proj/default.tfstate"
+    username       = "terraform"
+  }
+}</pre>
+  <pre class="doc-pre wrap" role="region" aria-label="Terraform auth env vars">export TF_HTTP_USERNAME=terraform
+export TF_HTTP_PASSWORD="$ENVELOPE_TF_WRITE_KEY"</pre>
+  <p class="muted">Set these for <code>terraform init</code> as well as plan/apply. In CI, inject <code>TF_HTTP_PASSWORD</code> from your secret store (never commit it).</p>
+</section>
+{% endblock %}

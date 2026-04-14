@@ -1,26 +1,166 @@
 {% extends "base.html" %}
 {% block title %}Certificates — Envelope{% endblock %}
 {% block nav %}
-<nav class="nav">
-  <a href="{{ url_path('/bundles') }}">Bundles</a>
-  <a href="{{ url_path('/projects') }}">Projects</a>
-  <a href="{{ url_path('/backup') }}">Backup</a>
-  <a href="{{ url_path('/keys') }}">API keys</a>
-  <a href="{{ url_path('/certificates') }}">Certificates</a>
-  <form method="post" action="{{ url_path('/logout') }}" class="inline-form">
-    <input type="hidden" name="csrf" value="{{ csrf_token }}">
-    <button type="submit" class="link">Log out</button>
-  </form>
-</nav>
+{% include "partials/nav_admin.html" %}
 {% endblock %}
 {% block content %}
 <h1>Certificates</h1>
-<p class="muted">Register recipient public certificates for sealed secret key wrapping.</p>
+<p class="cert-page-lead muted">
+  Register recipient <strong>public</strong> certificates for sealed-secret key wrapping.
+  <a href="{{ url_path('/help/certificates') }}">Certificates &amp; sealed secrets</a> — documentation
+</p>
+
+<section class="cert-wizard" id="cert-wizard" aria-labelledby="cert-wizard-title">
+  <h2 class="h3 cert-wizard-title" id="cert-wizard-title">Generate a recipient certificate</h2>
+  <p class="muted small cert-wizard-step-label" id="cert-wizard-step-label">Step 1 of 4</p>
+
+  <div class="cert-wizard-panel" data-panel="1">
+    <p>This wizard helps you create an RSA key pair and a PEM certificate locally. You upload only the certificate to Envelope; the private key never leaves your machine.</p>
+    <ul class="doc-list">
+      <li>Use a descriptive <strong>name</strong> when you register (for example <code class="mono">laptop-alice</code>).</li>
+      <li>Keep <code class="mono">*.key</code> files secret and backed up only in a safe store.</li>
+      <li>More detail: <a href="{{ url_path('/help/certificates') }}">help — certificates &amp; sealed secrets</a>.</li>
+    </ul>
+    <p class="form-actions">
+      <button type="button" class="button cert-wizard-next">Start wizard</button>
+    </p>
+  </div>
+
+  <div class="cert-wizard-panel" data-panel="2" hidden>
+    <fieldset class="cert-wizard-os-fieldset">
+      <legend class="cert-wizard-legend">Where are you generating the certificate?</legend>
+      <div class="cert-wizard-os-grid">
+        <label class="cert-wizard-os-card">
+          <input type="radio" name="cert_wizard_os" value="linux" checked>
+          <span class="cert-wizard-os-card-title">Linux</span>
+          <span class="muted small">Terminal, OpenSSL</span>
+        </label>
+        <label class="cert-wizard-os-card">
+          <input type="radio" name="cert_wizard_os" value="macos">
+          <span class="cert-wizard-os-card-title">macOS</span>
+          <span class="muted small">Terminal, OpenSSL</span>
+        </label>
+        <label class="cert-wizard-os-card">
+          <input type="radio" name="cert_wizard_os" value="win-openssl">
+          <span class="cert-wizard-os-card-title">Windows</span>
+          <span class="muted small">OpenSSL (Git Bash, WSL, etc.)</span>
+        </label>
+        <label class="cert-wizard-os-card">
+          <input type="radio" name="cert_wizard_os" value="win-ps">
+          <span class="cert-wizard-os-card-title">Windows</span>
+          <span class="muted small">PowerShell only</span>
+        </label>
+      </div>
+    </fieldset>
+    <p class="form-actions">
+      <button type="button" class="button secondary-outline cert-wizard-back">Back</button>
+      <button type="button" class="button cert-wizard-next">Continue</button>
+    </p>
+  </div>
+
+  <div class="cert-wizard-panel" data-panel="3" hidden>
+    <p class="muted small">Run the commands for your environment. Then continue to paste the PEM into the form below.</p>
+
+    <div class="cert-wizard-os-instructions" data-os-panel="linux">
+      <h3 class="h3 doc-sub">Linux (OpenSSL)</h3>
+      <p class="muted small">OpenSSL is usually installed. If not: <code class="mono">sudo apt install openssl</code> (Debian/Ubuntu) or use your distro’s package manager.</p>
+      <div class="cert-code-block">
+        <button type="button" class="button secondary-outline small cert-wizard-copy" data-copy-target="#cert-wiz-pre-linux">Copy</button>
+        <pre class="doc-pre cert-wiz-pre" id="cert-wiz-pre-linux">mkdir -p ~/envelope-cert &amp;&amp; cd ~/envelope-cert
+openssl req -x509 -newkey rsa:2048 \
+  -keyout recipient.key \
+  -days 3650 -nodes \
+  -out recipient.pem \
+  -subj "/CN=envelope-recipient"
+chmod 600 recipient.key
+cat recipient.pem</pre>
+      </div>
+      <p class="muted small">Copy the printed <code class="mono">-----BEGIN CERTIFICATE-----</code> block into <strong>Certificate PEM</strong> below. Store <code class="mono">recipient.key</code> securely offline.</p>
+    </div>
+
+    <div class="cert-wizard-os-instructions" data-os-panel="macos" hidden>
+      <h3 class="h3 doc-sub">macOS (OpenSSL)</h3>
+      <p class="muted small">A system <code class="mono">openssl</code> is available on most Macs. If you use Homebrew’s OpenSSL, call the full path (for example <code class="mono">/opt/homebrew/opt/openssl@3/bin/openssl</code>).</p>
+      <div class="cert-code-block">
+        <button type="button" class="button secondary-outline small cert-wizard-copy" data-copy-target="#cert-wiz-pre-macos">Copy</button>
+        <pre class="doc-pre cert-wiz-pre" id="cert-wiz-pre-macos">mkdir -p ~/envelope-cert &amp;&amp; cd ~/envelope-cert
+openssl req -x509 -newkey rsa:2048 \
+  -keyout recipient.key \
+  -days 3650 -nodes \
+  -out recipient.pem \
+  -subj "/CN=envelope-recipient"
+chmod 600 recipient.key
+cat recipient.pem</pre>
+      </div>
+      <p class="muted small">Paste the certificate PEM below. Do not upload <code class="mono">recipient.key</code>.</p>
+    </div>
+
+    <div class="cert-wizard-os-instructions" data-os-panel="win-openssl" hidden>
+      <h3 class="h3 doc-sub">Windows (OpenSSL)</h3>
+      <p class="muted small">Install OpenSSL, then open <strong>Git Bash</strong> or <strong>WSL</strong> and run (same as Linux). Typical installs:</p>
+      <ul class="doc-list">
+        <li><a href="https://git-scm.com/download/win">Git for Windows</a> — Git Bash includes OpenSSL</li>
+        <li><code class="mono">winget install ShiningLight.OpenSSL.Win64</code> or <code class="mono">choco install openssl</code></li>
+      </ul>
+      <div class="cert-code-block">
+        <button type="button" class="button secondary-outline small cert-wizard-copy" data-copy-target="#cert-wiz-pre-winssl">Copy</button>
+        <pre class="doc-pre cert-wiz-pre" id="cert-wiz-pre-winssl">mkdir -p ~/envelope-cert &amp;&amp; cd ~/envelope-cert
+openssl req -x509 -newkey rsa:2048 \
+  -keyout recipient.key \
+  -days 3650 -nodes \
+  -out recipient.pem \
+  -subj "/CN=envelope-recipient"
+chmod 600 recipient.key
+cat recipient.pem</pre>
+      </div>
+      <p class="muted small">From <strong>Command Prompt</strong> or <strong>PowerShell</strong> without Bash, either add OpenSSL to your <code class="mono">PATH</code> or use the <strong>PowerShell</strong> option in the previous step instead.</p>
+    </div>
+
+    <div class="cert-wizard-os-instructions" data-os-panel="win-ps" hidden>
+      <h3 class="h3 doc-sub">Windows (PowerShell)</h3>
+      <p class="muted small">Creates a self-signed certificate in your user store and writes <code class="mono">envelope-recipient.pem</code> in the current folder. Requires Windows PowerShell 5+ or PowerShell 7.</p>
+      <div class="cert-code-block">
+        <button type="button" class="button secondary-outline small cert-wizard-copy" data-copy-target="#cert-wiz-pre-ps">Copy</button>
+        <pre class="doc-pre cert-wiz-pre" id="cert-wiz-pre-ps">$cert = New-SelfSignedCertificate `
+  -Subject "CN=envelope-recipient" `
+  -DnsName "envelope-recipient.local" `
+  -CertStoreLocation "Cert:\CurrentUser\My" `
+  -KeyAlgorithm RSA `
+  -KeyLength 2048 `
+  -HashAlgorithm SHA256 `
+  -NotAfter (Get-Date).AddYears(10) `
+  -KeyExportPolicy Exportable `
+  -KeyUsage DigitalSignature,KeyEncipherment `
+  -Type Custom
+$bytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+$b64 = [System.Convert]::ToBase64String($bytes, [System.Base64FormattingOptions]::InsertLineBreaks)
+$pem = "-----BEGIN CERTIFICATE-----`r`n$b64`r`n-----END CERTIFICATE-----"
+Set-Content -Path .\envelope-recipient.pem -Value $pem -Encoding ascii
+Get-Content .\envelope-recipient.pem</pre>
+      </div>
+      <p class="muted small">Open <code class="mono">envelope-recipient.pem</code> in a text editor and paste its contents into <strong>Certificate PEM</strong> below. Optionally remove the certificate from the store when finished: <code class="mono">Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)"</code></p>
+    </div>
+
+    <p class="form-actions">
+      <button type="button" class="button secondary-outline cert-wizard-back">Back</button>
+      <button type="button" class="button cert-wizard-next">I have my PEM — continue</button>
+    </p>
+  </div>
+
+  <div class="cert-wizard-panel" data-panel="4" hidden>
+    <p>Enter a short <strong>Name</strong> and paste the full <strong>Certificate PEM</strong> (including <code class="mono">BEGIN</code> / <code class="mono">END</code> lines) in the form below, then <strong>Add certificate</strong>.</p>
+    <p class="muted small">The page has scrolled to the registration form.</p>
+    <p class="form-actions">
+      <button type="button" class="button secondary-outline cert-wizard-back">Back</button>
+    </p>
+  </div>
+</section>
 
 {% if error %}
 <p class="error">{{ error }}</p>
 {% endif %}
 
+<h2 class="h3">Registered certificates</h2>
 <table class="table">
   <thead>
     <tr><th>Name</th><th>Fingerprint (SHA-256)</th><th>Used by</th><th class="actions-col">Actions</th></tr>
@@ -44,8 +184,8 @@
   </tbody>
 </table>
 
-<h2 class="h3">Add certificate</h2>
-<form method="post" action="{{ url_path('/certificates/new') }}" class="stack">
+<h2 class="h3" id="add-certificate">Add certificate</h2>
+<form method="post" action="{{ url_path('/certificates/new') }}" class="stack" id="cert-add-form">
   <input type="hidden" name="csrf" value="{{ csrf_token }}">
   <label for="name">Name</label>
   <input id="name" name="name" required maxlength="128" value="{{ form_name }}">
@@ -55,4 +195,5 @@
 
   <button type="submit">Add certificate</button>
 </form>
+<script src="{{ url_path('/static/cert-wizard.js') }}" defer></script>
 {% endblock %}

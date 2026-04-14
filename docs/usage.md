@@ -1,5 +1,7 @@
 # Envelope — usage guide
 
+> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **`/help/web-ui`**, **`/help/api`**, **`/help/certificates`**, **`/help/terraform`**, **`/help/pulumi`**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
+
 Envelope is a self-hosted **secure environment bundle** manager: named groups of variables (like a `.env` file), **encrypted at rest** for secret values, with **API keys** for automation and a **web UI** for administration.
 
 For installation, environment variables, TLS, and reverse-proxy notes, see the [project README](../README.md). Interactive API reference: `/docs` (OpenAPI/Swagger) when the app is running.
@@ -9,13 +11,14 @@ For installation, environment variables, TLS, and reverse-proxy notes, see the [
 ## Web UI
 
 1. **Sign in** with an **admin** API key (the key is verified server-side; it is not stored in the browser after login).
-2. **Projects** — Create projects to group bundles. Each project has a **slug** (used in URLs and Terraform state paths).
+2. **Projects** — Create projects to group bundles and stacks. Each project has a **slug** (used in URLs and Terraform state paths).
 3. **Bundles** — Create bundles inside a project. Each bundle holds key/value entries; values can be stored as secrets (Fernet-encrypted) or plaintext config.
-4. **Variables** — Add, edit, encrypt, or delete entries on a bundle’s edit page.
-5. **Sealed secrets** — In each bundle, manage ciphertext-only rows for client-side encrypted values and wrapped recipient keys.
-6. **Secret env URL** — Generate opaque download links (`GET /env/<token>`) that do not expose project or bundle names. Treat these URLs like credentials.
-7. **Certificates** — Register recipient public certificates used by sealed secrets.
-8. **API keys** — Create keys with scoped access (`read`, `write`, per-bundle or per-project scopes). Use **read** keys in CI to export bundles; reserve **admin** for management.
+4. **Stacks** — Define an **ordered list of bundle names** (layers). Export merges variables from those bundles into one map; **later layers overwrite** earlier keys with the same name. Sealed secrets are not included in merged exports (same as single-bundle export).
+5. **Variables** — Add, edit, encrypt, or delete entries on a bundle’s edit page.
+6. **Sealed secrets** — In each bundle, manage ciphertext-only rows for client-side encrypted values and wrapped recipient keys.
+7. **Secret env URL** — Generate opaque download links (`GET /env/<token>`) for a bundle or **merged stack**; project and resource names do not appear in the path. Treat these URLs like credentials.
+8. **Certificates** — Register recipient public certificates used by sealed secrets.
+9. **API keys** — Create keys with scoped access (`read:bundle:…`, `write:bundle:…`, `read:stack:…`, `write:stack:…`, per-project scopes, or **admin**). Export requires both **read** on the stack and **read** on every bundle in its layers.
 
 ---
 
@@ -37,6 +40,19 @@ curl -fsS "https://your-envelope.example.com/env/<token>" -o .env
 ```
 
 Create links from the UI or `POST /api/v1/bundles/{name}/env-links` with a key that has write access to the bundle.
+
+### Bundle stacks (merged export)
+
+**Authenticated:**
+
+```http
+GET /api/v1/stacks/{name}/export?format=dotenv
+Authorization: Bearer <api-key>
+```
+
+Use `format=json` for JSON. The caller must be allowed to read the stack **and** every bundle listed as a layer (`403` if any layer bundle is not readable).
+
+**Opaque URL** — Same as bundles: `POST /api/v1/stacks/{name}/env-links` with write access; `GET /env/<token>` returns the merged variables (optional `?format=json`). For a **prefix slice** (merge from the bottom through one layer only), send JSON `{"through_layer_position": <n>}` where `n` is a layer `position` in that stack; omit the field or send `null` for the full merged stack. `GET /api/v1/stacks/{name}/env-links` lists links with `through_layer_position` and `slice_label` (bundle name at that position).
 
 ---
 

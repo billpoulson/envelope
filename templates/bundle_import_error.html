@@ -1,17 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Import failed — Envelope{% endblock %}
 {% block nav %}
-<nav class="nav">
-  <a href="{{ url_path('/bundles') }}">Bundles</a>
-  <a href="{{ url_path('/projects') }}">Projects</a>
-  <a href="{{ url_path('/backup') }}">Backup</a>
-  <a href="{{ url_path('/keys') }}">API keys</a>
-  <a href="{{ url_path('/certificates') }}">Certificates</a>
-  <form method="post" action="{{ url_path('/logout') }}" class="inline-form">
-    <input type="hidden" name="csrf" value="{{ csrf_token }}">
-    <button type="submit" class="link">Log out</button>
-  </form>
-</nav>
+{% include "partials/nav_admin.html" %}
 {% endblock %}
 {% block content %}
 <article class="error-article">
@@ -93,7 +83,7 @@
 
   <p class="error-actions">
     <a href="{{ url_path('/bundles/new') }}" class="button">Back to new bundle</a>
-    <a href="{{ url_path('/bundles') }}" class="button secondary-outline">All bundles</a>
+    <a href="{{ url_path('/projects') }}" class="button secondary-outline">Projects</a>
   </p>
 </article>
 {% endblock %}

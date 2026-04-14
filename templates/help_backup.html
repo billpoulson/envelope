@@ -1,0 +1,23 @@
+{% extends "help_base.html" %}
+{% block help_title %}Backup &amp; security{% endblock %}
+{% block help_body %}
+<h1>Backup &amp; security</h1>
+
+<section class="doc-section">
+  <h2 class="h3">Backups</h2>
+  <ul class="doc-list">
+    <li><strong>Full database</strong> — Admin API or <strong>Backup</strong> under Admin in the UI; optional passphrase-encrypted download. The encrypted backup does not include <code>ENVELOPE_MASTER_KEY</code>; keep the Fernet key separately.</li>
+    <li><strong>Per-bundle / automation</strong> — Export or merge via scoped API keys; see the README API table.</li>
+  </ul>
+</section>
+
+<section class="doc-section">
+  <h2 class="h3">Operational security</h2>
+  <ul class="doc-list">
+    <li>Use <strong>HTTPS</strong> in production; opaque env URLs and exports return <strong>plaintext</strong> for use in pipelines.</li>
+    <li>Never log request bodies or API keys.</li>
+    <li>Rate limits apply to sensitive routes (export, login, Terraform state).</li>
+    <li>Sealed secret payloads are opaque to the server, but holders of recipient private keys can decrypt them; treat wrapped-key metadata and ciphertext as sensitive configuration artifacts.</li>
+  </ul>
+</section>
+{% endblock %}

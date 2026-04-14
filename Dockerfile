@@ -15,6 +15,9 @@ COPY app ./app
 COPY templates ./templates
 COPY static ./static
 
+# If the UI looks stale after code changes, rebuild without cache so COPY layers refresh:
+#   docker compose build --no-cache && docker compose up -d
+
 RUN mkdir -p /data /app/data && chown envelope:envelope /data /app/data
 
 USER envelope

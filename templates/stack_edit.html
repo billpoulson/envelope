@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block main_class %}container container-stack-detail{% endblock %}
+{% block title %}{{ stack_name }} — Stack — Envelope{% endblock %}
+{% block nav %}
+{% include "partials/nav_admin.html" %}
+{% endblock %}
+{% block content %}
+<h1 class="mono">{{ stack_name }}</h1>
+{% include "stack_subnav.html" %}
+<form method="post" action="{{ stack_route_base }}/rename" class="stack stack-rename-form">
+  <input type="hidden" name="csrf" value="{{ csrf_token }}">
+  <label for="stack-rename-input">Rename stack</label>
+  <p class="muted small">This changes the stack identifier in URLs and the API. Layers keep their optional display names below.</p>
+  <p class="form-row-inline">
+    <input id="stack-rename-input" name="new_name" type="text" value="{{ stack_name }}" required maxlength="256" class="mono" autocomplete="off" spellcheck="false" pattern="[a-zA-Z0-9._\-]+" title="Letters, numbers, dots, underscores, hyphens" aria-label="Stack name">
+    <button type="submit" class="secondary">Rename</button>
+  </p>
+</form>
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+<form method="post" action="{{ stack_route_base }}/edit" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token }}">
+  <label>Layers</label>
+  <p class="muted small">Choose a bundle per layer, then <strong>all keys</strong> or <strong>selected keys</strong>. Bottom layer first; top layer wins on duplicates.</p>
+  <div
+    id="stack-layers-root"
+    class="stack-layers-ui"
+    data-mode="edit"
+    data-project-slug="{{ project_slug|e }}"
+    data-bundles-json="{{ bundles_json|e }}"
+    data-projects-prefix="{{ url_path('/projects/') }}"
+    data-legacy-prefix="{{ url_path('/bundles/') }}"
+  ></div>
+  <input type="hidden" name="layers_json" id="stack-layers-json-input" value="">
+  <script type="application/json" id="stack-layers-initial">{{ layers_json|safe }}</script>
+  <script src="{{ url_path('/static/stack-layers-ui.js') }}" defer></script>
+  <p class="form-actions">
+    <button type="submit">Save layers</button>
+  </p>
+</form>
+<form method="post" action="{{ stack_route_base }}/delete" class="stack danger-zone" data-delete-name="{{ stack_name|e }}" data-delete-kind="stack" onsubmit="return envelopeConfirmTypedName(this);">
+  <input type="hidden" name="csrf" value="{{ csrf_token }}">
+  <button type="submit" class="danger">Delete stack</button>
+</form>
+{% endblock %}

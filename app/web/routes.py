@@ -1,6 +1,7 @@
 import json
 import secrets
 from datetime import datetime, timezone
+from urllib.parse import quote
 from itertools import groupby
 from typing import Annotated, Literal
 
@@ -17,17 +18,19 @@ from starlette.status import HTTP_302_FOUND
 from app.auth_keys import generate_raw_api_key, hash_api_key, verify_api_key
 from app.config import get_settings
 from app.db import get_db
-from app.deps import get_fernet
 from app.limiter import limiter
 from app.models import (
     ApiKey,
     Bundle,
     BundleEnvLink,
     BundleGroup,
+    BundleStack,
+    BundleStackLayer,
     Certificate,
     SealedSecret,
     SealedSecretRecipient,
     Secret,
+    StackEnvLink,
 )
 from app.paths import url_path
 from app.services.projects import (
@@ -37,6 +40,104 @@ from app.services.projects import (
     validate_project_name,
     validate_project_slug,
 )
+
+# --- Bundles / stacks list helpers (global or per-project) ---
+
+
+def _bundle_sections_from_rows(
+    rows: list,
+) -> tuple[list[dict[str, object]], int]:
+    bundle_sections: list[dict[str, object]] = []
+    for (proj_name, proj_slug), group in groupby(
+        rows, key=lambda row: (row[1], row[2])
+    ):
+        title = proj_name if proj_name is not None else "Ungrouped"
+        bundle_sections.append(
+            {
+                "title": title,
+                "slug": proj_slug,
+                "bundles": [
+                    {"name": x[0], "secret_count": int(x[3])} for x in group
+                ],
+            }
+        )
+    return bundle_sections, len(rows)
+
+
+async def _bundles_list_rows(
+    session: AsyncSession, *, project_slug: str | None
+) -> list:
+    q = (
+        select(
+            Bundle.name,
+            BundleGroup.name,
+            BundleGroup.slug,
+            func.count(Secret.id).label("n_secrets"),
+        )
+        .select_from(Bundle)
+        .outerjoin(BundleGroup, Bundle.group_id == BundleGroup.id)
+        .outerjoin(Secret, Secret.bundle_id == Bundle.id)
+        .group_by(
+            Bundle.id,
+            Bundle.name,
+            BundleGroup.id,
+            BundleGroup.name,
+            BundleGroup.slug,
+        )
+    )
+    if project_slug is not None:
+        q = q.where(BundleGroup.slug == project_slug.strip())
+    q = q.order_by(BundleGroup.name.asc().nulls_last(), Bundle.name)
+    r = await session.execute(q)
+    return list(r.all())
+
+
+def _stack_sections_from_rows(
+    rows: list,
+) -> tuple[list[dict[str, object]], int]:
+    stack_sections: list[dict[str, object]] = []
+    for (proj_name, proj_slug), group in groupby(
+        rows, key=lambda row: (row[1], row[2])
+    ):
+        title = proj_name if proj_name is not None else "Ungrouped"
+        stack_sections.append(
+            {
+                "title": title,
+                "slug": proj_slug,
+                "stacks": [
+                    {"name": x[0], "layer_count": int(x[3])} for x in group
+                ],
+            }
+        )
+    return stack_sections, len(rows)
+
+
+async def _stacks_list_rows(
+    session: AsyncSession, *, project_slug: str | None
+) -> list:
+    q = (
+        select(
+            BundleStack.name,
+            BundleGroup.name,
+            BundleGroup.slug,
+            func.count(BundleStackLayer.id).label("n_layers"),
+        )
+        .select_from(BundleStack)
+        .outerjoin(BundleGroup, BundleStack.group_id == BundleGroup.id)
+        .outerjoin(BundleStackLayer, BundleStackLayer.stack_id == BundleStack.id)
+        .group_by(
+            BundleStack.id,
+            BundleStack.name,
+            BundleGroup.id,
+            BundleGroup.name,
+            BundleGroup.slug,
+        )
+    )
+    if project_slug is not None:
+        q = q.where(BundleGroup.slug == project_slug.strip())
+    q = q.order_by(BundleGroup.name.asc().nulls_last(), BundleStack.name)
+    r = await session.execute(q)
+    return list(r.all())
 from app.services.backup_crypto import (
     WrongPassphraseError,
     decrypt_bytes,
@@ -48,11 +149,13 @@ from app.services.bundles import (
     bulk_upsert_bundle_secrets,
     dedupe_entry_rows,
     duplicate_key_groups_from_object,
-    encode_stored_value,
+    declassify_secret_entry,
     encrypt_plain_entry,
+    upsert_bundle_secret_entry,
     extract_conflicting_secret_key_name,
     format_secrets_dotenv,
     decrypt_bundle_entry_value,
+    list_bundle_secret_key_names,
     load_bundle_entries,
     load_bundle_entries_list_masked,
     load_bundle_secrets,
@@ -60,12 +163,31 @@ from app.services.bundles import (
     parse_bundle_entries_json,
     validate_bundle_name,
 )
+from app.services.stacks import (
+    LayerSpec,
+    get_stack_by_name,
+    load_stack_secrets,
+    load_stack_secrets_through,
+    parse_layer_label_field,
+    replace_stack_layers,
+    stack_key_graph_payload_for_stack,
+    validate_stack_name,
+    validate_through_layer_position,
+)
 from app.services.env_links import new_env_link_token, token_sha256_hex
 from fastapi.templating import Jinja2Templates
 
 templates = Jinja2Templates(directory="templates")
 
 router = APIRouter()
+
+
+def _bundle_edit_redirect_after_var_change(base: str, key_name: str) -> str:
+    """Redirect target so bundle edit can scroll the affected row into view (see ?highlight=)."""
+    k = key_name.strip()
+    if not k:
+        return f"{base}/edit"
+    return f"{base}/edit?highlight={quote(k, safe='')}"
 
 
 def _bundle_web_base(project_slug: str | None, bundle_name: str) -> str:
@@ -107,6 +229,123 @@ async def _validate_bundle_ungrouped_web(session: AsyncSession, bundle_name: str
         )
 
 
+def _stack_web_base(project_slug: str | None, stack_name: str) -> str:
+    if project_slug is not None:
+        return url_path(f"/projects/{project_slug}/stacks/{stack_name}")
+    return url_path(f"/stacks/{stack_name}")
+
+
+async def _validate_stack_in_project(
+    session: AsyncSession, project_slug: str, stack_name: str
+) -> None:
+    validate_stack_name(stack_name)
+    r = await session.execute(
+        select(BundleStack.id)
+        .join(BundleGroup, BundleStack.group_id == BundleGroup.id)
+        .where(BundleStack.name == stack_name, BundleGroup.slug == project_slug.strip())
+    )
+    if r.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Stack not found in this project")
+
+
+async def _validate_stack_ungrouped_web(session: AsyncSession, stack_name: str) -> None:
+    validate_stack_name(stack_name)
+    r = await session.execute(
+        select(BundleStack).where(BundleStack.name == stack_name).options(joinedload(BundleStack.group))
+    )
+    st = r.unique().scalar_one_or_none()
+    if st is None:
+        raise HTTPException(status_code=404, detail="Stack not found")
+    if st.group_id is not None and st.group is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This stack lives under project “{st.group.name}”; "
+                f"use {url_path(f'/projects/{st.group.slug}/stacks/{stack_name}/edit')}"
+            ),
+        )
+
+
+def _stack_layers_json_for_template(st: BundleStack) -> str:
+    layers = sorted(st.layers, key=lambda L: L.position)
+    payload: list[dict[str, object]] = []
+    for layer in layers:
+        item: dict[str, object]
+        if getattr(layer, "keys_mode", "all") != "pick" or not layer.selected_keys_json:
+            item = {"bundle": layer.bundle.name, "keys": "*"}
+        else:
+            item = {"bundle": layer.bundle.name, "keys": json.loads(layer.selected_keys_json)}
+        raw_lbl = getattr(layer, "layer_label", None)
+        if isinstance(raw_lbl, str) and raw_lbl.strip():
+            item["label"] = raw_lbl.strip()
+        payload.append(item)
+    return json.dumps(payload)
+
+
+async def _bundles_by_project_slug_map(session: AsyncSession) -> dict[str, list[str]]:
+    r = await session.execute(
+        select(BundleGroup.slug, Bundle.name)
+        .select_from(Bundle)
+        .join(BundleGroup, Bundle.group_id == BundleGroup.id)
+        .order_by(BundleGroup.slug, Bundle.name)
+    )
+    by_slug: dict[str, list[str]] = {}
+    for slug, bname in r.all():
+        by_slug.setdefault(slug, []).append(bname)
+    return by_slug
+
+
+async def _bundle_names_in_project(session: AsyncSession, group_id: int) -> list[str]:
+    r = await session.execute(select(Bundle.name).where(Bundle.group_id == group_id).order_by(Bundle.name))
+    return [row[0] for row in r.all()]
+
+
+async def _all_bundle_names(session: AsyncSession) -> list[str]:
+    r = await session.execute(select(Bundle.name).order_by(Bundle.name))
+    return [row[0] for row in r.all()]
+
+
+def _parse_stack_layers_json(raw: str) -> list[LayerSpec]:
+    raw = (raw or "").strip()
+    if not raw:
+        raise ValueError("Configure at least one layer")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid layers JSON: {e}") from None
+    if not isinstance(data, list) or len(data) == 0:
+        raise ValueError("Add at least one layer")
+    out: list[LayerSpec] = []
+    for item in data:
+        if isinstance(item, str):
+            bn = item.strip()
+            if not bn:
+                continue
+            validate_bundle_name(bn)
+            out.append(LayerSpec(bn, None, None))
+            continue
+        if not isinstance(item, dict):
+            raise ValueError("Each layer must be an object or string")
+        bn = str(item.get("bundle", "")).strip()
+        if not bn:
+            raise ValueError("Each layer needs a bundle name")
+        validate_bundle_name(bn)
+        lbl = parse_layer_label_field(item.get("label"))
+        keys = item.get("keys", "*")
+        if keys in ("*", "all"):
+            out.append(LayerSpec(bn, None, lbl))
+        elif isinstance(keys, list):
+            kl = [str(k).strip() for k in keys if str(k).strip()]
+            if not kl:
+                raise ValueError("Select at least one variable or choose all keys")
+            out.append(LayerSpec(bn, kl, lbl))
+        else:
+            raise ValueError('layer "keys" must be "*" or a list of key names')
+    if not out:
+        raise ValueError("Add at least one layer")
+    return out
+
+
 async def _bundle_edit_template(
     request: Request,
     session: AsyncSession,
@@ -114,6 +353,7 @@ async def _bundle_edit_template(
     key: str | None,
     bundle_route_base: str,
     project_slug: str | None,
+    highlight: str | None = None,
 ) -> HTMLResponse:
     try:
         _bundle, entries = await load_bundle_entries_list_masked(session, name)
@@ -128,9 +368,12 @@ async def _bundle_edit_template(
     items = sorted(entries.items(), key=lambda x: x[0])
     editing: dict[str, object] | None = None
     edit_error: str | None = None
+    highlight_key: str | None = None
+    flash_err = request.session.pop("bundle_edit_error", None)
     if key is not None and key.strip():
         kn = key.strip()
         if kn in entries:
+            highlight_key = kn
             _list_val, is_sec = entries[kn]
             if is_sec:
                 try:
@@ -144,8 +387,16 @@ async def _bundle_edit_template(
                     editing = {"key": kn, "value": plain, "is_secret": True}
             else:
                 editing = {"key": kn, "value": _list_val or "", "is_secret": False}
+            if flash_err:
+                edit_error = flash_err
         else:
             edit_error = "No entry with that key."
+    elif highlight is not None and highlight.strip():
+        hn = highlight.strip()
+        if hn in entries:
+            highlight_key = hn
+    if edit_error is None and flash_err:
+        edit_error = flash_err
     return templates.TemplateResponse(
         "bundle_edit.html",
         {
@@ -156,6 +407,7 @@ async def _bundle_edit_template(
             "secrets": [(k, v[0], v[1]) for k, v in items],
             "editing": editing,
             "edit_error": edit_error,
+            "highlight_key": highlight_key,
             "csrf_token": _csrf_token(request),
             "secret_values_json_url": f"{bundle_route_base}/secret-values",
             "bundle_subnav_active": "variables",
@@ -373,6 +625,8 @@ async def _keys_template_context(
     projects_for_scopes = [{"slug": row.slug, "name": row.name} for row in pr.all()]
     br = await session.execute(select(Bundle.name).order_by(Bundle.name))
     bundles_for_scopes = [row[0] for row in br.all()]
+    sr = await session.execute(select(BundleStack.name).order_by(BundleStack.name))
+    stacks_for_scopes = [row[0] for row in sr.all()]
     return {
         "request": request,
         "keys": keys,
@@ -382,6 +636,7 @@ async def _keys_template_context(
         "scopes_json_value": scopes_json_value,
         "projects_for_scopes": projects_for_scopes,
         "bundles_for_scopes": bundles_for_scopes,
+        "stacks_for_scopes": stacks_for_scopes,
     }
 
 
@@ -409,6 +664,18 @@ def _absolute_base(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
+def _form_through_layer_position(raw: str | None) -> int | None:
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    try:
+        return int(s)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid through_layer_position")
+
+
 @router.get("/env/{env_token}")
 @limiter.limit("60/minute")
 async def download_env_by_secret_token(
@@ -417,7 +684,7 @@ async def download_env_by_secret_token(
     format: Literal["dotenv", "json"] = Query("dotenv"),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Public download: only the random token identifies the bundle (project/name not in URL)."""
+    """Public download: token maps to a bundle export or merged stack export (no names in URL)."""
     raw = (env_token or "").strip()
     if len(raw) < 16 or len(raw) > 256:
         raise HTTPException(status_code=404, detail="Not found")
@@ -428,10 +695,27 @@ async def download_env_by_secret_token(
         .where(BundleEnvLink.token_sha256 == digest)
     )
     row = r.one_or_none()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Not found")
-    _link, bundle = row
-    _, secrets_map = await load_bundle_secrets(session, bundle.name)
+    if row is not None:
+        _link, bundle = row
+        _, secrets_map = await load_bundle_secrets(session, bundle.name)
+    else:
+        rs = await session.execute(
+            select(StackEnvLink, BundleStack)
+            .join(BundleStack, StackEnvLink.stack_id == BundleStack.id)
+            .where(StackEnvLink.token_sha256 == digest)
+        )
+        row2 = rs.one_or_none()
+        if row2 is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        slink, stack = row2
+        stack = await get_stack_by_name(session, stack.name)
+        assert stack is not None
+        if slink.through_layer_position is not None:
+            secrets_map = await load_stack_secrets_through(
+                session, stack, slink.through_layer_position
+            )
+        else:
+            secrets_map = await load_stack_secrets(session, stack)
     if format == "json":
         body = json.dumps(secrets_map, sort_keys=True, indent=2) + "\n"
         return Response(
@@ -447,16 +731,50 @@ async def download_env_by_secret_token(
     )
 
 
+def _help_ctx(request: Request, section: str) -> dict:
+    return {"request": request, "help_section": section}
+
+
 @router.get("/help", response_class=HTMLResponse, response_model=None)
-async def help_page(request: Request) -> HTMLResponse:
-    """Public usage and Terraform state documentation."""
-    return templates.TemplateResponse("help.html", {"request": request})
+async def help_index(request: Request) -> HTMLResponse:
+    """Public documentation overview."""
+    return templates.TemplateResponse("help_index.html", _help_ctx(request, "index"))
+
+
+@router.get("/help/web-ui", response_class=HTMLResponse, response_model=None)
+async def help_web_ui(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("help_web_ui.html", _help_ctx(request, "web-ui"))
+
+
+@router.get("/help/api", response_class=HTMLResponse, response_model=None)
+async def help_api(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("help_api.html", _help_ctx(request, "api"))
+
+
+@router.get("/help/certificates", response_class=HTMLResponse, response_model=None)
+async def help_certificates(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("help_certificates.html", _help_ctx(request, "certificates"))
+
+
+@router.get("/help/terraform", response_class=HTMLResponse, response_model=None)
+async def help_terraform(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("help_terraform.html", _help_ctx(request, "terraform"))
+
+
+@router.get("/help/pulumi", response_class=HTMLResponse, response_model=None)
+async def help_pulumi(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("help_pulumi.html", _help_ctx(request, "pulumi"))
+
+
+@router.get("/help/backup", response_class=HTMLResponse, response_model=None)
+async def help_backup(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("help_backup.html", _help_ctx(request, "backup"))
 
 
 @router.get("/login", response_class=HTMLResponse, response_model=None)
 async def login_get(request: Request) -> HTMLResponse:
     if request.session.get("admin"):
-        return RedirectResponse(url_path("/bundles"), status_code=HTTP_302_FOUND)
+        return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
     return templates.TemplateResponse(
         "login.html",
         {"request": request, "csrf_token": _csrf_token(request), "error": None},
@@ -491,7 +809,7 @@ async def login_post(
         ):
             request.session["admin"] = True
             request.session.pop("csrf", None)
-            return RedirectResponse(url_path("/bundles"), status_code=HTTP_302_FOUND)
+            return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
     return templates.TemplateResponse(
         "login.html",
         {
@@ -513,61 +831,913 @@ async def logout(request: Request, csrf: Annotated[str, Form()]) -> RedirectResp
 @router.get("/", response_class=HTMLResponse, response_model=None)
 async def root(request: Request) -> RedirectResponse:
     if request.session.get("admin"):
-        return RedirectResponse(url_path("/bundles"), status_code=HTTP_302_FOUND)
+        return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
     return RedirectResponse(url_path("/login"), status_code=HTTP_302_FOUND)
 
 
-@router.get("/bundles", response_class=HTMLResponse, response_model=None)
-async def bundles_list(
+@router.get("/bundles", response_model=None)
+async def bundles_list_gone(request: Request) -> RedirectResponse:
+    """Global bundle list removed; open a project from /projects."""
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
+
+
+@router.get(
+    "/projects/{project_slug}/bundles",
+    response_class=HTMLResponse,
+    response_model=None,
+)
+async def bundles_list_in_project(
     request: Request,
+    project_slug: str,
     session: AsyncSession = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
     if (redir := _require_web_admin(request)) is not None:
         return redir
-    r = await session.execute(
-        select(
-            Bundle.name,
-            BundleGroup.name,
-            BundleGroup.slug,
-            func.count(Secret.id).label("n_secrets"),
-        )
-        .select_from(Bundle)
-        .outerjoin(BundleGroup, Bundle.group_id == BundleGroup.id)
-        .outerjoin(Secret, Secret.bundle_id == Bundle.id)
-        .group_by(
-            Bundle.id,
-            Bundle.name,
-            BundleGroup.id,
-            BundleGroup.name,
-            BundleGroup.slug,
-        )
-        .order_by(BundleGroup.name.asc().nulls_last(), Bundle.name)
-    )
-    rows = list(r.all())
-    bundle_sections: list[dict[str, object]] = []
-    for (proj_name, proj_slug), group in groupby(
-        rows, key=lambda row: (row[1], row[2])
-    ):
-        title = proj_name if proj_name is not None else "Ungrouped"
-        bundle_sections.append(
-            {
-                "title": title,
-                "slug": proj_slug,
-                "bundles": [
-                    {"name": x[0], "secret_count": int(x[3])} for x in group
-                ],
-            }
-        )
-    total_bundles = len(rows)
+    g = await get_project_by_slug_or_404(session, project_slug)
+    rows = await _bundles_list_rows(session, project_slug=project_slug)
+    bundle_sections, total_bundles = _bundle_sections_from_rows(rows)
     return templates.TemplateResponse(
         "bundles_list.html",
         {
             "request": request,
             "bundle_sections": bundle_sections,
             "total_bundles": total_bundles,
+            "list_project_slug": project_slug.strip(),
+            "list_project_name": g.name,
             "csrf_token": _csrf_token(request),
         },
     )
+
+
+@router.get("/stacks", response_model=None)
+async def stacks_list_gone(request: Request) -> RedirectResponse:
+    """Global stack list removed; open a project from /projects."""
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
+
+
+@router.get(
+    "/projects/{project_slug}/stacks",
+    response_class=HTMLResponse,
+    response_model=None,
+)
+async def stacks_list_in_project(
+    request: Request,
+    project_slug: str,
+    session: AsyncSession = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    g = await get_project_by_slug_or_404(session, project_slug)
+    rows = await _stacks_list_rows(session, project_slug=project_slug)
+    stack_sections, total_stacks = _stack_sections_from_rows(rows)
+    return templates.TemplateResponse(
+        "stacks_list.html",
+        {
+            "request": request,
+            "stack_sections": stack_sections,
+            "total_stacks": total_stacks,
+            "list_project_slug": project_slug.strip(),
+            "list_project_name": g.name,
+            "csrf_token": _csrf_token(request),
+        },
+    )
+
+
+@router.get("/stacks/new", response_class=HTMLResponse, response_model=None)
+async def stack_new_get(
+    request: Request, session: AsyncSession = Depends(get_db)
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    projects = await _projects_for_select(session)
+    bundles_map = await _bundles_by_project_slug_map(session)
+    return templates.TemplateResponse(
+        "stack_new.html",
+        {
+            "request": request,
+            "csrf_token": _csrf_token(request),
+            "error": None,
+            "projects": projects,
+            "bundles_by_project_json": json.dumps(bundles_map),
+        },
+    )
+
+
+@router.post("/stacks/new", response_model=None)
+async def stack_new_post(
+    request: Request,
+    name: Annotated[str, Form()],
+    csrf: Annotated[str, Form()],
+    layers_json: Annotated[str, Form()] = "",
+    project_slug: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse | HTMLResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    projects = await _projects_for_select(session)
+    bundles_map = await _bundles_by_project_slug_map(session)
+    bundles_by_project_json = json.dumps(bundles_map)
+    name = name.strip()
+    if not projects:
+        return templates.TemplateResponse(
+            "stack_new.html",
+            {
+                "request": request,
+                "csrf_token": _csrf_token(request),
+                "error": "Create a project first, then add a stack.",
+                "projects": projects,
+                "bundles_by_project_json": bundles_by_project_json,
+            },
+            status_code=400,
+        )
+    slug_in = (project_slug or "").strip()
+    if not slug_in:
+        return templates.TemplateResponse(
+            "stack_new.html",
+            {
+                "request": request,
+                "csrf_token": _csrf_token(request),
+                "error": "Select a project for this stack.",
+                "projects": projects,
+                "bundles_by_project_json": bundles_by_project_json,
+            },
+            status_code=400,
+        )
+    try:
+        g = await get_project_by_slug_or_404(session, slug_in)
+    except HTTPException as e:
+        return templates.TemplateResponse(
+            "stack_new.html",
+            {
+                "request": request,
+                "csrf_token": _csrf_token(request),
+                "error": e.detail,
+                "projects": projects,
+                "bundles_by_project_json": bundles_by_project_json,
+            },
+            status_code=e.status_code,
+        )
+    try:
+        validate_stack_name(name)
+    except HTTPException as e:
+        return templates.TemplateResponse(
+            "stack_new.html",
+            {
+                "request": request,
+                "csrf_token": _csrf_token(request),
+                "error": e.detail,
+                "projects": projects,
+                "bundles_by_project_json": bundles_by_project_json,
+            },
+            status_code=400,
+        )
+    existing = await session.execute(select(BundleStack.id).where(BundleStack.name == name))
+    if existing.scalar_one_or_none() is not None:
+        return templates.TemplateResponse(
+            "stack_new.html",
+            {
+                "request": request,
+                "csrf_token": _csrf_token(request),
+                "error": "Stack already exists",
+                "projects": projects,
+                "bundles_by_project_json": bundles_by_project_json,
+            },
+            status_code=409,
+        )
+    try:
+        layer_specs = _parse_stack_layers_json(layers_json)
+    except ValueError as e:
+        return templates.TemplateResponse(
+            "stack_new.html",
+            {
+                "request": request,
+                "csrf_token": _csrf_token(request),
+                "error": str(e),
+                "projects": projects,
+                "bundles_by_project_json": bundles_by_project_json,
+            },
+            status_code=400,
+        )
+    st = BundleStack(name=name, group_id=g.id)
+    session.add(st)
+    await session.flush()
+    try:
+        await replace_stack_layers(session, st.id, layer_specs)
+    except HTTPException as e:
+        await session.rollback()
+        return templates.TemplateResponse(
+            "stack_new.html",
+            {
+                "request": request,
+                "csrf_token": _csrf_token(request),
+                "error": e.detail,
+                "projects": projects,
+                "bundles_by_project_json": bundles_by_project_json,
+            },
+            status_code=e.status_code,
+        )
+    await session.commit()
+    return RedirectResponse(
+        url_path(f"/projects/{g.slug}/stacks/{name}/edit"),
+        status_code=HTTP_302_FOUND,
+    )
+
+
+@router.get("/projects/{project_slug}/stacks/{name}", response_model=None)
+async def stack_in_project_short_url(
+    request: Request,
+    project_slug: str,
+    name: str,
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    return RedirectResponse(
+        url_path(f"/projects/{project_slug}/stacks/{name}/edit"),
+        status_code=HTTP_302_FOUND,
+    )
+
+
+@router.get(
+    "/projects/{project_slug}/stacks/{name}/edit",
+    response_class=HTMLResponse,
+    response_model=None,
+)
+async def stack_edit_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    await _validate_stack_in_project(session, project_slug, name)
+    base = _stack_web_base(project_slug, name)
+    return await _stack_edit_template(request, session, name, base, project_slug)
+
+
+@router.get("/stacks/{name}/edit", response_class=HTMLResponse, response_model=None)
+async def stack_edit_legacy(
+    request: Request,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    validate_stack_name(name)
+    r = await session.execute(
+        select(BundleStack).where(BundleStack.name == name).options(joinedload(BundleStack.group))
+    )
+    st = r.unique().scalar_one_or_none()
+    if st is None:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "message": "Stack not found"},
+            status_code=404,
+        )
+    if st.group_id and st.group:
+        return RedirectResponse(
+            url_path(f"/projects/{st.group.slug}/stacks/{name}/edit"),
+            status_code=HTTP_302_FOUND,
+        )
+    base = _stack_web_base(None, name)
+    return await _stack_edit_template(request, session, name, base, None)
+
+
+async def _stack_edit_template(
+    request: Request,
+    session: AsyncSession,
+    name: str,
+    stack_route_base: str,
+    project_slug: str | None,
+    *,
+    layers_json_override: str | None = None,
+    error: str | None = None,
+) -> HTMLResponse:
+    st = await get_stack_by_name(session, name)
+    if st is None:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "message": "Stack not found"},
+            status_code=404,
+        )
+    if st.group_id is not None:
+        bundles = await _bundle_names_in_project(session, st.group_id)
+    else:
+        bundles = await _all_bundle_names(session)
+    layers_json = (
+        layers_json_override
+        if layers_json_override is not None
+        else _stack_layers_json_for_template(st)
+    )
+    return templates.TemplateResponse(
+        "stack_edit.html",
+        {
+            "request": request,
+            "stack_name": name,
+            "stack_route_base": stack_route_base,
+            "project_slug": project_slug or "",
+            "layers_json": layers_json,
+            "bundles_json": json.dumps(bundles),
+            "csrf_token": _csrf_token(request),
+            "stack_subnav_active": "layers",
+            "error": error,
+        },
+        status_code=400 if error else 200,
+    )
+
+
+@router.post("/projects/{project_slug}/stacks/{name}/edit", response_model=None)
+async def stack_edit_post_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    csrf: Annotated[str, Form()],
+    layers_json: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse | HTMLResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_stack_in_project(session, project_slug, name)
+    st = await get_stack_by_name(session, name)
+    assert st is not None
+    base = _stack_web_base(project_slug, name)
+    try:
+        layer_specs = _parse_stack_layers_json(layers_json)
+    except ValueError as e:
+        return await _stack_edit_template(
+            request,
+            session,
+            name,
+            base,
+            project_slug,
+            layers_json_override=layers_json,
+            error=str(e),
+        )
+    try:
+        await replace_stack_layers(session, st.id, layer_specs)
+    except HTTPException as e:
+        return await _stack_edit_template(
+            request,
+            session,
+            name,
+            base,
+            project_slug,
+            layers_json_override=layers_json,
+            error=str(e.detail),
+        )
+    await session.commit()
+    return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
+
+
+@router.post("/stacks/{name}/edit", response_model=None)
+async def stack_edit_post_legacy(
+    request: Request,
+    name: str,
+    csrf: Annotated[str, Form()],
+    layers_json: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse | HTMLResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_stack_ungrouped_web(session, name)
+    st = await get_stack_by_name(session, name)
+    assert st is not None
+    base = _stack_web_base(None, name)
+    try:
+        layer_specs = _parse_stack_layers_json(layers_json)
+    except ValueError as e:
+        return await _stack_edit_template(
+            request,
+            session,
+            name,
+            base,
+            None,
+            layers_json_override=layers_json,
+            error=str(e),
+        )
+    try:
+        await replace_stack_layers(session, st.id, layer_specs)
+    except HTTPException as e:
+        return await _stack_edit_template(
+            request,
+            session,
+            name,
+            base,
+            None,
+            layers_json_override=layers_json,
+            error=str(e.detail),
+        )
+    await session.commit()
+    return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
+
+
+@router.post("/projects/{project_slug}/stacks/{name}/rename", response_model=None)
+async def stack_rename_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    csrf: Annotated[str, Form()],
+    new_name: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse | HTMLResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_stack_in_project(session, project_slug, name)
+    st = await get_stack_by_name(session, name)
+    assert st is not None
+    base = _stack_web_base(project_slug, name)
+    raw = (new_name or "").strip()
+    if not raw:
+        return await _stack_edit_template(
+            request,
+            session,
+            name,
+            base,
+            project_slug,
+            error="Stack name is required",
+        )
+    try:
+        validate_stack_name(raw)
+    except HTTPException as e:
+        return await _stack_edit_template(
+            request,
+            session,
+            name,
+            base,
+            project_slug,
+            error=str(e.detail),
+        )
+    if raw == name:
+        return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
+    dup = await session.execute(select(BundleStack.id).where(BundleStack.name == raw))
+    if dup.scalar_one_or_none() is not None:
+        return await _stack_edit_template(
+            request,
+            session,
+            name,
+            base,
+            project_slug,
+            error="A stack with that name already exists",
+        )
+    st.name = raw
+    await session.commit()
+    new_base = _stack_web_base(project_slug, raw)
+    return RedirectResponse(f"{new_base}/edit", status_code=HTTP_302_FOUND)
+
+
+@router.post("/stacks/{name}/rename", response_model=None)
+async def stack_rename_legacy(
+    request: Request,
+    name: str,
+    csrf: Annotated[str, Form()],
+    new_name: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse | HTMLResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_stack_ungrouped_web(session, name)
+    st = await get_stack_by_name(session, name)
+    assert st is not None
+    base = _stack_web_base(None, name)
+    raw = (new_name or "").strip()
+    if not raw:
+        return await _stack_edit_template(
+            request,
+            session,
+            name,
+            base,
+            None,
+            error="Stack name is required",
+        )
+    try:
+        validate_stack_name(raw)
+    except HTTPException as e:
+        return await _stack_edit_template(
+            request,
+            session,
+            name,
+            base,
+            None,
+            error=str(e.detail),
+        )
+    if raw == name:
+        return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
+    dup = await session.execute(select(BundleStack.id).where(BundleStack.name == raw))
+    if dup.scalar_one_or_none() is not None:
+        return await _stack_edit_template(
+            request,
+            session,
+            name,
+            base,
+            None,
+            error="A stack with that name already exists",
+        )
+    st.name = raw
+    await session.commit()
+    new_base = _stack_web_base(None, raw)
+    return RedirectResponse(f"{new_base}/edit", status_code=HTTP_302_FOUND)
+
+
+@router.post("/projects/{project_slug}/stacks/{name}/delete", response_model=None)
+async def stack_delete_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_stack_in_project(session, project_slug, name)
+    validate_stack_name(name)
+    await session.execute(delete(BundleStack).where(BundleStack.name == name))
+    await session.commit()
+    return RedirectResponse(
+        url_path(f"/projects/{project_slug.strip()}/stacks"), status_code=HTTP_302_FOUND
+    )
+
+
+@router.post("/stacks/{name}/delete", response_model=None)
+async def stack_delete_legacy(
+    request: Request,
+    name: str,
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_stack_ungrouped_web(session, name)
+    validate_stack_name(name)
+    await session.execute(delete(BundleStack).where(BundleStack.name == name))
+    await session.commit()
+    return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
+
+
+@router.get("/projects/{project_slug}/bundles/{name}/variable-key-names", response_model=None)
+async def web_bundle_variable_key_names_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    if request.session.get("admin") is not True:
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    await _validate_bundle_in_project(session, project_slug, name)
+    keys = await list_bundle_secret_key_names(session, name)
+    return JSONResponse({"keys": keys})
+
+
+@router.get("/bundles/{name}/variable-key-names", response_model=None)
+async def web_bundle_variable_key_names_legacy(
+    request: Request,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    if request.session.get("admin") is not True:
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    await _validate_bundle_ungrouped_web(session, name)
+    keys = await list_bundle_secret_key_names(session, name)
+    return JSONResponse({"keys": keys})
+
+
+async def _stack_env_links_template(
+    request: Request,
+    session: AsyncSession,
+    name: str,
+    stack_route_base: str,
+    project_slug: str | None,
+    *,
+    new_env_url: str | None = None,
+) -> HTMLResponse:
+    st = await get_stack_by_name(session, name)
+    if st is None:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "message": "Stack not found"},
+            status_code=404,
+        )
+    layers_sorted = sorted(st.layers, key=lambda L: L.position)
+    pos_to_bundle = {L.position: L.bundle.name for L in layers_sorted}
+    stack_layers = [
+        {"position": L.position, "bundle_name": L.bundle.name} for L in layers_sorted
+    ]
+    lr = await session.execute(
+        select(
+            StackEnvLink.id,
+            StackEnvLink.created_at,
+            StackEnvLink.through_layer_position,
+        )
+        .where(StackEnvLink.stack_id == st.id)
+        .order_by(StackEnvLink.created_at.desc())
+    )
+    links = []
+    for row in lr.all():
+        tpl = row.through_layer_position
+        slice_label = pos_to_bundle.get(tpl) if tpl is not None else None
+        links.append(
+            {
+                "id": row.id,
+                "created_at": row.created_at,
+                "through_layer_position": tpl,
+                "slice_label": slice_label,
+            }
+        )
+    flash = new_env_url or request.session.pop("flash_stack_env_link_url", None)
+    return templates.TemplateResponse(
+        "stack_env_links.html",
+        {
+            "request": request,
+            "stack_name": name,
+            "stack_route_base": stack_route_base,
+            "project_slug": project_slug,
+            "csrf_token": _csrf_token(request),
+            "env_links": links,
+            "stack_layers": stack_layers,
+            "new_env_url": flash,
+            "stack_subnav_active": "env-links",
+        },
+    )
+
+
+@router.get(
+    "/projects/{project_slug}/stacks/{name}/env-links",
+    response_class=HTMLResponse,
+    response_model=None,
+)
+async def stack_env_links_page_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    await _validate_stack_in_project(session, project_slug, name)
+    base = _stack_web_base(project_slug, name)
+    flash_url = request.session.pop("flash_stack_env_link_url", None)
+    return await _stack_env_links_template(
+        request,
+        session,
+        name,
+        base,
+        project_slug,
+        new_env_url=flash_url,
+    )
+
+
+async def _stack_key_graph_template(
+    request: Request,
+    session: AsyncSession,
+    name: str,
+    stack_route_base: str,
+    project_slug: str | None,
+) -> HTMLResponse:
+    st = await get_stack_by_name(session, name)
+    if st is None:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "message": "Stack not found"},
+            status_code=404,
+        )
+    return templates.TemplateResponse(
+        "stack_key_graph.html",
+        {
+            "request": request,
+            "stack_name": name,
+            "stack_route_base": stack_route_base,
+            "project_slug": project_slug or "",
+            "csrf_token": _csrf_token(request),
+            "stack_subnav_active": "key-graph",
+        },
+    )
+
+
+@router.get(
+    "/projects/{project_slug}/stacks/{name}/key-graph",
+    response_class=HTMLResponse,
+    response_model=None,
+)
+async def stack_key_graph_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    await _validate_stack_in_project(session, project_slug, name)
+    base = _stack_web_base(project_slug, name)
+    return await _stack_key_graph_template(
+        request, session, name, base, project_slug
+    )
+
+
+@router.get("/stacks/{name}/key-graph", response_class=HTMLResponse, response_model=None)
+async def stack_key_graph_legacy(
+    request: Request,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    validate_stack_name(name)
+    r = await session.execute(
+        select(BundleStack).where(BundleStack.name == name).options(joinedload(BundleStack.group))
+    )
+    st = r.unique().scalar_one_or_none()
+    if st is None:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "message": "Stack not found"},
+            status_code=404,
+        )
+    if st.group_id and st.group:
+        return RedirectResponse(
+            url_path(f"/projects/{st.group.slug}/stacks/{name}/key-graph"),
+            status_code=HTTP_302_FOUND,
+        )
+    base = _stack_web_base(None, name)
+    return await _stack_key_graph_template(request, session, name, base, None)
+
+
+@router.get(
+    "/projects/{project_slug}/stacks/{name}/key-graph/data",
+    response_model=None,
+)
+async def stack_key_graph_data_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    if request.session.get("admin") is not True:
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    await _validate_stack_in_project(session, project_slug, name)
+    st = await get_stack_by_name(session, name)
+    if st is None:
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+    payload = await stack_key_graph_payload_for_stack(session, st)
+    return JSONResponse(payload)
+
+
+@router.get("/stacks/{name}/key-graph/data", response_model=None)
+async def stack_key_graph_data_legacy(
+    request: Request,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    if request.session.get("admin") is not True:
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    await _validate_stack_ungrouped_web(session, name)
+    st = await get_stack_by_name(session, name)
+    if st is None:
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+    payload = await stack_key_graph_payload_for_stack(session, st)
+    return JSONResponse(payload)
+
+
+@router.get("/stacks/{name}/env-links", response_class=HTMLResponse, response_model=None)
+async def stack_env_links_page_legacy(
+    request: Request,
+    name: str,
+    session: AsyncSession = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    validate_stack_name(name)
+    r = await session.execute(
+        select(BundleStack).where(BundleStack.name == name).options(joinedload(BundleStack.group))
+    )
+    st = r.unique().scalar_one_or_none()
+    if st is None:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "message": "Stack not found"},
+            status_code=404,
+        )
+    if st.group_id and st.group:
+        return RedirectResponse(
+            url_path(f"/projects/{st.group.slug}/stacks/{name}/env-links"),
+            status_code=HTTP_302_FOUND,
+        )
+    base = _stack_web_base(None, name)
+    flash_url = request.session.pop("flash_stack_env_link_url", None)
+    return await _stack_env_links_template(
+        request, session, name, base, None, new_env_url=flash_url
+    )
+
+
+@router.post("/projects/{project_slug}/stacks/{name}/env-links", response_model=None)
+async def stack_env_link_create_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+    through_layer_position: Annotated[str | None, Form()] = None,
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_stack_in_project(session, project_slug, name)
+    st = await get_stack_by_name(session, name)
+    assert st is not None
+    tpl = validate_through_layer_position(st, _form_through_layer_position(through_layer_position))
+    raw, digest = new_env_link_token()
+    session.add(
+        StackEnvLink(stack_id=st.id, token_sha256=digest, through_layer_position=tpl)
+    )
+    await session.commit()
+    request.session["flash_stack_env_link_url"] = f"{_absolute_base(request)}/env/{raw}"
+    base = _stack_web_base(project_slug, name)
+    return RedirectResponse(f"{base}/env-links", status_code=HTTP_302_FOUND)
+
+
+@router.post("/stacks/{name}/env-links", response_model=None)
+async def stack_env_link_create_legacy(
+    request: Request,
+    name: str,
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+    through_layer_position: Annotated[str | None, Form()] = None,
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_stack_ungrouped_web(session, name)
+    st = await get_stack_by_name(session, name)
+    assert st is not None
+    tpl = validate_through_layer_position(st, _form_through_layer_position(through_layer_position))
+    raw, digest = new_env_link_token()
+    session.add(
+        StackEnvLink(stack_id=st.id, token_sha256=digest, through_layer_position=tpl)
+    )
+    await session.commit()
+    request.session["flash_stack_env_link_url"] = f"{_absolute_base(request)}/env/{raw}"
+    base = _stack_web_base(None, name)
+    return RedirectResponse(f"{base}/env-links", status_code=HTTP_302_FOUND)
+
+
+@router.post("/projects/{project_slug}/stacks/{name}/env-links/{link_id}/delete", response_model=None)
+async def stack_env_link_delete_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    link_id: int,
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_stack_in_project(session, project_slug, name)
+    st = await get_stack_by_name(session, name)
+    assert st is not None
+    await session.execute(
+        delete(StackEnvLink).where(
+            StackEnvLink.id == link_id,
+            StackEnvLink.stack_id == st.id,
+        )
+    )
+    await session.commit()
+    base = _stack_web_base(project_slug, name)
+    return RedirectResponse(f"{base}/env-links", status_code=HTTP_302_FOUND)
+
+
+@router.post("/stacks/{name}/env-links/{link_id}/delete", response_model=None)
+async def stack_env_link_delete_legacy(
+    request: Request,
+    name: str,
+    link_id: int,
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_stack_ungrouped_web(session, name)
+    st = await get_stack_by_name(session, name)
+    assert st is not None
+    await session.execute(
+        delete(StackEnvLink).where(
+            StackEnvLink.id == link_id,
+            StackEnvLink.stack_id == st.id,
+        )
+    )
+    await session.commit()
+    base = _stack_web_base(None, name)
+    return RedirectResponse(f"{base}/env-links", status_code=HTTP_302_FOUND)
 
 
 @router.get("/bundles/new", response_class=HTMLResponse, response_model=None)
@@ -763,6 +1933,7 @@ async def bundle_edit_in_project(
     project_slug: str,
     name: str,
     key: Annotated[str | None, Query()] = None,
+    highlight: Annotated[str | None, Query()] = None,
     session: AsyncSession = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
     if (redir := _require_web_admin(request)) is not None:
@@ -776,6 +1947,7 @@ async def bundle_edit_in_project(
         key,
         base,
         project_slug,
+        highlight,
     )
 
 
@@ -810,6 +1982,7 @@ async def bundle_edit_legacy(
     request: Request,
     name: str,
     key: Annotated[str | None, Query()] = None,
+    highlight: Annotated[str | None, Query()] = None,
     session: AsyncSession = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
     """Ungrouped bundles only; grouped bundles redirect to /projects/{slug}/bundles/.../edit."""
@@ -827,13 +2000,13 @@ async def bundle_edit_legacy(
             status_code=404,
         )
     if b.group_id and b.group:
-        return RedirectResponse(
-            url_path(f"/projects/{b.group.slug}/bundles/{name}/edit"),
-            status_code=HTTP_302_FOUND,
-        )
+        dest = url_path(f"/projects/{b.group.slug}/bundles/{name}/edit")
+        if request.url.query:
+            dest = f"{dest}?{request.url.query}"
+        return RedirectResponse(dest, status_code=HTTP_302_FOUND)
     base = _bundle_web_base(None, name)
     return await _bundle_edit_template(
-        request, session, name, key, base, None
+        request, session, name, key, base, None, highlight
     )
 
 
@@ -917,6 +2090,7 @@ async def bundle_secret_add_in_project(
     value: Annotated[str, Form()],
     csrf: Annotated[str, Form()],
     is_secret: Annotated[str, Form()] = "1",
+    previous_key_name: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     if (redir := _require_web_admin(request)) is not None:
@@ -924,31 +2098,38 @@ async def bundle_secret_add_in_project(
     _check_csrf(request, csrf)
     await _validate_bundle_in_project(session, project_slug, name)
     bundle, _ = await load_bundle_entries(session, name)
-    key_name = key_name.strip()
     base = _bundle_web_base(project_slug, name)
-    if not key_name:
-        return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
     secret_flag = is_secret not in ("0", "false", "False")
-    fernet = get_fernet()
-    stored = encode_stored_value(fernet, value, secret_flag)
-    r = await session.execute(
-        select(Secret).where(Secret.bundle_id == bundle.id, Secret.key_name == key_name)
-    )
-    row = r.scalar_one_or_none()
-    if row:
-        row.value_ciphertext = stored
-        row.is_secret = secret_flag
-    else:
-        session.add(
-            Secret(
-                bundle_id=bundle.id,
-                key_name=key_name,
-                value_ciphertext=stored,
-                is_secret=secret_flag,
-            )
+    prev = previous_key_name.strip()
+    try:
+        nk = await upsert_bundle_secret_entry(
+            session,
+            bundle.id,
+            key_name_input=key_name,
+            value=value,
+            is_secret=secret_flag,
+            previous_key_name=previous_key_name or None,
         )
-    await session.commit()
-    return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
+        await session.commit()
+        return RedirectResponse(
+            _bundle_edit_redirect_after_var_change(base, nk), status_code=HTTP_302_FOUND
+        )
+    except ValueError as err:
+        await session.rollback()
+        request.session["bundle_edit_error"] = str(err)
+        if prev:
+            return RedirectResponse(
+                f"{base}/edit?key={quote(prev, safe='')}", status_code=HTTP_302_FOUND
+            )
+        return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
+    except IntegrityError:
+        await session.rollback()
+        request.session["bundle_edit_error"] = "Another variable already uses that name."
+        if prev:
+            return RedirectResponse(
+                f"{base}/edit?key={quote(prev, safe='')}", status_code=HTTP_302_FOUND
+            )
+        return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
 
 
 @router.post("/bundles/{name}/secrets/add", response_model=None)
@@ -959,6 +2140,7 @@ async def bundle_secret_add_legacy(
     value: Annotated[str, Form()],
     csrf: Annotated[str, Form()],
     is_secret: Annotated[str, Form()] = "1",
+    previous_key_name: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     if (redir := _require_web_admin(request)) is not None:
@@ -966,31 +2148,38 @@ async def bundle_secret_add_legacy(
     _check_csrf(request, csrf)
     await _validate_bundle_ungrouped_web(session, name)
     bundle, _ = await load_bundle_entries(session, name)
-    key_name = key_name.strip()
     base = _bundle_web_base(None, name)
-    if not key_name:
-        return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
     secret_flag = is_secret not in ("0", "false", "False")
-    fernet = get_fernet()
-    stored = encode_stored_value(fernet, value, secret_flag)
-    r = await session.execute(
-        select(Secret).where(Secret.bundle_id == bundle.id, Secret.key_name == key_name)
-    )
-    row = r.scalar_one_or_none()
-    if row:
-        row.value_ciphertext = stored
-        row.is_secret = secret_flag
-    else:
-        session.add(
-            Secret(
-                bundle_id=bundle.id,
-                key_name=key_name,
-                value_ciphertext=stored,
-                is_secret=secret_flag,
-            )
+    prev = previous_key_name.strip()
+    try:
+        nk = await upsert_bundle_secret_entry(
+            session,
+            bundle.id,
+            key_name_input=key_name,
+            value=value,
+            is_secret=secret_flag,
+            previous_key_name=previous_key_name or None,
         )
-    await session.commit()
-    return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
+        await session.commit()
+        return RedirectResponse(
+            _bundle_edit_redirect_after_var_change(base, nk), status_code=HTTP_302_FOUND
+        )
+    except ValueError as err:
+        await session.rollback()
+        request.session["bundle_edit_error"] = str(err)
+        if prev:
+            return RedirectResponse(
+                f"{base}/edit?key={quote(prev, safe='')}", status_code=HTTP_302_FOUND
+            )
+        return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
+    except IntegrityError:
+        await session.rollback()
+        request.session["bundle_edit_error"] = "Another variable already uses that name."
+        if prev:
+            return RedirectResponse(
+                f"{base}/edit?key={quote(prev, safe='')}", status_code=HTTP_302_FOUND
+            )
+        return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
 
 
 @router.post("/projects/{project_slug}/bundles/{name}/secrets/encrypt", response_model=None)
@@ -1009,7 +2198,9 @@ async def bundle_secret_encrypt_in_project(
     await encrypt_plain_entry(session, name, key_name)
     await session.commit()
     base = _bundle_web_base(project_slug, name)
-    return RedirectResponse(f"{base}/edit", status_code=HTTP_302_FOUND)
+    return RedirectResponse(
+        _bundle_edit_redirect_after_var_change(base, key_name), status_code=HTTP_302_FOUND
+    )
 
 
 @router.post("/bundles/{name}/secrets/encrypt", response_model=None)
@@ -1026,7 +2217,51 @@ async def bundle_secret_encrypt_legacy(
     await _validate_bundle_ungrouped_web(session, name)
     await encrypt_plain_entry(session, name, key_name)
     await session.commit()
-    return RedirectResponse(f"{_bundle_web_base(None, name)}/edit", status_code=HTTP_302_FOUND)
+    base = _bundle_web_base(None, name)
+    return RedirectResponse(
+        _bundle_edit_redirect_after_var_change(base, key_name), status_code=HTTP_302_FOUND
+    )
+
+
+@router.post("/projects/{project_slug}/bundles/{name}/secrets/declassify", response_model=None)
+async def bundle_secret_declassify_in_project(
+    request: Request,
+    project_slug: str,
+    name: str,
+    key_name: Annotated[str, Form()],
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_bundle_in_project(session, project_slug, name)
+    await declassify_secret_entry(session, name, key_name)
+    await session.commit()
+    base = _bundle_web_base(project_slug, name)
+    return RedirectResponse(
+        _bundle_edit_redirect_after_var_change(base, key_name), status_code=HTTP_302_FOUND
+    )
+
+
+@router.post("/bundles/{name}/secrets/declassify", response_model=None)
+async def bundle_secret_declassify_legacy(
+    request: Request,
+    name: str,
+    key_name: Annotated[str, Form()],
+    csrf: Annotated[str, Form()],
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if (redir := _require_web_admin(request)) is not None:
+        return redir
+    _check_csrf(request, csrf)
+    await _validate_bundle_ungrouped_web(session, name)
+    await declassify_secret_entry(session, name, key_name)
+    await session.commit()
+    base = _bundle_web_base(None, name)
+    return RedirectResponse(
+        _bundle_edit_redirect_after_var_change(base, key_name), status_code=HTTP_302_FOUND
+    )
 
 
 @router.post("/projects/{project_slug}/bundles/{name}/secrets/delete", response_model=None)
@@ -1086,7 +2321,9 @@ async def bundle_delete_in_project(
     validate_bundle_name(name)
     await session.execute(delete(Bundle).where(Bundle.name == name))
     await session.commit()
-    return RedirectResponse(url_path("/bundles"), status_code=HTTP_302_FOUND)
+    return RedirectResponse(
+        url_path(f"/projects/{project_slug.strip()}/bundles"), status_code=HTTP_302_FOUND
+    )
 
 
 @router.post("/bundles/{name}/delete", response_model=None)
@@ -1103,7 +2340,7 @@ async def bundle_delete_legacy(
     validate_bundle_name(name)
     await session.execute(delete(Bundle).where(Bundle.name == name))
     await session.commit()
-    return RedirectResponse(url_path("/bundles"), status_code=HTTP_302_FOUND)
+    return RedirectResponse(url_path("/projects"), status_code=HTTP_302_FOUND)
 
 
 @router.post("/projects/{project_slug}/bundles/{name}/env-links", response_model=None)

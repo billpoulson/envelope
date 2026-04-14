@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block main_class %}container container-stack-detail{% endblock %}
+{% block title %}{{ stack_name }} — Secret URL — Envelope{% endblock %}
+{% block nav %}
+{% include "partials/nav_admin.html" %}
+{% endblock %}
+{% block content %}
+<h1 class="mono">{{ stack_name }}</h1>
+{% include "stack_subnav.html" %}
+
+<h2 class="h3">Secret env URL</h2>
+<p class="muted small">Download the stack as <code>.env</code> or JSON using a random path — project and stack names never appear in the URL. You can issue a link for the <strong>full merged</strong> stack or a <strong>prefix slice</strong> (merge from the bottom through a chosen layer). Anyone with a link can fetch variables; revoke when done.</p>
+{% if new_env_url %}
+<dialog id="stack-env-link-result-modal" class="modal-dialog" aria-labelledby="stack-env-link-result-title" aria-modal="true">
+  <div class="stack modal-form">
+    <h2 id="stack-env-link-result-title" class="h3 modal-title">New secret URL</h2>
+    <p class="muted small">Copy now — this path is not stored and cannot be shown again.</p>
+    <p class="mono env-link-url-display"><a href="{{ new_env_url }}" id="stack-env-link-result-url">{{ new_env_url }}</a></p>
+    <p class="muted small">Append <code>?format=json</code> for JSON. Rate-limited.</p>
+    <p class="form-actions">
+      <button type="button" class="secondary" id="stack-env-link-result-copy">Copy URL</button>
+      <button type="button" class="secondary-outline" id="stack-env-link-result-close">Done</button>
+    </p>
+  </div>
+</dialog>
+{% endif %}
+{% if env_links %}
+<ul class="env-link-list muted small">
+  {% for link in env_links %}
+  <li class="env-link-row">
+    <span>Link #{{ link.id }} · {% if link.through_layer_position is none %}Full merged stack{% else %}Prefix through <strong>{{ link.slice_label or "?" }}</strong> (position {{ link.through_layer_position }}){% endif %} · created {{ link.created_at }}</span>
+    <form method="post" action="{{ stack_route_base }}/env-links/{{ link.id }}/delete" class="inline-form" onsubmit="return confirm('Revoke this URL? Clients using it will get 404.');">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <button type="submit" class="danger small">Revoke</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% if stack_layers %}
+<section class="stack-env-slices" aria-label="Prefix slice URLs">
+  <h3 class="h3 stack-env-slices__title">Prefix slice (per layer)</h3>
+  <p class="muted small">Each link merges from the bottom of the stack through the selected layer (same overwrite rules as the full stack, but layers above are omitted).</p>
+  <ul class="stack-env-slice-list">
+    {% for layer in stack_layers %}
+    <li class="stack-env-slice-row">
+      <span class="stack-env-slice-row__label">Through <strong>{{ layer.bundle_name }}</strong> <span class="muted">(position {{ layer.position }})</span></span>
+      <form method="post" action="{{ stack_route_base }}/env-links" class="inline-form">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <input type="hidden" name="through_layer_position" value="{{ layer.position }}">
+        <button type="submit" class="secondary small">Generate secret URL</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+<p class="form-actions env-link-actions">
+  <button type="button" class="secondary" id="stack-env-link-open">Generate full-stack URL</button>
+</p>
+
+<dialog id="stack-env-link-generate-modal" class="modal-dialog" aria-labelledby="stack-env-link-generate-title" aria-modal="true">
+  <form method="post" action="{{ stack_route_base }}/env-links" class="stack modal-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+    <h2 id="stack-env-link-generate-title" class="h3 modal-title">Generate full-stack URL</h2>
+    <p class="muted small">Creates a new random path under <code>/env/…</code>. Anyone with the link can download the <strong>fully merged</strong> stack as <code>.env</code> or JSON. Revoke unused links when finished.</p>
+    <p class="form-actions">
+      <button type="submit">Generate URL</button>
+      <button type="button" class="secondary-outline" id="stack-env-link-generate-cancel">Cancel</button>
+    </p>
+  </form>
+</dialog>
+
+<p class="muted small bundle-env-links-back"><a href="{{ stack_route_base }}/edit">← Back to layers</a></p>
+<script src="{{ url_path('/static/stack-env-links.js') }}" defer></script>
+{% endblock %}

@@ -1,4 +1,6 @@
 from contextlib import asynccontextmanager
+import hashlib
+from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import FastAPI
@@ -8,6 +10,8 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 from app.api.tfstate.routes import router as tfstate_router
 from app.api.v1.router import router as api_v1_router
@@ -17,7 +21,32 @@ from app.db import get_session_factory, init_db, reset_engine
 from app.models import ApiKey
 from app.auth_keys import hash_api_key
 from app.paths import url_path
+from app.web.nav_middleware import AdminNavMiddleware
 from app.web.routes import router as web_router, templates
+
+
+def _asset_version() -> str:
+    """Short fingerprint of static/style.css for cache-busting (?v=… on each deploy)."""
+    root = Path(__file__).resolve().parent.parent
+    p = root / "static" / "style.css"
+    try:
+        return hashlib.sha256(p.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return "dev"
+
+
+async def _no_store_html_middleware(request: Request, call_next) -> Response:
+    """Avoid stale HTML when a reverse proxy caches full pages (CSS may still update)."""
+    response = await call_next(request)
+    if request.method != "GET":
+        return response
+    path = request.url.path
+    if path.startswith("/static/") or path.startswith("/api/"):
+        return response
+    ct = response.headers.get("content-type", "")
+    if "text/html" in ct:
+        response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
+    return response
 
 
 def _validate_master_key(settings: Settings) -> None:
@@ -72,6 +101,7 @@ def create_app() -> FastAPI:
 
     root = settings.root_path or ""
     templates.env.globals["url_path"] = url_path
+    templates.env.globals["asset_version"] = _asset_version()
 
     app = FastAPI(
         title="Envelope",
@@ -81,11 +111,14 @@ def create_app() -> FastAPI:
     )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    # AdminNavMiddleware must be registered before SessionMiddleware so Session runs first (outer).
+    app.add_middleware(AdminNavMiddleware)
     app.add_middleware(
         SessionMiddleware,
         secret_key=session_secret,
         https_only=settings.https_cookies,
     )
+    app.middleware("http")(_no_store_html_middleware)
 
     app.include_router(web_router)
     app.include_router(api_v1_router, prefix="/api/v1")
