@@ -108,6 +108,21 @@ Store a **read** API key in `ENVELOPE_API_KEY` (or similar), then:
 
 Use `format=json` for JSON instead of dotenv text.
 
+## React admin (SPA)
+
+A **Vite + React + TypeScript + Tailwind** admin app lives under [`frontend/`](frontend/).
+
+**Local development** (API + Vite together):
+
+- **Windows:** `powershell -ExecutionPolicy Bypass -File scripts/dev.ps1`
+- **Unix:** `chmod +x scripts/dev.sh && ./scripts/dev.sh`
+
+Optional: run the API and Vite in two terminals — `uvicorn app.main:app --reload --port 8000` and `cd frontend && npm run dev` (Vite on **5173** proxies `/api` to `127.0.0.1:8000`). Open `http://127.0.0.1:5173` and sign in with an **admin** API key.
+
+**Production-style process** (no reload, default port **8080** like the container): `scripts/start.sh` or `powershell -File scripts/start.ps1`. Put secrets in a **`.env`** file next to `.env.example` (see [Quick start](#quick-start-docker)); the app loads it when the working directory is the repo root. You can still set `ENVELOPE_*` in the shell; those override `.env`. Override bind address and proxy options with `PORT`, `HOST`, `FORWARDED_ALLOW_IPS`, `ENVELOPE_ROOT_PATH` as needed. On Windows, the scripts pick **Python 3.10+** via the `py` launcher if plain `python` is an older install.
+
+The **Docker image** builds the SPA and serves it at **`/app`**. Details: [`docs/react-migration/README.md`](docs/react-migration/README.md).
+
 ### Without project or bundle names in the download URL
 
 For jobs where the fetch URL must not contain bundle or project identifiers, create an **opaque link** once (admin / bundle write scope), store the full URL in your secret store, then use it with plain `curl` (no `Authorization` header):

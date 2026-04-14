@@ -29,6 +29,11 @@ class CreateProjectBody(BaseModel):
     slug: str | None = Field(None, max_length=128)
 
 
+class UpdateProjectBody(BaseModel):
+    name: str | None = Field(None, max_length=256)
+    slug: str | None = Field(None, max_length=128)
+
+
 @router.get("/projects")
 async def list_projects(
     key: ApiKey = Depends(get_api_key),
@@ -104,6 +109,51 @@ async def create_project(
 
     g = BundleGroup(name=name, slug=slug)
     session.add(g)
+    await session.commit()
+    await session.refresh(g)
+    return {"id": g.id, "name": g.name, "slug": g.slug}
+
+
+@router.patch("/projects/{project_slug}")
+async def update_project(
+    project_slug: str,
+    body: UpdateProjectBody,
+    key: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, int | str]:
+    if body.name is None and body.slug is None:
+        raise HTTPException(status_code=400, detail="Provide at least one of: name, slug")
+
+    scopes = parse_scopes_json(key.scopes)
+    g = await get_project_by_slug_or_404(session, project_slug)
+    if not can_write_project(
+        scopes,
+        project_id=g.id,
+        project_name=g.name,
+        project_slug=g.slug,
+    ):
+        raise HTTPException(status_code=403, detail="Insufficient scope for this project")
+
+    if body.name is not None:
+        name = body.name.strip()
+        validate_project_name(name)
+        dup = await session.execute(
+            select(BundleGroup.id).where(BundleGroup.name == name, BundleGroup.id != g.id),
+        )
+        if dup.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Project name already exists")
+        g.name = name
+
+    if body.slug is not None:
+        slug = body.slug.strip()
+        validate_project_slug(slug)
+        dup = await session.execute(
+            select(BundleGroup.id).where(BundleGroup.slug == slug, BundleGroup.id != g.id),
+        )
+        if dup.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Project slug already exists")
+        g.slug = slug
+
     await session.commit()
     await session.refresh(g)
     return {"id": g.id, "name": g.name, "slug": g.slug}

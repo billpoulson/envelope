@@ -27,6 +27,7 @@ from app.services.stacks import (
     get_stack_by_name,
     load_stack_secrets,
     replace_stack_layers,
+    stack_key_graph_payload_for_stack,
     validate_stack_name,
     validate_through_layer_position,
 )
@@ -191,13 +192,16 @@ async def _ensure_can_export_stack(
 
 @router.get("/stacks", response_model=list[str])
 async def list_stacks(
+    project_slug: str | None = Query(None, description="If set, only stacks in this project"),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> list[str]:
     scopes = parse_scopes_json(key.scopes)
-    r = await session.execute(
-        select(BundleStack).options(selectinload(BundleStack.group)).order_by(BundleStack.name)
-    )
+    q = select(BundleStack).options(selectinload(BundleStack.group)).order_by(BundleStack.name)
+    if project_slug is not None and str(project_slug).strip():
+        g = await get_project_by_slug_or_404(session, project_slug.strip())
+        q = q.where(BundleStack.group_id == g.id)
+    r = await session.execute(q)
     rows = r.scalars().all()
     if scopes_allow_admin(scopes):
         return [s.name for s in rows]
@@ -305,6 +309,29 @@ async def get_stack(
         "project_slug": out_slug,
         "layers": layer_payload,
     }
+
+
+@router.get("/stacks/{name}/key-graph")
+async def get_stack_key_graph(
+    name: str,
+    key: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Merged key graph for stack layers (same payload as legacy web `/key-graph/data`)."""
+    validate_stack_name(name)
+    st = await _load_stack_for_api(session, name)
+    scopes = parse_scopes_json(key.scopes)
+    pn = st.group.name if st.group else None
+    ps = _pslug(st.group)
+    if not can_read_stack(
+        scopes,
+        stack_name=st.name,
+        group_id=st.group_id,
+        project_name=pn,
+        project_slug=ps,
+    ):
+        raise HTTPException(status_code=403, detail="Insufficient scope for this stack")
+    return await stack_key_graph_payload_for_stack(session, st)
 
 
 @router.patch("/stacks/{name}")

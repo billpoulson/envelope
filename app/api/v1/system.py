@@ -10,10 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.deps import get_bearer_token, require_admin, resolve_api_key
+from app.deps import require_admin
 from app.limiter import limiter
 from app.models import ApiKey
-from app.services.scopes import parse_scopes_json, scopes_allow_admin
 from app.services.backup_crypto import (
     WrongPassphraseError,
     decrypt_bytes,
@@ -98,6 +97,7 @@ async def download_encrypted_database_backup(
 @limiter.limit("6/hour")
 async def restore_database(
     request: Request,
+    _: ApiKey = Depends(require_admin),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     settings = get_settings()
@@ -111,11 +111,6 @@ async def restore_database(
             status_code=400,
             detail="Restore is only supported for file-backed SQLite databases",
         )
-    # Read Authorization from the request (Header() injection is unreliable for multipart bodies).
-    token = await get_bearer_token(request.headers.get("Authorization"))
-    key = await resolve_api_key(token, session)
-    if not scopes_allow_admin(parse_scopes_json(key.scopes)):
-        raise HTTPException(status_code=403, detail="Admin scope required")
     # Return pooled connection before replacing the SQLite file (required on Windows).
     await session.close()
     form = await request.form()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, NamedTuple
 
 from fastapi import HTTPException
@@ -51,9 +52,25 @@ def parse_layer_label_field(raw: object | None) -> str | None:
     return s
 
 
+_STACK_NAME_MAX_LEN = 256
+# Human-readable titles (spaces allowed). Block path/reserved/shell-hostile characters.
+_STACK_NAME_FORBIDDEN = re.compile(r'[/\\<>:"|?*\x00-\x1f]')
+
+
 def validate_stack_name(name: str) -> None:
-    """Same rules as bundle names ([a-zA-Z0-9._-]+)."""
-    validate_bundle_name(name)
+    """Stack names may include spaces and common punctuation; bundle names stay stricter."""
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="Stack name is required")
+    if len(name) > _STACK_NAME_MAX_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stack name must be at most {_STACK_NAME_MAX_LEN} characters",
+        )
+    if _STACK_NAME_FORBIDDEN.search(name):
+        raise HTTPException(
+            status_code=400,
+            detail='Stack name cannot contain / \\ : * ? " < > | or control characters',
+        )
 
 
 async def get_stack_by_name(

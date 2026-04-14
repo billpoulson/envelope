@@ -622,5 +622,77 @@ class StacksHttpTests(unittest.TestCase):
             self.assertEqual(slice_rows[0]["slice_label"], f"s1-{nonce}")
 
 
+class AuthJsonApiTests(unittest.TestCase):
+    """JSON auth routes and session-backed /api/v1 access for the React admin."""
+
+    _token = "tfstate-http-test-admin-key"
+
+    def test_auth_csrf_login_projects_logout(self) -> None:
+        with TestClient(app) as client:
+            r = client.get("/api/v1/auth/csrf")
+            self.assertEqual(r.status_code, 200, r.text)
+            csrf = r.json()["csrf_token"]
+            r2 = client.post(
+                "/api/v1/auth/login",
+                json={"api_key": self._token},
+                headers={"X-CSRF-Token": csrf},
+            )
+            self.assertEqual(r2.status_code, 200, r2.text)
+            csrf_new = r2.json()["csrf_token"]
+            r3 = client.get("/api/v1/projects")
+            self.assertEqual(r3.status_code, 200, r3.text)
+            r4 = client.post(
+                "/api/v1/auth/logout",
+                headers={"X-CSRF-Token": csrf_new},
+            )
+            self.assertEqual(r4.status_code, 204, r4.text)
+            r5 = client.get("/api/v1/projects")
+            self.assertEqual(r5.status_code, 401, r5.text)
+
+
+class StackKeyGraphApiTests(unittest.TestCase):
+    """GET /api/v1/stacks/{name}/key-graph returns merged layer graph JSON."""
+
+    _token = "tfstate-http-test-admin-key"
+
+    def test_key_graph_json_shape(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"kgp-{nonce}"
+        bname = f"kgb-{nonce}"
+        sname = f"kgs-{nonce}"
+        with TestClient(app) as client:
+            pr = client.post(
+                "/api/v1/projects",
+                json={"name": f"KG {nonce}", "slug": slug},
+                headers=hj,
+            )
+            self.assertEqual(pr.status_code, 201, pr.text)
+            br = client.post(
+                "/api/v1/bundles",
+                json={"name": bname, "project_slug": slug},
+                headers=hj,
+            )
+            self.assertEqual(br.status_code, 201, br.text)
+            sr = client.post(
+                "/api/v1/stacks",
+                json={
+                    "name": sname,
+                    "project_slug": slug,
+                    "layers": [{"bundle": bname, "keys": "*"}],
+                },
+                headers=hj,
+            )
+            self.assertEqual(sr.status_code, 201, sr.text)
+            r = client.get(f"/api/v1/stacks/{sname}/key-graph", headers=h)
+        self.assertEqual(r.status_code, 200, r.text)
+        j = r.json()
+        self.assertIn("layers", j)
+        self.assertIn("rows", j)
+        self.assertIsInstance(j["layers"], list)
+        self.assertIsInstance(j["rows"], list)
+
+
 if __name__ == "__main__":
     unittest.main()

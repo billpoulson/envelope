@@ -1,3 +1,12 @@
+FROM node:20-alpine AS frontend-build
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+# React Router basename must match `/app` (see app/main.py _register_react_spa).
+ENV VITE_ADMIN_BASENAME=/app
+RUN npm run build
+
 FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -12,8 +21,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-COPY templates ./templates
-COPY static ./static
+
+# React admin at /app (Vite build from frontend/)
+COPY --from=frontend-build /build/dist ./frontend/dist
 
 # If the UI looks stale after code changes, rebuild without cache so COPY layers refresh:
 #   docker compose build --no-cache && docker compose up -d

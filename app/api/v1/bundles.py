@@ -1,5 +1,5 @@
 import json
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
@@ -26,6 +26,8 @@ from app.services.backup_crypto import (
     encrypt_bytes_async,
 )
 from app.services.bundles import (
+    IMPORT_KIND_VALUES,
+    ImportKind,
     bulk_upsert_bundle_secrets,
     coerce_value_to_string,
     dedupe_entry_rows,
@@ -38,6 +40,7 @@ from app.services.bundles import (
     load_bundle_secrets,
     normalize_env_key,
     parse_bundle_entries_dict,
+    parse_bundle_initial_paste,
     validate_bundle_name,
 )
 from app.services.env_links import new_env_link_token
@@ -63,6 +66,12 @@ class CreateBundleBody(BaseModel):
     # Optional initial keys (same rules as JSON paste: strings secret by default;
     # use {"K": {"value": "x", "secret": false}} or _plaintext_keys)
     entries: dict[str, Any] | None = None
+    # Alternative to `entries`: raw paste + import kind (same as web bundle_new wizard).
+    initial_paste: str | None = None
+    import_kind: str | None = Field(
+        default="skip",
+        description="skip | json_object | json_array | csv_quoted | dotenv_lines",
+    )
     group_id: int | None = None
     project_slug: str | None = None
 
@@ -87,13 +96,16 @@ def _pslug(group: BundleGroup | None) -> str | None:
 
 @router.get("/bundles", response_model=list[str])
 async def list_bundles(
+    project_slug: str | None = Query(None, description="If set, only bundles in this project"),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> list[str]:
     scopes = parse_scopes_json(key.scopes)
-    r = await session.execute(
-        select(Bundle).options(selectinload(Bundle.group)).order_by(Bundle.name)
-    )
+    q = select(Bundle).options(selectinload(Bundle.group)).order_by(Bundle.name)
+    if project_slug is not None and str(project_slug).strip():
+        g = await get_project_by_slug_or_404(session, project_slug.strip())
+        q = q.where(Bundle.group_id == g.id)
+    r = await session.execute(q)
     rows = r.scalars().all()
     if scopes_allow_admin(scopes):
         return [b.name for b in rows]
@@ -131,10 +143,25 @@ async def create_bundle(
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="Bundle already exists")
     entry_rows: list[tuple[str, str, bool]] = []
+    kind_in = (body.import_kind or "skip").strip() or "skip"
+    if body.entries is not None and (body.initial_paste or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either entries or initial_paste, not both",
+        )
     if body.entries is not None:
         entry_rows, err = parse_bundle_entries_dict(body.entries)
         if err:
             raise HTTPException(status_code=400, detail=err)
+    elif kind_in != "skip" and (body.initial_paste or "").strip():
+        if kind_in not in IMPORT_KIND_VALUES or kind_in == "skip":
+            raise HTTPException(status_code=400, detail="Invalid import_kind")
+        paste_rows, err = parse_bundle_initial_paste(
+            body.initial_paste or "", cast(ImportKind, kind_in)
+        )
+        if err:
+            raise HTTPException(status_code=400, detail=err)
+        entry_rows = paste_rows
     has_ps = body.project_slug is not None and str(body.project_slug).strip()
     has_gid = body.group_id is not None
     if not has_ps and not has_gid:

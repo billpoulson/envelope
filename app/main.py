@@ -1,17 +1,17 @@
 from contextlib import asynccontextmanager
-import hashlib
 from pathlib import Path
+
+_SPA_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import FileResponse, Response
 
 from app.api.tfstate.routes import router as tfstate_router
 from app.api.v1.router import router as api_v1_router
@@ -20,19 +20,7 @@ from app.config import Settings, get_settings
 from app.db import get_session_factory, init_db, reset_engine
 from app.models import ApiKey
 from app.auth_keys import hash_api_key
-from app.paths import url_path
-from app.web.nav_middleware import AdminNavMiddleware
-from app.web.routes import router as web_router, templates
-
-
-def _asset_version() -> str:
-    """Short fingerprint of static/style.css for cache-busting (?v=… on each deploy)."""
-    root = Path(__file__).resolve().parent.parent
-    p = root / "static" / "style.css"
-    try:
-        return hashlib.sha256(p.read_bytes()).hexdigest()[:16]
-    except OSError:
-        return "dev"
+from app.web.routes import router as web_router
 
 
 async def _no_store_html_middleware(request: Request, call_next) -> Response:
@@ -41,7 +29,7 @@ async def _no_store_html_middleware(request: Request, call_next) -> Response:
     if request.method != "GET":
         return response
     path = request.url.path
-    if path.startswith("/static/") or path.startswith("/api/"):
+    if path.startswith("/app/") or path.startswith("/api/"):
         return response
     ct = response.headers.get("content-type", "")
     if "text/html" in ct:
@@ -92,6 +80,37 @@ async def lifespan(app: FastAPI):
     await reset_engine()
 
 
+def _register_react_spa(app: FastAPI) -> None:
+    """Serve the Vite build: real files from dist, everything else → index.html (client-side routes)."""
+    dist = _SPA_DIST
+    index = dist / "index.html"
+    if not dist.is_dir() or not index.is_file():
+        return
+    root = dist.resolve()
+
+    def _safe_file(rel: str) -> Path | None:
+        if rel.startswith(("/", "\\")) or ".." in Path(rel).parts:
+            return None
+        candidate = (dist / rel).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None
+        return candidate if candidate.is_file() else None
+
+    @app.get("/app")
+    @app.get("/app/")
+    async def react_spa_shell() -> FileResponse:
+        return FileResponse(index)
+
+    @app.get("/app/{full_path:path}")
+    async def react_spa_or_asset(full_path: str) -> FileResponse:
+        hit = _safe_file(full_path)
+        if hit is not None:
+            return FileResponse(hit)
+        return FileResponse(index)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     _validate_master_key(settings)
@@ -99,20 +118,14 @@ def create_app() -> FastAPI:
         raise RuntimeError("ENVELOPE_SESSION_SECRET is required when ENVELOPE_DEBUG is false")
     session_secret = settings.session_secret or "dev-insecure-change-me"
 
-    root = settings.root_path or ""
-    templates.env.globals["url_path"] = url_path
-    templates.env.globals["asset_version"] = _asset_version()
-
     app = FastAPI(
         title="Envelope",
         description="Self-hosted secure environment bundle manager",
         lifespan=lifespan,
-        root_path=root,
+        root_path=settings.root_path or "",
     )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    # AdminNavMiddleware must be registered before SessionMiddleware so Session runs first (outer).
-    app.add_middleware(AdminNavMiddleware)
     app.add_middleware(
         SessionMiddleware,
         secret_key=session_secret,
@@ -125,7 +138,7 @@ def create_app() -> FastAPI:
     if settings.pulumi_state_enabled:
         app.include_router(tfstate_router, prefix="/tfstate")
 
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    _register_react_spa(app)
     return app
 
 

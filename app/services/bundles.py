@@ -1,7 +1,9 @@
+import csv
 import json
 import re
 import unicodedata
-from typing import Any
+from io import StringIO
+from typing import Any, Literal
 
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
@@ -27,6 +29,12 @@ def extract_conflicting_secret_key_name(error_text: str) -> str | None:
     return m.group(1) if m else None
 
 RESERVED_JSON_KEYS = frozenset({"_plaintext_keys", "_bundle_name"})
+
+ImportKind = Literal["json_object", "json_array", "csv_quoted", "dotenv_lines"]
+
+IMPORT_KIND_VALUES: frozenset[str] = frozenset(
+    {"skip", "json_object", "json_array", "csv_quoted", "dotenv_lines"}
+)
 
 
 def format_secrets_dotenv(secrets_map: dict[str, str]) -> str:
@@ -156,15 +164,104 @@ def parse_bundle_entries_dict(data: dict[str, Any]) -> tuple[list[tuple[str, str
     return rows, None
 
 
-def parse_bundle_entries_json(raw: str) -> tuple[list[tuple[str, str, bool]], str | None]:
+def _split_key_value_first_eq(s: str) -> tuple[str | None, str | None, str | None]:
+    """Split on first '='; return (error, key, value) where error is set if invalid."""
+    s = s.strip()
+    if not s:
+        return ("Empty entry", None, None)
+    if "=" not in s:
+        return (f"Expected KEY=value, got: {s!r}", None, None)
+    k, _, v = s.partition("=")
+    kn = normalize_env_key(k)
+    if not kn:
+        return ("Empty key is not allowed", None, None)
+    return (None, kn, v)
+
+
+def _parse_json_array_of_kv_strings(raw: str) -> tuple[list[tuple[str, str, bool]], str | None]:
+    try:
+        data = json.loads(raw.strip())
+    except json.JSONDecodeError as e:
+        return [], f"Invalid JSON: {e}"
+    if not isinstance(data, list):
+        return [], "Expected a JSON array of strings (each KEY=value)"
+    rows: list[tuple[str, str, bool]] = []
+    for i, item in enumerate(data):
+        if not isinstance(item, str):
+            return [], f"JSON array must contain only strings (index {i})"
+        err, kn, v = _split_key_value_first_eq(item)
+        if err:
+            return [], err
+        assert kn is not None and v is not None
+        rows.append((kn, v, True))
+    return dedupe_entry_rows(rows), None
+
+
+def _parse_csv_quoted_key_value_pairs(raw: str) -> tuple[list[tuple[str, str, bool]], str | None]:
+    s = raw.strip()
+    if not s:
+        return [], None
+    s = s.rstrip(",").strip()
+    all_cells: list[str] = []
+    try:
+        for row in csv.reader(StringIO(s)):
+            for c in row:
+                c = c.strip()
+                if c:
+                    all_cells.append(c)
+    except csv.Error as e:
+        return [], f"Could not parse comma-separated values: {e}"
+    rows: list[tuple[str, str, bool]] = []
+    for cell in all_cells:
+        err, kn, v = _split_key_value_first_eq(cell)
+        if err:
+            return [], err
+        assert kn is not None and v is not None
+        rows.append((kn, v, True))
+    return dedupe_entry_rows(rows), None
+
+
+def _parse_dotenv_lines(raw: str) -> tuple[list[tuple[str, str, bool]], str | None]:
+    rows: list[tuple[str, str, bool]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        err, kn, v = _split_key_value_first_eq(line)
+        if err:
+            return [], err
+        assert kn is not None and v is not None
+        rows.append((kn, v, True))
+    return dedupe_entry_rows(rows), None
+
+
+def parse_bundle_initial_paste(
+    raw: str, kind: ImportKind
+) -> tuple[list[tuple[str, str, bool]], str | None]:
+    """Parse initial bundle variables from pasted text; kind selects the format."""
     raw = raw.strip()
     if not raw:
         return [], None
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        return [], f"Invalid JSON: {e}"
-    return parse_bundle_entries_dict(data)
+    if kind == "json_object":
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            return [], f"Invalid JSON: {e}"
+        if not isinstance(data, dict):
+            return [], "JSON must be an object"
+        return parse_bundle_entries_dict(data)
+    if kind == "json_array":
+        return _parse_json_array_of_kv_strings(raw)
+    if kind == "csv_quoted":
+        return _parse_csv_quoted_key_value_pairs(raw)
+    if kind == "dotenv_lines":
+        return _parse_dotenv_lines(raw)
+    return [], f"Unknown import kind: {kind!r}"
+
+
+def parse_bundle_entries_json(raw: str) -> tuple[list[tuple[str, str, bool]], str | None]:
+    """Backward compat: same as import kind ``json_object`` (JSON object paste)."""
+    return parse_bundle_initial_paste(raw, "json_object")
 
 
 async def bulk_upsert_bundle_secrets(

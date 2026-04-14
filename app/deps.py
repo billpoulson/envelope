@@ -3,7 +3,10 @@ from functools import lru_cache
 from typing import Annotated
 
 from cryptography.fernet import Fernet
+from datetime import datetime, timezone
+
 from fastapi import Depends, Header, HTTPException
+from starlette.requests import Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,8 +36,6 @@ async def resolve_api_key(
     token: str,
     session: AsyncSession,
 ) -> ApiKey:
-    from datetime import datetime, timezone
-
     result = await session.execute(select(ApiKey))
     rows = result.scalars().all()
     for row in rows:
@@ -45,12 +46,37 @@ async def resolve_api_key(
     raise HTTPException(status_code=401, detail="Invalid API key")
 
 
+def _bearer_token_optional(authorization: str | None) -> str | None:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    t = authorization[7:].strip()
+    return t if t else None
+
+
 async def get_api_key(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     session: AsyncSession = Depends(get_db),
 ) -> ApiKey:
-    token = await get_bearer_token(authorization)
-    return await resolve_api_key(token, session)
+    """Resolve API key from Bearer header, or from browser session (`admin_key_id`) after web/JSON login."""
+    token = _bearer_token_optional(authorization)
+    if token:
+        return await resolve_api_key(token, session)
+    raw_id = request.session.get("admin_key_id")
+    if raw_id is not None:
+        try:
+            kid = int(raw_id)
+        except (TypeError, ValueError):
+            kid = None
+        if kid is not None:
+            r = await session.execute(select(ApiKey).where(ApiKey.id == kid))
+            row = r.scalar_one_or_none()
+            if row is not None:
+                if row.expires_at and row.expires_at < datetime.now(timezone.utc):
+                    raise HTTPException(status_code=401, detail="API key expired")
+                if scopes_allow_admin(parse_scopes_json(row.scopes)):
+                    return row
+    raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
 
 async def require_admin(key: ApiKey = Depends(get_api_key)) -> ApiKey:

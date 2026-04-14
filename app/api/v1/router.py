@@ -1,8 +1,9 @@
 from fastapi import APIRouter
 
-from app.api.v1 import bundles, certificates, keys, projects, sealed_secrets, stacks, system
+from app.api.v1 import auth, bundles, certificates, keys, projects, sealed_secrets, stacks, system
 
 router = APIRouter()
+router.include_router(auth.router, tags=["auth"])
 router.include_router(bundles.router, tags=["bundles"])
 router.include_router(stacks.router, tags=["stacks"])
 router.include_router(sealed_secrets.router, tags=["sealed-secrets"])
