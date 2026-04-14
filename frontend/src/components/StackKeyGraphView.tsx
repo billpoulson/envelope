@@ -150,6 +150,7 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
           isSecret: boolean;
           targets: { layerIndex: number; label: string; bundle: string }[];
         };
+        remove?: { bundleName: string; keyName: string };
       }
   >(null);
   const ctxRef = useRef<HTMLDivElement>(null);
@@ -188,6 +189,9 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
   const [movePick, setMovePick] = useState<number | null>(null);
   const [moveErr, setMoveErr] = useState<string | null>(null);
   const [moveBusy, setMoveBusy] = useState(false);
+
+  const [removeErr, setRemoveErr] = useState<string | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   const [dragMove, setDragMove] = useState<DragMovePayload | null>(null);
   const [dragOverDrop, setDragOverDrop] = useState<{ key: string; li: number } | null>(null);
@@ -252,6 +256,23 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
     );
   }, [moveDialog, movePick, executeMoveToBundle]);
 
+  const executeRemoveFromBundle = useCallback(
+    async (bundleName: string, keyName: string) => {
+      setRemoveErr(null);
+      setRemoveBusy(true);
+      try {
+        await deleteSecret(bundleName, keyName);
+        setCtx(null);
+        onRefetch();
+      } catch (e: unknown) {
+        setRemoveErr(formatApiError(e));
+      } finally {
+        setRemoveBusy(false);
+      }
+    },
+    [onRefetch],
+  );
+
   if (n === 0) {
     return <p className="text-slate-400">This stack has no layers.</p>;
   }
@@ -283,13 +304,18 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
           <li>
             <strong className="text-slate-300">Drag</strong> using the grip beside a value onto another layer’s{" "}
             <strong className="text-slate-300">empty</strong> cell (same row) to move the variable to that bundle.
-            Or <strong className="text-slate-300">right-click</strong> for View secret, Edit, Define, or Move…
+            Or <strong className="text-slate-300">right-click</strong> for View secret, Edit, Define, Move, or{" "}
+            <strong className="text-slate-300">Remove from bundle</strong> (deletes the variable from that bundle for
+            all stacks).
           </li>
         </ul>
       </details>
 
       {moveErr && !moveDialog ? (
         <p className="rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-300">{moveErr}</p>
+      ) : null}
+      {removeErr ? (
+        <p className="rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-300">{removeErr}</p>
       ) : null}
 
       <div className="flex flex-wrap items-center gap-4 border-b border-border/40 pb-3">
@@ -433,7 +459,16 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
                             : undefined;
                         const canDefine = rowNoValueAnywhere && !!bundleName && !!editBase;
                         const definePayload = canDefine ? { bundleName, keyName: key } : undefined;
-                        if (!viewSecretPayload && !editTo && !definePayload && !movePayload) return;
+                        const removePayload =
+                          hasVal && bundleName ? { bundleName, keyName: key } : undefined;
+                        if (
+                          !viewSecretPayload &&
+                          !editTo &&
+                          !definePayload &&
+                          !movePayload &&
+                          !removePayload
+                        )
+                          return;
                         setTimeout(() => {
                           setCtx({
                             x: e.clientX,
@@ -442,6 +477,7 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
                             editTo: editTo || undefined,
                             define: definePayload,
                             move: movePayload,
+                            remove: removePayload,
                           });
                         }, 0);
                       };
@@ -620,15 +656,24 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
                         if (!mergedHasVal) return;
                         e.preventDefault();
                         e.stopPropagation();
-                        if (!mergedSecret || !hasProvidedCellValue(mergedRaw)) return;
+                        const winBundle =
+                          win != null ? String(data.layers[win]?.bundle || "").trim() : "";
+                        const viewSecretPayload =
+                          mergedSecret && hasProvidedCellValue(mergedRaw)
+                            ? {
+                                raw: String(mergedRaw),
+                                title: `${key} · merged export`,
+                              }
+                            : undefined;
+                        const removePayload =
+                          winBundle !== "" ? { bundleName: winBundle, keyName: key } : undefined;
+                        if (!viewSecretPayload && !removePayload) return;
                         setTimeout(() => {
                           setCtx({
                             x: e.clientX,
                             y: e.clientY,
-                            viewSecret: {
-                              raw: String(mergedRaw),
-                              title: `${key} · merged export`,
-                            },
+                            viewSecret: viewSecretPayload,
+                            remove: removePayload,
                           });
                         }, 0);
                       }}
@@ -718,6 +763,21 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
               }}
             >
               Move to another layer…
+            </button>
+          ) : null}
+          {ctx.remove ? (
+            <button
+              type="button"
+              disabled={removeBusy}
+              className="block w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+              onClick={() => {
+                const r = ctx.remove!;
+                const msg = `Remove "${r.keyName}" from bundle "${r.bundleName}"? This deletes the variable from that bundle; other stacks using this bundle will no longer see it.`;
+                if (!confirm(msg)) return;
+                void executeRemoveFromBundle(r.bundleName, r.keyName);
+              }}
+            >
+              {removeBusy ? "Removing…" : "Remove from bundle…"}
             </button>
           ) : null}
         </div>
