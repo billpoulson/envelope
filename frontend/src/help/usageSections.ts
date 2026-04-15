@@ -10,6 +10,7 @@ export type HelpSectionId =
   | "certificates"
   | "terraform"
   | "pulumi"
+  | "cli"
   | "backup";
 
 function headingToSectionId(title: string): HelpSectionId | null {
@@ -20,6 +21,7 @@ function headingToSectionId(title: string): HelpSectionId | null {
   if (t.startsWith("Certificate-backed")) return "certificates";
   if (t.startsWith("Terraform HTTP")) return "terraform";
   if (t.startsWith("Pulumi state")) return "pulumi";
+  if (t === "CLI tool") return "cli";
   return null;
 }
 

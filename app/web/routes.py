@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.responses import RedirectResponse
+from starlette.responses import FileResponse, RedirectResponse
 from starlette.status import HTTP_302_FOUND
 
 from app.db import get_db
@@ -21,6 +22,8 @@ from app.services.stacks import get_stack_by_name, load_stack_secrets, load_stac
 from app.session_csrf import check_csrf
 
 router = APIRouter()
+
+_CLI_DIR = Path(__file__).resolve().parent.parent.parent / "cli"
 
 _LEGACY_SPA_SEGMENTS = (
     "projects",
@@ -149,3 +152,31 @@ async def download_env_by_secret_token(
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="environment.env"'},
     )
+
+
+def _cli_file_response(name: str) -> FileResponse:
+    path = _CLI_DIR / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    media = "text/plain; charset=utf-8"
+    if name.endswith(".py"):
+        media = "text/x-python; charset=utf-8"
+    return FileResponse(path, media_type=media, filename=name)
+
+
+@router.get("/cli/envelope-run.sh")
+async def download_cli_envelope_run_sh() -> FileResponse:
+    """Installable shell wrapper for the opaque-env CLI (requires envelope_run.py alongside)."""
+    return _cli_file_response("envelope-run.sh")
+
+
+@router.get("/cli/envelope-run.ps1")
+async def download_cli_envelope_run_ps1() -> FileResponse:
+    """Installable PowerShell wrapper for the opaque-env CLI."""
+    return _cli_file_response("envelope-run.ps1")
+
+
+@router.get("/cli/envelope_run.py")
+async def download_cli_envelope_run_py() -> FileResponse:
+    """Python implementation: fetch /env/{{token}} and run a command or write an env file."""
+    return _cli_file_response("envelope_run.py")

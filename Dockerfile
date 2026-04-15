@@ -21,6 +21,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY cli ./cli
 
 # React admin at /app (Vite build from frontend/)
 COPY --from=frontend-build /build/dist ./frontend/dist

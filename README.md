@@ -181,6 +181,36 @@ curl -fsS "$ENVELOPE_SECRET_ENV_URL?format=json" | python -m json.tool
 
 If Envelope is behind a **path prefix** (`ENVELOPE_ROOT_PATH`), the `url` from the API already includes that prefix—use it exactly as returned.
 
+### CLI (install from deployment)
+
+Download the helper and wrappers from your Envelope origin (paths are stable):
+
+- `GET /cli/envelope_run.py` — Python implementation (stdlib only)
+- `GET /cli/envelope-run.sh` — shell wrapper (`exec python3` next to `envelope_run.py`)
+- `GET /cli/envelope-run.ps1` — PowerShell wrapper
+
+In the **web UI**, open **Help → CLI (opaque env)** (path **`/app/help/cli`** when the admin SPA is served under `/app`) for an interactive page that detects this deployment’s base URL and generates **Bash** or **PowerShell** install scripts, with your choice of **user** or **system** `PATH`.
+
+Example:
+
+```bash
+curl -fsS "$ENVELOPE_URL/cli/envelope_run.py" -o envelope_run.py
+curl -fsS "$ENVELOPE_URL/cli/envelope-run.sh" -o envelope-run.sh && chmod +x envelope-run.sh
+```
+
+**Arguments:** pass the deployment **base URL** as a single value—**including** any gateway path prefix (e.g. `https://envelope.example.com/envelope`)—and the opaque **token** (the path segment after `/env/`). The script builds `…/env/{token}` internally.
+
+```bash
+./envelope-run.sh \
+  --envelope-url 'https://envelope.example.com/envelope' \
+  --token '<token-from-env-link>' \
+  -- terraform plan
+
+python3 envelope_run.py --envelope-url "$ENVELOPE_URL" --token "$TOKEN" --out .env.local
+```
+
+You can set **`ENVELOPE_URL`** and **`ENVELOPE_ENV_TOKEN`** instead of `--envelope-url` / `--token`. Errors avoid echoing the token or full request URL. **HTTPS only** unless **`ENVELOPE_CLI_INSECURE=1`** (local dev). **`--out`** files are cleartext secrets—protect like any `.env`.
+
 ## Certificate-backed sealed secrets (server-blind mode)
 
 Use this mode when you want Envelope to store only ciphertext envelopes and wrapped data keys for recipients. You encrypt on the client side (browser app, CLI, or pipeline step), then upload:

@@ -1,6 +1,6 @@
 # Envelope — usage guide
 
-> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **[Installation & hosting](/help/installation)**, **`/help/web-ui`**, **`/help/api`**, **`/help/certificates`**, **`/help/terraform`**, **`/help/pulumi`**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
+> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **[Installation & hosting](/help/installation)**, **`/help/web-ui`**, **`/help/api`**, **`/help/certificates`**, **`/help/terraform`**, **`/help/pulumi`**, **[CLI (opaque env)](/help/cli)**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
 
 Envelope is a self-hosted **secure environment bundle** manager: named groups of variables (like a `.env` file), **encrypted at rest** for secret values, with **API keys** for automation and a **web UI** for administration.
 
@@ -245,6 +245,14 @@ pulumi login postgres://user:pass@host:5432/pulumi
 ```
 
 The legacy scope name **`pulumi:state`** only authorizes flat **`/tfstate/blobs/…`** keys in Envelope; it does not enable the stock Pulumi CLI to use Envelope as an HTTP state store. For Pulumi, use a native backend plus secrets from Envelope.
+
+---
+
+## CLI tool
+
+Download the **opaque env CLI** from this deployment (`GET /cli/envelope_run.py` and shell wrappers) and add it to your **`PATH`**.
+
+Use **`--envelope-url`** with your deployment’s public base URL (including any gateway path prefix, e.g. `https://host/envelope`) and **`--token`** with the secret path segment from **Secret env URL**. The interactive **installer** below runs in your browser: it detects that base URL, lets you choose **user** vs **system** environment scope for **`PATH`**, and generates a **Bash** or **PowerShell** script you can save and run locally.
 
 ---
 
