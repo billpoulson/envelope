@@ -694,6 +694,69 @@ class StackKeyGraphApiTests(unittest.TestCase):
         self.assertIsInstance(j["rows"], list)
         self.assertIs(j.get("secret_values_included"), False)
 
+    def test_key_graph_cells_alias_source(self) -> None:
+        """Key-graph rows include cells_alias_source when stack layers define aliases."""
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"kgalias-{nonce}"
+        base_b = f"kgb-in-{nonce}"
+        top_b = f"kgb-out-{nonce}"
+        sname = f"kgs-alias-{nonce}"
+        with TestClient(app) as client:
+            pr = client.post(
+                "/api/v1/projects",
+                json={"name": f"KGAlias {nonce}", "slug": slug},
+                headers=hj,
+            )
+            self.assertEqual(pr.status_code, 201, pr.text)
+            br0 = client.post(
+                "/api/v1/bundles",
+                json={
+                    "name": base_b,
+                    "project_slug": slug,
+                    "entries": {"OIDC_KEY": "the-oidc-value"},
+                },
+                headers=hj,
+            )
+            self.assertEqual(br0.status_code, 201, br0.text)
+            br1 = client.post(
+                "/api/v1/bundles",
+                json={"name": top_b, "project_slug": slug},
+                headers=hj,
+            )
+            self.assertEqual(br1.status_code, 201, br1.text)
+            sr = client.post(
+                "/api/v1/stacks",
+                json={
+                    "name": sname,
+                    "project_slug": slug,
+                    "layers": [
+                        {"bundle": base_b, "keys": "*"},
+                        {
+                            "bundle": top_b,
+                            "keys": "*",
+                            "aliases": {"VITE_OIDC_KEY": "OIDC_KEY"},
+                        },
+                    ],
+                },
+                headers=hj,
+            )
+            self.assertEqual(sr.status_code, 201, sr.text)
+            r = client.get(f"/api/v1/stacks/{sname}/key-graph", headers=h)
+        self.assertEqual(r.status_code, 200, r.text)
+        j = r.json()
+        rows_by_key = {row["key"]: row for row in j["rows"]}
+        self.assertIn("OIDC_KEY", rows_by_key)
+        self.assertIn("VITE_OIDC_KEY", rows_by_key)
+        vite = rows_by_key["VITE_OIDC_KEY"]
+        cas = vite["cells_alias_source"]
+        self.assertEqual(len(cas), 2)
+        self.assertIsNone(cas[0])
+        self.assertEqual(cas[1], "OIDC_KEY")
+        oidc = rows_by_key["OIDC_KEY"]
+        self.assertEqual(oidc["cells_alias_source"], [None, None])
+
 
 if __name__ == "__main__":
     unittest.main()

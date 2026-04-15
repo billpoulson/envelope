@@ -44,6 +44,22 @@ class StackKeyGraphPayloadTests(unittest.TestCase):
         self.assertEqual(r["merged_value_redacted"], False)
         self.assertEqual(r["winner_layer_index"], 0)
         self.assertEqual(r["merged"], "a")
+        self.assertEqual(r["cells_alias_source"], [None])
+
+    def test_cells_alias_source_metadata(self) -> None:
+        p = stack_key_graph_payload(
+            [
+                {"OIDC_KEY": ("a", False)},
+                {"VITE_OIDC_KEY": ("a", False)},
+            ],
+            ["l0", "l1"],
+            None,
+            None,
+            [{}, {"VITE_OIDC_KEY": "OIDC_KEY"}],
+        )
+        by = {r["key"]: r for r in p["rows"]}
+        self.assertEqual(by["OIDC_KEY"]["cells_alias_source"], [None, None])
+        self.assertEqual(by["VITE_OIDC_KEY"]["cells_alias_source"], [None, "OIDC_KEY"])
 
     def test_override_top_wins(self) -> None:
         p = stack_key_graph_payload(
@@ -59,6 +75,7 @@ class StackKeyGraphPayloadTests(unittest.TestCase):
         self.assertEqual(row["cell_secrets"], [False, True, False])
         self.assertEqual(row["cells_value_present"], [True, True, True])
         self.assertEqual(row["cells_secret_redacted"], [False, False, False])
+        self.assertEqual(row["cells_alias_source"], [None, None, None])
         self.assertEqual(row["winner_layer_index"], 2)
         self.assertEqual(row["merged"], "c")
         self.assertEqual(row["merged_secret"], False)

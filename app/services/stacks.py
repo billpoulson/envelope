@@ -13,14 +13,24 @@ from sqlalchemy.orm import selectinload
 
 from app.models import Bundle, BundleStack, BundleStackLayer
 from app.paths import url_path
-from app.services.bundles import load_bundle_entries, load_bundle_secrets, validate_bundle_name
+from app.services.bundles import (
+    load_bundle_entries,
+    load_bundle_secrets,
+    normalize_env_key,
+    validate_bundle_name,
+)
+
+_ALIAS_MAX_PER_LAYER = 64
+_ENV_KEY_MAX_LEN = 512
+
 
 class LayerSpec(NamedTuple):
-    """One stack layer: bundle, key subset, optional UI label."""
+    """One stack layer: bundle, key subset, optional UI label, optional key aliases."""
 
     bundle: str
     keys: list[str] | None  # None = all keys
     label: str | None = None
+    aliases: dict[str, str] | None = None  # export name -> source key from merged layers below
 
 
 def normalize_layer_label(raw: str | None) -> str | None:
@@ -55,6 +65,32 @@ def parse_layer_label_field(raw: object | None) -> str | None:
 _STACK_NAME_MAX_LEN = 256
 # Human-readable titles (spaces allowed). Block path/reserved/shell-hostile characters.
 _STACK_NAME_FORBIDDEN = re.compile(r'[/\\<>:"|?*\x00-\x1f]')
+
+
+def normalize_layer_aliases_map(raw: dict[str, str] | None) -> dict[str, str] | None:
+    """Validate and normalize layer alias map (export name -> source key). Returns None if empty."""
+    if not raw:
+        return None
+    if len(raw) > _ALIAS_MAX_PER_LAYER:
+        raise ValueError(f"at most {_ALIAS_MAX_PER_LAYER} aliases per layer")
+    out: dict[str, str] = {}
+    seen_targets: set[str] = set()
+    for tk, sk in raw.items():
+        if not isinstance(tk, str) or not isinstance(sk, str):
+            raise ValueError("alias map keys and values must be strings")
+        t = normalize_env_key(tk)
+        s = normalize_env_key(sk)
+        if not t or not s:
+            raise ValueError("alias names must be non-empty after normalization")
+        if len(t) > _ENV_KEY_MAX_LEN or len(s) > _ENV_KEY_MAX_LEN:
+            raise ValueError(f"alias key names must be at most {_ENV_KEY_MAX_LEN} characters")
+        if t == s:
+            raise ValueError("alias target and source must be different keys")
+        if t in seen_targets:
+            raise ValueError(f"duplicate alias target {t!r}")
+        seen_targets.add(t)
+        out[t] = s
+    return out or None
 
 
 def validate_stack_name(name: str) -> None:
@@ -102,6 +138,81 @@ def _layer_key_filter(layer: BundleStackLayer, secrets_map: dict[str, str]) -> d
     return {k: v for k, v in secrets_map.items() if k in ps}
 
 
+def _parse_layer_aliases_json(layer: BundleStackLayer) -> dict[str, str]:
+    raw = getattr(layer, "aliases_json", None)
+    if not raw or not str(raw).strip():
+        return {}
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(obj, dict):
+        return {}
+    out: dict[str, str] = {}
+    for tk, sk in obj.items():
+        if not isinstance(tk, str) or not isinstance(sk, str):
+            continue
+        t = tk.strip()
+        s = sk.strip()
+        if t and s and t != s:
+            out[t] = s
+    return out
+
+
+def _apply_layer_aliases_to_str_map(
+    prefix: dict[str, str],
+    layer_keys: dict[str, str],
+    aliases: dict[str, str],
+) -> None:
+    """Mutate ``layer_keys`` to add alias targets from ``prefix`` + ``layer_keys`` (with chaining)."""
+    if not aliases:
+        return
+    base: dict[str, str] = dict(prefix)
+    base.update(layer_keys)
+    al_items = list(aliases.items())
+    for _ in range(len(aliases) + 1):
+        stable = True
+        for t, s in al_items:
+            if s not in base:
+                continue
+            v = base[s]
+            if base.get(t) != v:
+                base[t] = v
+                stable = False
+        if stable:
+            break
+    for t in aliases:
+        if t in base:
+            layer_keys[t] = base[t]
+
+
+def _apply_layer_aliases_to_entry_map(
+    prefix: dict[str, tuple[str, bool]],
+    layer_ent: dict[str, tuple[str, bool]],
+    aliases: dict[str, str],
+) -> None:
+    """Mutate ``layer_ent`` for synthetic alias keys (value/secret copied from source chain)."""
+    if not aliases:
+        return
+    base: dict[str, tuple[str, bool]] = dict(prefix)
+    base.update(layer_ent)
+    al_items = list(aliases.items())
+    for _ in range(len(aliases) + 1):
+        stable = True
+        for t, s in al_items:
+            if s not in base:
+                continue
+            val = base[s]
+            if base.get(t) != val:
+                base[t] = val
+                stable = False
+        if stable:
+            break
+    for t in aliases:
+        if t in base:
+            layer_ent[t] = base[t]
+
+
 def _layer_entry_filter(
     layer: BundleStackLayer, ent_map: dict[str, tuple[str, bool]]
 ) -> dict[str, tuple[str, bool]]:
@@ -123,8 +234,12 @@ async def load_stack_secrets(session: AsyncSession, stack: BundleStack) -> dict[
         raise HTTPException(status_code=400, detail="Stack has no layers")
     merged: dict[str, str] = {}
     for layer in layers:
+        prefix = dict(merged)
         _, sm = await load_bundle_secrets(session, layer.bundle.name)
         sm = _layer_key_filter(layer, sm)
+        al = _parse_layer_aliases_json(layer)
+        if al:
+            _apply_layer_aliases_to_str_map(prefix, sm, al)
         merged.update(sm)
     return merged
 
@@ -157,8 +272,12 @@ async def load_stack_secrets_through(
     for layer in layers:
         if layer.position > through_layer_position:
             break
+        prefix = dict(merged)
         _, sm = await load_bundle_secrets(session, layer.bundle.name)
         sm = _layer_key_filter(layer, sm)
+        al = _parse_layer_aliases_json(layer)
+        if al:
+            _apply_layer_aliases_to_str_map(prefix, sm, al)
         merged.update(sm)
     return merged
 
@@ -182,10 +301,16 @@ async def load_stack_layer_entry_maps(
     """Per-layer key -> (value, is_secret) after each layer's key filter (bottom → top)."""
     layers = sorted(stack.layers, key=lambda L: L.position)
     out: list[dict[str, tuple[str, bool]]] = []
+    merged_below: dict[str, tuple[str, bool]] = {}
     for layer in layers:
         _, ent = await load_bundle_entries(session, layer.bundle.name)
         ent = _layer_entry_filter(layer, ent)
-        out.append(dict(ent))
+        row = dict(ent)
+        al = _parse_layer_aliases_json(layer)
+        if al:
+            _apply_layer_aliases_to_entry_map(merged_below, row, al)
+        out.append(row)
+        merged_below.update(row)
     return out
 
 
@@ -203,6 +328,7 @@ def stack_key_graph_payload(
     layer_bundle_names: list[str],
     layer_bundle_edit_paths: list[str] | None = None,
     layer_display_labels: list[str | None] | None = None,
+    layer_alias_maps: list[dict[str, str]] | None = None,
     *,
     include_secret_values: bool = True,
 ) -> dict[str, Any]:
@@ -270,12 +396,22 @@ def stack_key_graph_payload(
                 merged_val = None
                 merged_value_redacted = True
 
+        cells_alias_source: list[str | None] = []
+        for i in range(n):
+            src: str | None = None
+            if layer_alias_maps is not None and i < len(layer_alias_maps):
+                am = layer_alias_maps[i]
+                if am and key in am:
+                    src = am[key]
+            cells_alias_source.append(src)
+
         row_out: dict[str, Any] = {
             "key": key,
             "cells": cells,
             "cell_secrets": cell_secrets,
             "cells_value_present": cells_value_present,
             "cells_secret_redacted": cells_secret_redacted,
+            "cells_alias_source": cells_alias_source,
             "winner_layer_index": win_idx,
             "merged": merged_val,
             "merged_secret": merged_secret,
@@ -341,8 +477,14 @@ async def stack_key_graph_payload_for_stack(
             edit_paths.append(url_path(f"/bundles/{b.name}/edit"))
         raw = getattr(L, "layer_label", None)
         labels.append(raw.strip() if isinstance(raw, str) and raw.strip() else None)
+    layer_alias_maps = [_parse_layer_aliases_json(L) for L in layers_sorted]
     return stack_key_graph_payload(
-        maps, names, edit_paths, labels, include_secret_values=include_secret_values
+        maps,
+        names,
+        edit_paths,
+        labels,
+        layer_alias_maps,
+        include_secret_values=include_secret_values,
     )
 
 
@@ -373,6 +515,9 @@ async def replace_stack_layers(
         else:
             km = "pick"
             sj = json.dumps(sorted(set(keys)))
+        aliases_json: str | None = None
+        if spec.aliases:
+            aliases_json = json.dumps(spec.aliases, sort_keys=True, separators=(",", ":"))
         session.add(
             BundleStackLayer(
                 stack_id=stack_id,
@@ -381,6 +526,7 @@ async def replace_stack_layers(
                 keys_mode=km,
                 selected_keys_json=sj,
                 layer_label=lbl,
+                aliases_json=aliases_json,
             )
         )
     await session.flush()

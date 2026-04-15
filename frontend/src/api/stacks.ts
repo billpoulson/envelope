@@ -10,6 +10,8 @@ export type StackLayer = {
   bundle: string;
   keys: "*" | string[];
   label?: string | null;
+  /** Export name -> source variable from merged layers below (e.g. VITE_OIDC_KEY -> OIDC_KEY). */
+  aliases?: Record<string, string> | null;
 };
 
 export type StackDetail = {
@@ -70,6 +72,8 @@ export type StackKeyGraphPayload = {
     cell_secrets: (boolean | null)[];
     cells_value_present?: (boolean | null)[];
     cells_secret_redacted?: (boolean | null)[];
+    /** Per layer: source key name when this row key is a layer alias export; else null. */
+    cells_alias_source?: (string | null)[];
     winner_layer_index: number | null;
     merged: string | null;
     merged_secret: boolean | null;

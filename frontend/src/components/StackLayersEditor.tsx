@@ -8,29 +8,58 @@ export type LayerEditorState = {
   mode: "all" | "pick";
   selected: string[];
   label: string;
+  /** Pairs for API `aliases` (export name <- source from lower layers). */
+  aliasRows: { target: string; source: string }[];
 };
 
 function stackLayerToEditor(l: StackLayer): LayerEditorState {
   const label = typeof l.label === "string" ? l.label : "";
+  const aliasRows: { target: string; source: string }[] = [];
+  if (l.aliases && typeof l.aliases === "object") {
+    for (const [target, source] of Object.entries(l.aliases)) {
+      aliasRows.push({ target, source: String(source) });
+    }
+    aliasRows.sort((a, b) => a.target.localeCompare(b.target));
+  }
   if (l.keys === "*") {
-    return { bundle: l.bundle, mode: "all", selected: [], label };
+    return { bundle: l.bundle, mode: "all", selected: [], label, aliasRows };
   }
   if (Array.isArray(l.keys)) {
-    return { bundle: l.bundle, mode: "pick", selected: [...l.keys], label };
+    return { bundle: l.bundle, mode: "pick", selected: [...l.keys], label, aliasRows };
   }
-  return { bundle: l.bundle, mode: "all", selected: [], label };
+  return { bundle: l.bundle, mode: "all", selected: [], label, aliasRows };
 }
 
 export function editorToStackLayer(l: LayerEditorState): StackLayer {
   const label = l.label.trim() ? l.label.trim() : undefined;
+  const aliases: Record<string, string> = {};
+  for (const row of l.aliasRows) {
+    const t = row.target.trim();
+    const s = row.source.trim();
+    if (t && s) aliases[t] = s;
+  }
+  const aliasOpt = Object.keys(aliases).length ? { aliases } : {};
   if (l.mode === "all") {
-    return { bundle: l.bundle.trim(), keys: "*", ...(label ? { label } : {}) };
+    return { bundle: l.bundle.trim(), keys: "*", ...aliasOpt, ...(label ? { label } : {}) };
   }
   return {
     bundle: l.bundle.trim(),
     keys: l.selected,
+    ...aliasOpt,
     ...(label ? { label } : {}),
   };
+}
+
+/** Export names from key aliases on layers strictly below ``belowIndex`` (synthetic keys forwarded upward). */
+function forwardedAliasExportNames(layers: LayerEditorState[], belowIndex: number): string[] {
+  const out = new Set<string>();
+  for (let j = 0; j < belowIndex; j++) {
+    for (const row of layers[j]?.aliasRows ?? []) {
+      const t = row.target.trim();
+      if (t) out.add(t);
+    }
+  }
+  return [...out];
 }
 
 async function unionForwardedKeyNames(
@@ -54,6 +83,9 @@ async function unionForwardedKeyNames(
         if (s) out.add(s);
       });
     }
+  }
+  for (const t of forwardedAliasExportNames(layers, belowIndex)) {
+    out.add(t);
   }
   return [...out].sort((a, b) => a.localeCompare(b));
 }
@@ -176,7 +208,7 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
   const addLayer = () => {
     onChange([
       ...layers,
-      { bundle: "", mode: "all", selected: [], label: "" },
+      { bundle: "", mode: "all", selected: [], label: "", aliasRows: [] },
     ]);
   };
 
@@ -409,6 +441,15 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
                 </div>
               ) : null}
             </div>
+
+            {index > 0 ? (
+              <LayerAliasesBlock
+                layerIndex={index}
+                layers={layers}
+                aliasRows={layer.aliasRows ?? []}
+                updateLayer={updateLayer}
+              />
+            ) : null}
           </div>
         );
       })}
@@ -422,7 +463,118 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
 
 export function stackLayersFromApi(layers: StackLayer[]): LayerEditorState[] {
   if (!layers.length) {
-    return [{ bundle: "", mode: "all", selected: [], label: "" }];
+    return [{ bundle: "", mode: "all", selected: [], label: "", aliasRows: [] }];
   }
   return layers.map(stackLayerToEditor);
+}
+
+type AliasBlockProps = {
+  layerIndex: number;
+  layers: LayerEditorState[];
+  aliasRows: { target: string; source: string }[];
+  updateLayer: (index: number, patch: Partial<LayerEditorState>) => void;
+};
+
+function LayerAliasesBlock({ layerIndex, layers, aliasRows, updateLayer }: AliasBlockProps) {
+  const [sourceOptions, setSourceOptions] = useState<string[] | "loading" | "error">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const keys = await unionForwardedKeyNames(layers, layerIndex);
+        if (!cancelled) setSourceOptions(keys);
+      } catch {
+        if (!cancelled) setSourceOptions("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [layers, layerIndex]);
+
+  const opts = sourceOptions === "loading" || sourceOptions === "error" ? [] : sourceOptions;
+
+  return (
+    <div className="mt-4 border-t border-border/40 pt-3">
+      <div className="mb-1 text-xs font-medium text-slate-500">Key aliases (optional)</div>
+      <p className="mb-2 text-xs text-slate-500">
+        Add export names that copy values from variables already present in merged layers below — e.g.{" "}
+        <span className="font-mono text-slate-400">VITE_OIDC_KEY</span> from{" "}
+        <span className="font-mono text-slate-400">OIDC_KEY</span> without storing the value twice.
+      </p>
+      {sourceOptions === "loading" ? (
+        <p className="text-sm text-slate-500">Loading names from lower layers…</p>
+      ) : sourceOptions === "error" ? (
+        <p className="text-sm text-red-400">Could not load variable names from lower layers.</p>
+      ) : (
+        <div className="space-y-2">
+          {aliasRows.map((row, ri) => (
+            <div key={ri} className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[8rem] flex-1">
+                <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-500">
+                  Export as
+                </label>
+                <input
+                  className="w-full rounded border border-border bg-[#121820] px-2 py-1.5 font-mono text-xs"
+                  placeholder="VITE_OIDC_KEY"
+                  value={row.target}
+                  onChange={(e) => {
+                    const next = aliasRows.slice();
+                    next[ri] = { ...row, target: e.target.value };
+                    updateLayer(layerIndex, { aliasRows: next });
+                  }}
+                />
+              </div>
+              <span className="pb-2 text-slate-600">←</span>
+              <div className="min-w-[8rem] flex-1">
+                <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-500">
+                  From (below)
+                </label>
+                <select
+                  className="w-full rounded border border-border bg-[#121820] px-2 py-1.5 font-mono text-xs"
+                  value={row.source}
+                  onChange={(e) => {
+                    const next = aliasRows.slice();
+                    next[ri] = { ...row, source: e.target.value };
+                    updateLayer(layerIndex, { aliasRows: next });
+                  }}
+                >
+                  <option value="">Select…</option>
+                  {opts.map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="rounded border border-red-900/40 px-2 py-1 text-xs text-red-300 hover:bg-red-950/30"
+                onClick={() => {
+                  updateLayer(
+                    layerIndex,
+                    { aliasRows: aliasRows.filter((_, j) => j !== ri) },
+                  );
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="text-xs text-accent underline"
+            onClick={() =>
+              updateLayer(layerIndex, {
+                aliasRows: [...aliasRows, { target: "", source: "" }],
+              })
+            }
+          >
+            Add alias
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }

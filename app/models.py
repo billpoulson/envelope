@@ -111,6 +111,8 @@ class BundleStackLayer(Base):
     selected_keys_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Optional display name for this row in the UI (bundle reference unchanged).
     layer_label: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # JSON object: export name -> source key from merged layers below this one (e.g. VITE_OIDC_KEY -> OIDC_KEY).
+    aliases_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     stack: Mapped["BundleStack"] = relationship(back_populates="layers")
     bundle: Mapped["Bundle"] = relationship(back_populates="stack_layers")

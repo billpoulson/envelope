@@ -26,6 +26,7 @@ from app.services.stacks import (
     LayerSpec,
     get_stack_by_name,
     load_stack_secrets,
+    normalize_layer_aliases_map,
     replace_stack_layers,
     stack_key_graph_payload_for_stack,
     validate_stack_name,
@@ -51,6 +52,8 @@ class StackLayerIn(BaseModel):
     bundle: str = Field(..., min_length=1, max_length=256)
     keys: Literal["*"] | list[str] = "*"
     label: str | None = None
+    # Export additional names copying values from keys already present in merged layers below.
+    aliases: dict[str, str] | None = None
 
     @field_validator("bundle")
     @classmethod
@@ -87,6 +90,14 @@ class StackLayerIn(BaseModel):
                 raise ValueError("no valid key names after trim/dedupe")
             return out
         return v
+
+    @field_validator("aliases")
+    @classmethod
+    def validate_aliases(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        try:
+            return normalize_layer_aliases_map(v)
+        except ValueError as e:
+            raise ValueError(str(e)) from e
 
 
 def _coerce_legacy_string_layers(data: Any) -> Any:
@@ -132,10 +143,11 @@ class PatchStackBody(BaseModel):
 def _stack_layers_to_specs(layers: list[StackLayerIn]) -> list[LayerSpec]:
     out: list[LayerSpec] = []
     for L in layers:
+        al = L.aliases
         if L.keys == "*":
-            out.append(LayerSpec(L.bundle, None, L.label))
+            out.append(LayerSpec(L.bundle, None, L.label, al))
         else:
-            out.append(LayerSpec(L.bundle, L.keys, L.label))
+            out.append(LayerSpec(L.bundle, L.keys, L.label, al))
     return out
 
 
@@ -147,6 +159,14 @@ def _serialize_stack_layer(layer: BundleStackLayer) -> dict[str, Any]:
     raw = getattr(layer, "layer_label", None)
     if isinstance(raw, str) and raw.strip():
         d["label"] = raw.strip()
+    aj = getattr(layer, "aliases_json", None)
+    if isinstance(aj, str) and aj.strip():
+        try:
+            parsed = json.loads(aj)
+            if isinstance(parsed, dict) and parsed:
+                d["aliases"] = parsed
+        except json.JSONDecodeError:
+            pass
     return d
 
 

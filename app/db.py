@@ -178,6 +178,8 @@ def _migrate_sqlite_bundle_stack_layer_keys(sync_conn) -> None:
         sync_conn.execute(
             text("ALTER TABLE bundle_stack_layers ADD COLUMN layer_label VARCHAR(256)")
         )
+    if "aliases_json" not in cols:
+        sync_conn.execute(text("ALTER TABLE bundle_stack_layers ADD COLUMN aliases_json TEXT"))
 
 
 def _migrate_sqlite_stack_env_links_slice(sync_conn) -> None:

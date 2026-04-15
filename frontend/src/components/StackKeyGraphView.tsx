@@ -62,6 +62,11 @@ function isValidDropTarget(
   return !graphCellHasValue(cells[targetLi], cellsSecretRedacted?.[targetLi]);
 }
 
+function scrollToGraphRowByKey(sourceKey: string) {
+  const el = document.querySelector(`[data-graph-row="${CSS.escape(sourceKey)}"]`);
+  el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function DragHandle() {
   return (
     <span
@@ -118,12 +123,12 @@ function CellValue({
 export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRefetch }: Props) {
   const [filter, setFilter] = useState("");
   const n = data.layers.length;
-  const [collapsed, setCollapsed] = useState<boolean[]>(() => Array.from({ length: n }, () => true));
+  const [collapsed, setCollapsed] = useState<boolean[]>(() => Array.from({ length: n }, () => false));
 
   useEffect(() => {
     setCollapsed((c) => {
       if (c.length === n) return c;
-      return Array.from({ length: n }, () => true);
+      return Array.from({ length: n }, () => false);
     });
   }, [n]);
 
@@ -412,13 +417,40 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
                   }
                 }
 
+                const aliasSrc =
+                  row.cells_alias_source ??
+                  (row as { cellsAliasSource?: (string | null)[] }).cellsAliasSource;
+                const aliasSourceName = aliasSrc?.find((s) => s != null && String(s).trim() !== "");
+
                 return (
-                  <tr key={key} className="border-b border-border/30 hover:bg-white/[0.02]">
+                  <tr
+                    key={key}
+                    data-graph-row={key}
+                    className="border-b border-border/30 hover:bg-white/[0.02]"
+                  >
                     <th
                       scope="row"
                       className="sticky left-0 z-10 bg-[#121820] px-2 py-2 font-mono text-xs text-slate-200"
                     >
-                      {key}
+                      <div>{key}</div>
+                      {aliasSourceName ? (
+                        <div
+                          className="mt-1 max-w-[14rem] font-mono text-[10px] font-normal leading-tight text-slate-500"
+                          title="This name is a stack layer alias; same value as the source variable from merged layers below."
+                        >
+                          <span className="text-slate-600">alias of </span>
+                          <button
+                            type="button"
+                            className="text-accent underline decoration-accent/40 underline-offset-2 hover:text-slate-300"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              scrollToGraphRowByKey(aliasSourceName);
+                            }}
+                          >
+                            {aliasSourceName}
+                          </button>
+                        </div>
+                      ) : null}
                     </th>
                     {data.layers.map((L, li) => {
                       const v = cells[li];
@@ -600,6 +632,24 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
                                       showSecrets={showSecrets}
                                       redactedFromApi={redacted}
                                     />
+                                    {aliasSrc?.[li] ? (
+                                      <div
+                                        className="mt-0.5 font-mono text-[10px] leading-tight text-slate-500"
+                                        title={`Alias: same value as ${aliasSrc[li]} from merged layers below this layer`}
+                                      >
+                                        <span className="select-none text-slate-600">from </span>
+                                        <button
+                                          type="button"
+                                          className="text-accent underline decoration-accent/40 underline-offset-2 hover:text-slate-300"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            scrollToGraphRowByKey(aliasSrc[li]!);
+                                          }}
+                                        >
+                                          {aliasSrc[li]}
+                                        </button>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </div>
                               ) : (
