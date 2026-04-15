@@ -24,8 +24,11 @@ export function Layout() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { pathname } = useLocation();
-  /** Stack key graph is table-heavy; allow more horizontal room than default pages. */
-  const wideMain = pathname.includes("/key-graph");
+  /** Full-bleed main: stack layers, env links, and key graph use full width; body scroll is inside the page shell. */
+  const stackWorkbenchFullBleed =
+    pathname.includes("/key-graph") ||
+    (pathname.includes("/stacks/") &&
+      (pathname.endsWith("/edit") || pathname.endsWith("/env-links")));
   const projectMatch = useMatch({ path: "/projects/:projectSlug/*", end: false });
   const rawSlug = projectMatch?.params.projectSlug;
   const projectSlug = rawSlug && rawSlug !== "new" ? rawSlug : undefined;
@@ -86,21 +89,31 @@ export function Layout() {
   }
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-border/80 bg-[#121820]/95 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-4 pt-3">
+    <div className="flex min-h-[100dvh] min-h-screen flex-col bg-[#0b0f14]">
+      <header className="z-20 shrink-0 border-b border-border/80 bg-[#121820]/95 backdrop-blur">
+        <div className="mx-auto w-full max-w-none px-4 pt-3">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <Link to="/" className="text-lg font-semibold tracking-tight text-white">
               Envelope
             </Link>
-            <NavLink
-              to="/help"
-              className={({ isActive }) =>
-                `text-sm ${isActive ? "text-white" : "text-slate-400 hover:text-slate-200"}`
-              }
-            >
-              Help
-            </NavLink>
+            <div className="flex items-center gap-4">
+              <NavLink
+                to="/tutorial"
+                className={({ isActive }) =>
+                  `text-sm ${isActive ? "text-white" : "text-slate-400 hover:text-slate-200"}`
+                }
+              >
+                Tutorial
+              </NavLink>
+              <NavLink
+                to="/help"
+                className={({ isActive }) =>
+                  `text-sm ${isActive ? "text-white" : "text-slate-400 hover:text-slate-200"}`
+                }
+              >
+                Help
+              </NavLink>
+            </div>
           </div>
 
           <nav
@@ -212,10 +225,14 @@ export function Layout() {
           ) : null}
         </div>
       </header>
-      <main
-        className={`mx-auto px-4 py-8 ${wideMain ? "max-w-[min(100rem,calc(100vw-2rem))]" : "max-w-6xl"}`}
-      >
-        <Outlet />
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {stackWorkbenchFullBleed ? (
+          <Outlet />
+        ) : (
+          <div className="mx-auto flex min-h-0 w-full max-w-[min(96rem,calc(100vw-2rem))] flex-1 flex-col overflow-y-auto px-4 py-8">
+            <Outlet />
+          </div>
+        )}
       </main>
     </div>
   );

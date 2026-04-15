@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { listBundles } from "@/api/bundles";
 import {
   deleteStack,
@@ -14,7 +14,7 @@ import {
   stackLayersFromApi,
   StackLayersEditor,
 } from "@/components/StackLayersEditor";
-import { StackSubnav } from "@/components/StackSubnav";
+import { StackPageShell } from "@/components/StackPageShell";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
@@ -102,12 +102,13 @@ export default function StackEditPage() {
     : "/stacks";
 
   return (
-    <div>
-      <h1 className="mb-2 font-mono text-2xl text-white">{stackName}</h1>
-      <StackSubnav projectSlug={subnavSlug} stackName={stackName} />
-      <p className="mb-4 text-slate-400">
-        <Link to={stacksListTo}>← Stacks</Link>
-      </p>
+    <StackPageShell
+      stackName={stackName}
+      subnavSlug={subnavSlug}
+      subtitle="Edit stack layers"
+      tertiaryLink={{ to: stacksListTo, label: "← Stacks" }}
+      fullBleed
+    >
       {err ? <p className="mb-4 text-red-400">{err}</p> : null}
       <div className="mb-4">
         <label className="mb-1 block text-sm text-slate-400">Rename</label>
@@ -146,6 +147,6 @@ export default function StackEditPage() {
           Delete stack
         </Button>
       </div>
-    </div>
+    </StackPageShell>
   );
 }

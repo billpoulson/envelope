@@ -475,7 +475,7 @@ type AliasBlockProps = {
   updateLayer: (index: number, patch: Partial<LayerEditorState>) => void;
 };
 
-function LayerAliasesBlock({ layerIndex, layers, aliasRows, updateLayer }: AliasBlockProps) {
+export function LayerAliasesBlock({ layerIndex, layers, aliasRows, updateLayer }: AliasBlockProps) {
   const [sourceOptions, setSourceOptions] = useState<string[] | "loading" | "error">("loading");
 
   useEffect(() => {

@@ -11,6 +11,7 @@ import BundleVariablesPage from "@/pages/BundleVariablesPage";
 import BundlesPage from "@/pages/BundlesPage";
 import CertificatesPage from "@/pages/CertificatesPage";
 import HelpPage from "@/pages/HelpPage";
+import TutorialPage from "@/pages/TutorialPage";
 import LoginPage from "@/pages/LoginPage";
 import NewBundlePage from "@/pages/NewBundlePage";
 import NewProjectPage from "@/pages/NewProjectPage";
@@ -96,6 +97,7 @@ export default function App() {
           <Route path="/certificates" element={<CertificatesPage />} />
           <Route path="/backup" element={<BackupPage />} />
           <Route path="/help" element={<HelpPage />} />
+          <Route path="/tutorial" element={<TutorialPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/projects" replace />} />

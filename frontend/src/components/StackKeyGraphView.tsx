@@ -9,7 +9,13 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 import { deleteSecret, upsertSecret } from "@/api/bundles";
-import type { StackKeyGraphPayload } from "@/api/stacks";
+import { patchStack, type StackKeyGraphPayload, type StackLayer } from "@/api/stacks";
+import {
+  editorToStackLayer,
+  LayerAliasesBlock,
+  stackLayersFromApi,
+  type LayerEditorState,
+} from "@/components/StackLayersEditor";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 import {
@@ -82,6 +88,9 @@ function DragHandle() {
 
 type Props = {
   data: StackKeyGraphPayload;
+  /** Stack name and layers for editing key aliases from the context menu (optional). */
+  stackName?: string;
+  stackLayers?: StackLayer[];
   showSecrets: boolean;
   onShowSecretsChange: (next: boolean) => void;
   onRefetch: () => void;
@@ -120,7 +129,14 @@ function CellValue({
   return <div className={`font-mono text-[11px] text-slate-200 ${className}`}>{pj.text}</div>;
 }
 
-export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRefetch }: Props) {
+export function StackKeyGraphView({
+  data,
+  stackName,
+  stackLayers = [],
+  showSecrets,
+  onShowSecretsChange,
+  onRefetch,
+}: Props) {
   const [filter, setFilter] = useState("");
   const n = data.layers.length;
   const [collapsed, setCollapsed] = useState<boolean[]>(() => Array.from({ length: n }, () => false));
@@ -156,6 +172,7 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
           targets: { layerIndex: number; label: string; bundle: string }[];
         };
         remove?: { bundleName: string; keyName: string };
+        aliasesLayer?: { layerIndex: number };
       }
   >(null);
   const ctxRef = useRef<HTMLDivElement>(null);
@@ -200,6 +217,23 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
 
   const [dragMove, setDragMove] = useState<DragMovePayload | null>(null);
   const [dragOverDrop, setDragOverDrop] = useState<{ key: string; li: number } | null>(null);
+
+  const [aliasModalLayer, setAliasModalLayer] = useState<number | null>(null);
+  const [aliasEditLayers, setAliasEditLayers] = useState<LayerEditorState[]>([]);
+  const [aliasErr, setAliasErr] = useState<string | null>(null);
+  const [aliasBusy, setAliasBusy] = useState(false);
+
+  const canEditAliases = Boolean(stackName?.trim()) && stackLayers.length > 0;
+
+  const openAliasModal = useCallback(
+    (layerIndex: number) => {
+      setAliasErr(null);
+      setAliasEditLayers(stackLayersFromApi(stackLayers));
+      setAliasModalLayer(layerIndex);
+      setCtx(null);
+    },
+    [stackLayers],
+  );
 
   const submitDefine = useCallback(async () => {
     if (!defineBody) return;
@@ -278,6 +312,23 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
     [onRefetch],
   );
 
+  const submitAliasSave = useCallback(async () => {
+    if (aliasModalLayer === null || !stackName?.trim()) return;
+    setAliasErr(null);
+    setAliasBusy(true);
+    try {
+      await patchStack(stackName.trim(), {
+        layers: aliasEditLayers.map(editorToStackLayer),
+      });
+      setAliasModalLayer(null);
+      onRefetch();
+    } catch (e: unknown) {
+      setAliasErr(formatApiError(e));
+    } finally {
+      setAliasBusy(false);
+    }
+  }, [aliasEditLayers, aliasModalLayer, onRefetch, stackName]);
+
   if (n === 0) {
     return <p className="text-slate-400">This stack has no layers.</p>;
   }
@@ -309,7 +360,8 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
           <li>
             <strong className="text-slate-300">Drag</strong> using the grip beside a value onto another layer’s{" "}
             <strong className="text-slate-300">empty</strong> cell (same row) to move the variable to that bundle.
-            Or <strong className="text-slate-300">right-click</strong> for View secret, Edit, Define, Move, or{" "}
+            Or <strong className="text-slate-300">right-click</strong> for View secret, Edit, Define, Move,{" "}
+            <strong className="text-slate-300">Key aliases for this layer</strong> (layers after the bottom), or{" "}
             <strong className="text-slate-300">Remove from bundle</strong> (deletes the variable from that bundle for
             all stacks).
           </li>
@@ -353,6 +405,14 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
                 <th
                   key={L.position}
                   className={`border-l border-border/40 px-1 py-1 align-bottom transition-[width] ${collapsed[li] ? "max-w-[3.5rem]" : "min-w-[12rem] w-[14rem]"}`}
+                  onContextMenu={(e) => {
+                    if (!canEditAliases || li === 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setTimeout(() => {
+                      setCtx({ x: e.clientX, y: e.clientY, aliasesLayer: { layerIndex: li } });
+                    }, 0);
+                  }}
                 >
                   <div className="flex flex-col gap-1">
                     <div className="flex items-start gap-1">
@@ -493,12 +553,15 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
                         const definePayload = canDefine ? { bundleName, keyName: key } : undefined;
                         const removePayload =
                           hasVal && bundleName ? { bundleName, keyName: key } : undefined;
+                        const aliasesPayload =
+                          canEditAliases && li > 0 ? { layerIndex: li } : undefined;
                         if (
                           !viewSecretPayload &&
                           !editTo &&
                           !definePayload &&
                           !movePayload &&
-                          !removePayload
+                          !removePayload &&
+                          !aliasesPayload
                         )
                           return;
                         setTimeout(() => {
@@ -510,6 +573,7 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
                             define: definePayload,
                             move: movePayload,
                             remove: removePayload,
+                            aliasesLayer: aliasesPayload,
                           });
                         }, 0);
                       };
@@ -830,6 +894,17 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
               {removeBusy ? "Removing…" : "Remove from bundle…"}
             </button>
           ) : null}
+          {ctx.aliasesLayer ? (
+            <button
+              type="button"
+              className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/10"
+              onClick={() => {
+                openAliasModal(ctx.aliasesLayer!.layerIndex);
+              }}
+            >
+              Key aliases for this layer…
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -896,6 +971,49 @@ export function StackKeyGraphView({ data, showSecrets, onShowSecretsChange, onRe
                   setMovePick(null);
                   setMoveErr(null);
                 }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {aliasModalLayer !== null ? (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => {
+            if (!aliasBusy) setAliasModalLayer(null);
+          }}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-border bg-[#121820] p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-1 text-lg text-white">Key aliases for this layer</h3>
+            <p className="mb-4 font-mono text-xs text-slate-400">
+              {data.layers[aliasModalLayer]?.label} · {data.layers[aliasModalLayer]?.bundle}
+            </p>
+            {aliasErr ? <p className="mb-3 text-sm text-red-400">{aliasErr}</p> : null}
+            <LayerAliasesBlock
+              layerIndex={aliasModalLayer}
+              layers={aliasEditLayers}
+              aliasRows={aliasEditLayers[aliasModalLayer]?.aliasRows ?? []}
+              updateLayer={(index, patch) => {
+                setAliasEditLayers((prev) =>
+                  prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+                );
+              }}
+            />
+            <div className="mt-6 flex flex-wrap gap-2 border-t border-border/40 pt-4">
+              <Button type="button" disabled={aliasBusy} onClick={() => void submitAliasSave()}>
+                {aliasBusy ? "Saving…" : "Save aliases"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={aliasBusy}
+                onClick={() => setAliasModalLayer(null)}
               >
                 Cancel
               </Button>

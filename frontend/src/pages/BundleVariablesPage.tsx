@@ -11,8 +11,8 @@ import {
   upsertSecret,
   type BundlePayload,
 } from "@/api/bundles";
+import { BundlePageShell } from "@/components/BundlePageShell";
 import { BundleVarActionsMenu } from "@/components/BundleVarActionsMenu";
-import { BundleSubnav } from "@/components/BundleSubnav";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
@@ -127,22 +127,28 @@ export default function BundleVariablesPage() {
   const data = q.data;
   const projectSlug = projectSlugParam ?? data.project_slug ?? "";
   const subnavProjectSlug = projectSlugParam ?? (projectSlug || undefined);
+  const bundlesListTo = projectSlug
+    ? `/projects/${encodeURIComponent(projectSlug)}/bundles`
+    : "/bundles";
   const entries = Object.entries(data.secrets).sort(([a], [b]) => a.localeCompare(b));
 
   return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="font-mono text-2xl font-semibold text-white">{bundleName}</h1>
-        <div className="flex flex-wrap gap-2">
+    <BundlePageShell
+      bundleName={bundleName}
+      subnavSlug={subnavProjectSlug}
+      subtitle="Variables"
+      tertiaryLink={{ to: bundlesListTo, label: "← Bundles" }}
+      belowSubnav={
+        <>
           <Button type="button" variant="secondary" onClick={() => void copyKeys()}>
             Copy key names
           </Button>
           <Button type="button" onClick={() => setAddOpen(true)}>
             Add entry
           </Button>
-        </div>
-      </div>
-      <BundleSubnav projectSlug={subnavProjectSlug} bundleName={bundleName} />
+        </>
+      }
+    >
       {err ? <p className="mb-4 text-sm text-red-400">{err}</p> : null}
 
       <div className="rounded-xl border border-border/80">
@@ -323,6 +329,6 @@ export default function BundleVariablesPage() {
           </Button>
         </div>
       </div>
-    </div>
+    </BundlePageShell>
   );
 }

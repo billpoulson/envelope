@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   createStackEnvLink,
   deleteStackEnvLink,
   getStack,
   listStackEnvLinks,
 } from "@/api/stacks";
-import { StackSubnav } from "@/components/StackSubnav";
+import { StackPageShell } from "@/components/StackPageShell";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
@@ -89,17 +89,15 @@ export default function StackEnvLinksPage() {
   };
 
   return (
-    <div>
-      <h1 className="mb-2 font-mono text-2xl text-white">{stackName} — env links</h1>
-      <StackSubnav projectSlug={subnavSlug} stackName={stackName} />
-      <p className="mb-4">
-        <Link className="text-accent underline" to={editTo}>
-          ← Layers
-        </Link>
-      </p>
-
+    <StackPageShell
+      stackName={stackName}
+      subnavSlug={subnavSlug}
+      subtitle="Secret env URLs"
+      tertiaryLink={{ to: editTo, label: "← Edit stack layers" }}
+      fullBleed
+    >
       <h2 className="mb-2 text-lg font-medium text-white">Secret env URL</h2>
-      <p className="mb-6 max-w-3xl text-sm leading-relaxed text-slate-400">
+      <p className="mb-6 text-sm leading-relaxed text-slate-400">
         Download the stack as <code className="text-slate-300">.env</code> or JSON using a random path — project and
         stack names never appear in the URL. Issue a link for the <strong className="text-slate-300">full merged</strong>{" "}
         stack or a <strong className="text-slate-300">prefix slice</strong> (merge from the bottom through a chosen
@@ -158,7 +156,7 @@ export default function StackEnvLinksPage() {
       {stackLayers.length > 0 ? (
         <section className="mb-10" aria-label="Prefix slice URLs">
           <h3 className="mb-2 text-base font-medium text-slate-200">Prefix slice (per layer)</h3>
-          <p className="mb-4 max-w-3xl text-sm text-slate-500">
+          <p className="mb-4 text-sm text-slate-500">
             Each link merges from the bottom of the stack through the selected layer (same overwrite rules as the full
             stack, but layers above are omitted).
           </p>
@@ -278,12 +276,6 @@ export default function StackEnvLinksPage() {
           </div>
         </div>
       </dialog>
-
-      <p className="text-sm text-slate-500">
-        <Link className="text-accent underline" to={editTo}>
-          ← Back to layers
-        </Link>
-      </p>
-    </div>
+    </StackPageShell>
   );
 }

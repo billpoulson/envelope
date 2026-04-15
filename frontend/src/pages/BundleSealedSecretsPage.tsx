@@ -9,7 +9,7 @@ import {
   type SealedRecipientIn,
 } from "@/api/bundles";
 import { listCertificates } from "@/api/certificates";
-import { BundleSubnav } from "@/components/BundleSubnav";
+import { BundlePageShell } from "@/components/BundlePageShell";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
@@ -170,13 +170,12 @@ export default function BundleSealedSecretsPage() {
   const canSubmitWizard = certs.length > 0;
 
   return (
-    <div>
-      <h1 className="mb-2 font-mono text-2xl font-semibold text-white">{bundleName}</h1>
-      <BundleSubnav projectSlug={subnavSlug} bundleName={bundleName} />
-      <p className="mb-4 text-slate-400">
-        <Link to={editTo}>← Variables</Link>
-      </p>
-
+    <BundlePageShell
+      bundleName={bundleName}
+      subnavSlug={subnavSlug}
+      subtitle="Sealed secrets"
+      tertiaryLink={{ to: editTo, label: "← Variables" }}
+    >
       <p className="mb-4 text-sm text-slate-400">
         Upload client-encrypted payloads and wrapped data keys for certificate recipients. The server stores
         ciphertext only (same model as the classic UI).
@@ -417,6 +416,6 @@ export default function BundleSealedSecretsPage() {
           </div>
         </div>
       ) : null}
-    </div>
+    </BundlePageShell>
   );
 }

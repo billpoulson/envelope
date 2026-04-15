@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   createBundleEnvLink,
   deleteBundleEnvLink,
   getBundle,
   listBundleEnvLinks,
 } from "@/api/bundles";
-import { BundleSubnav } from "@/components/BundleSubnav";
+import { BundlePageShell } from "@/components/BundlePageShell";
 import { Button } from "@/components/ui";
 
 export default function BundleEnvLinksPage() {
@@ -67,12 +67,12 @@ export default function BundleEnvLinksPage() {
   const rows = q.data ?? [];
 
   return (
-    <div>
-      <h1 className="mb-2 font-mono text-2xl font-semibold text-white">{bundleName}</h1>
-      <BundleSubnav projectSlug={subnavSlug} bundleName={bundleName} />
-      <p className="mb-4 text-slate-400">
-        <Link to={editTo}>← Variables</Link>
-      </p>
+    <BundlePageShell
+      bundleName={bundleName}
+      subnavSlug={subnavSlug}
+      subtitle="Secret env URLs"
+      tertiaryLink={{ to: editTo, label: "← Variables" }}
+    >
       {err ? <p className="mb-4 text-red-400">{err}</p> : null}
       {lastUrl ? (
         <div className="mb-6 rounded-lg border border-accent/40 bg-accent/10 p-4">
@@ -108,6 +108,6 @@ export default function BundleEnvLinksPage() {
           ))}
         </ul>
       )}
-    </div>
+    </BundlePageShell>
   );
 }
