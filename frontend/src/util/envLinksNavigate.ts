@@ -16,14 +16,16 @@ export function envLinksPageLocation(
   options?: { highlightSha256?: string },
 ): { pathname: string; search: string } {
   const enc = encodeURIComponent;
-  const { resource, name, project_slug, environment_slug } = res;
+  const { resource, name, slug, project_slug, environment_slug } = res;
   const hl = options?.highlightSha256;
+  const stackSeg = resource === "stack" ? (slug ?? name) : name;
+  const bundleSeg = resource === "bundle" ? (slug ?? name) : name;
 
   if (project_slug) {
     const pathname =
       resource === "bundle"
-        ? `/projects/${enc(project_slug)}/bundles/${enc(name)}/env-links`
-        : `/projects/${enc(project_slug)}/stacks/${enc(name)}/env-links`;
+        ? `/projects/${enc(project_slug)}/bundles/${enc(bundleSeg)}/env-links`
+        : `/projects/${enc(project_slug)}/stacks/${enc(stackSeg)}/env-links`;
     const p = new URLSearchParams();
     if (environment_slug != null && environment_slug !== "") {
       p.set("env", environment_slug);
@@ -32,6 +34,8 @@ export function envLinksPageLocation(
   }
 
   const pathname =
-    resource === "bundle" ? `/bundles/${enc(name)}/env-links` : `/stacks/${enc(name)}/env-links`;
+    resource === "bundle"
+      ? `/bundles/${enc(bundleSeg)}/env-links`
+      : `/stacks/${enc(stackSeg)}/env-links`;
   return { pathname, search: appendHighlight(new URLSearchParams(), hl) };
 }

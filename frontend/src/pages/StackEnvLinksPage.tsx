@@ -102,6 +102,7 @@ export default function StackEnvLinksPage() {
   return (
     <StackPageShell
       stackName={stackName}
+      displayName={stackQ.data?.name}
       subnavSlug={subnavSlug}
       linkSearch={location.search}
       subtitle="Secret env URLs"

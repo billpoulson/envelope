@@ -32,6 +32,14 @@ def extract_conflicting_secret_key_name(error_text: str) -> str | None:
 
 RESERVED_JSON_KEYS = frozenset({"_plaintext_keys", "_bundle_name"})
 
+# Display titles (spaces allowed). Align with stack display rules.
+_BUNDLE_DISPLAY_MAX_LEN = 256
+_BUNDLE_DISPLAY_FORBIDDEN = re.compile(r'[/\\<>:"|?*\x00-\x1f]')
+_BUNDLE_SLUG_MAX_LEN = 128
+_BUNDLE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+# Keep in sync with app.db bundle slug migration reserved set.
+RESERVED_BUNDLE_SLUGS = frozenset({"new"})
+
 ImportKind = Literal["json_object", "json_array", "csv_quoted", "dotenv_lines"]
 
 IMPORT_KIND_VALUES: frozenset[str] = frozenset(
@@ -89,7 +97,69 @@ def dedupe_entry_rows(rows: list[tuple[str, str, bool]]) -> list[tuple[str, str,
     return [(k, merged[k][0], merged[k][1]) for k in sorted(merged.keys())]
 
 
+def validate_bundle_display_name(name: str) -> None:
+    """Human-readable bundle title (may include spaces)."""
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="Bundle name is required")
+    if len(name) > _BUNDLE_DISPLAY_MAX_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bundle name must be at most {_BUNDLE_DISPLAY_MAX_LEN} characters",
+        )
+    if _BUNDLE_DISPLAY_FORBIDDEN.search(name):
+        raise HTTPException(
+            status_code=400,
+            detail='Bundle name cannot contain / \\ : * ? " < > | or control characters',
+        )
+
+
+def validate_bundle_slug(slug: str) -> None:
+    """URL-safe bundle identifier (per project environment)."""
+    s = slug.strip()
+    if not s or len(s) > _BUNDLE_SLUG_MAX_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bundle slug must be 1–{_BUNDLE_SLUG_MAX_LEN} characters after trim.",
+        )
+    if not _BUNDLE_SLUG_RE.match(s):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Bundle slug: start with a letter or number; "
+                "then lowercase letters, numbers, ., _, - only."
+            ),
+        )
+    if s in RESERVED_BUNDLE_SLUGS:
+        raise HTTPException(status_code=400, detail=f"Bundle slug {s!r} is reserved.")
+
+
+def bundle_slug_suggestion_from_display_name(name: str) -> str:
+    s = name.lower().strip()
+    s = re.sub(r"[^a-z0-9._-]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-") or "bundle"
+    if s in RESERVED_BUNDLE_SLUGS:
+        s = f"{s}-bundle"
+    return s[:_BUNDLE_SLUG_MAX_LEN]
+
+
+def validate_bundle_path_segment(raw: str) -> None:
+    """URL path segment: slug (preferred) or legacy strict bundle name."""
+    s = raw.strip()
+    if not s:
+        raise HTTPException(status_code=400, detail="Bundle path is required")
+    try:
+        validate_bundle_slug(s)
+    except HTTPException:
+        if BUNDLE_NAME_RE.match(s):
+            return
+        raise HTTPException(
+            status_code=400,
+            detail="Bundle path must be a valid slug or legacy name [a-zA-Z0-9._-]+",
+        ) from None
+
+
 def validate_bundle_name(name: str) -> None:
+    """Legacy strict token [a-zA-Z0-9._-]+ (used where the old rules still apply)."""
     if not BUNDLE_NAME_RE.match(name):
         raise HTTPException(
             status_code=400,
@@ -490,7 +560,7 @@ async def load_bundle_entries(
     """Returns map key -> (value, is_secret). Decrypts every row (export/API)."""
     from app.services.scope_resolution import fetch_bundle_for_path
 
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     b = await fetch_bundle_for_path(
         session,
         name,
@@ -510,7 +580,7 @@ async def load_bundle_entries_list_masked(
     """Web list view: decrypt plaintext rows only; encrypted values are not loaded (None)."""
     from app.services.scope_resolution import fetch_bundle_for_path
 
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     resolved = await fetch_bundle_for_path(
         session,
         name,
@@ -585,7 +655,7 @@ async def list_bundle_secret_key_names(
     """Sorted key names from `secrets` rows only (not sealed secrets)."""
     from app.services.scope_resolution import fetch_bundle_for_path
 
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     b = await fetch_bundle_for_path(
         session, name, project_slug=project_slug, environment_slug=environment_slug
     )

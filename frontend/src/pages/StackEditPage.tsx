@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pencil } from "lucide-react";
 import { useLayoutEffect, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { listBundles } from "@/api/bundles";
@@ -16,6 +17,7 @@ import {
   stackLayersFromApi,
   StackLayersEditor,
 } from "@/components/StackLayersEditor";
+import { EditNameSlugModal } from "@/components/EditNameSlugModal";
 import { StackPageShell } from "@/components/StackPageShell";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
@@ -50,7 +52,9 @@ export default function StackEditPage() {
   });
   const resourceScope = resourceScopeFromNav(projectSlugParam, envTag);
   const [layerUi, setLayerUi] = useState<LayerEditorState[]>([]);
-  const [rename, setRename] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [stackSlug, setStackSlug] = useState("");
+  const [stackDetailsOpen, setStackDetailsOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const projectSlugForBundles = projectSlugParam ?? q.data?.project_slug ?? "";
@@ -92,37 +96,71 @@ export default function StackEditPage() {
   useLayoutEffect(() => {
     if (q.data?.layers) {
       setLayerUi(stackLayersFromApi(q.data.layers));
-      setRename(q.data.name);
     }
   }, [q.data]);
 
-  const saveM = useMutation({
+  useLayoutEffect(() => {
+    if (q.data && !stackDetailsOpen) {
+      setDisplayName(q.data.name);
+      setStackSlug(q.data.slug);
+    }
+  }, [q.data, stackDetailsOpen]);
+
+  function openStackDetails() {
+    if (!q.data) return;
+    setErr(null);
+    setDisplayName(q.data.name);
+    setStackSlug(q.data.slug);
+    setStackDetailsOpen(true);
+  }
+
+  const saveLayersM = useMutation({
     mutationFn: async () => {
+      const detail = q.data;
+      if (!detail) throw new Error("Missing stack");
       const layers = layerUi.map(editorToStackLayer);
-      const newName = rename.trim();
-      const ps = projectSlugParam ?? q.data?.project_slug ?? "";
-      await patchStack(
-        stackName,
-        {
-          name: newName !== stackName ? newName : undefined,
-          layers,
-        },
-        resourceScope,
-      );
-      return { newName, ps, renamed: newName !== stackName };
+      await patchStack(stackName, { layers }, resourceScope);
     },
-    onSuccess: async ({ newName, ps, renamed }) => {
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["stack", stackName] });
       await qc.invalidateQueries({ queryKey: ["stack"] });
       await qc.invalidateQueries({ queryKey: ["stacks"] });
       setErr(null);
-      if (renamed) {
+    },
+    onError: (e: unknown) => setErr(formatApiError(e)),
+  });
+
+  const saveDetailsM = useMutation({
+    mutationFn: async () => {
+      const detail = q.data;
+      if (!detail) throw new Error("Missing stack");
+      const dn = displayName.trim();
+      const ss = stackSlug.trim();
+      const body: { name?: string; slug?: string } = {};
+      if (dn !== detail.name) body.name = dn;
+      if (ss !== detail.slug) body.slug = ss;
+      const ps = projectSlugParam ?? detail.project_slug ?? "";
+      if (Object.keys(body).length === 0) {
+        return { ss, ps, slugChanged: ss !== stackName, skipped: true as const };
+      }
+      await patchStack(stackName, body, resourceScope);
+      return { ss, ps, slugChanged: ss !== stackName, skipped: false as const };
+    },
+    onSuccess: async (result) => {
+      setStackDetailsOpen(false);
+      if (result.skipped) return;
+      await qc.invalidateQueries({ queryKey: ["stack"] });
+      await qc.invalidateQueries({ queryKey: ["stacks"] });
+      setErr(null);
+      const { ss, ps, slugChanged } = result;
+      if (slugChanged) {
         if (ps) {
           navigate(
-            `/projects/${encodeURIComponent(ps)}/stacks/${encodeURIComponent(newName)}/edit${location.search}`,
+            `/projects/${encodeURIComponent(ps)}/stacks/${encodeURIComponent(ss)}/edit${location.search}`,
             { replace: true },
           );
         } else {
-          navigate(`/stacks/${encodeURIComponent(newName)}/edit${location.search}`, { replace: true });
+          navigate(`/stacks/${encodeURIComponent(ss)}/edit${location.search}`, { replace: true });
         }
       }
     },
@@ -191,13 +229,25 @@ export default function StackEditPage() {
   return (
     <StackPageShell
       stackName={stackName}
+      displayName={q.data.name}
       subnavSlug={subnavSlug}
       linkSearch={location.search}
       subtitle="Edit stack layers"
       tertiaryLink={{ to: `${stacksListTo}${location.search}`, label: "← Stacks" }}
+      titleAccessory={
+        <button
+          type="button"
+          className="rounded-md border border-border/60 p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
+          title="Edit name and slug"
+          aria-label="Edit name and slug"
+          onClick={openStackDetails}
+        >
+          <Pencil className="h-4 w-4" aria-hidden />
+        </button>
+      }
       fullBleed
     >
-      {err ? <p className="mb-4 text-red-400">{err}</p> : null}
+      {err && !stackDetailsOpen ? <p className="mb-4 text-red-400">{err}</p> : null}
       {projectSlugResolved && !envAssignmentLocked ? (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-slate-400">Environment</span>
@@ -221,14 +271,6 @@ export default function StackEditPage() {
         </div>
       ) : null}
       <div className="mb-4">
-        <label className="mb-1 block text-sm text-slate-400">Rename</label>
-        <input
-          className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm"
-          value={rename}
-          onChange={(e) => setRename(e.target.value)}
-        />
-      </div>
-      <div className="mb-4">
         <h2 className="mb-2 text-lg text-white">Layers</h2>
         {bundlesQ.isError ? (
           <p className="mb-2 text-sm text-amber-400">
@@ -247,20 +289,34 @@ export default function StackEditPage() {
         />
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" disabled={saveM.isPending} onClick={() => saveM.mutate()}>
-          Save
+        <Button type="button" disabled={saveLayersM.isPending} onClick={() => saveLayersM.mutate()}>
+          {saveLayersM.isPending ? "Saving…" : "Save layers"}
         </Button>
         <Button
           type="button"
           variant="secondary"
           className="text-red-300"
           onClick={() => {
-            if (confirm(`Delete stack ${stackName}?`)) delM.mutate();
+            if (confirm(`Delete stack “${q.data.name}”?`)) delM.mutate();
           }}
         >
           Delete stack
         </Button>
       </div>
+
+      <EditNameSlugModal
+        open={stackDetailsOpen}
+        onClose={() => setStackDetailsOpen(false)}
+        title="Stack name & slug"
+        nameValue={displayName}
+        slugValue={stackSlug}
+        onNameChange={setDisplayName}
+        onSlugChange={setStackSlug}
+        onSave={() => saveDetailsM.mutate()}
+        savePending={saveDetailsM.isPending}
+        error={err}
+        saveLabel="Save"
+      />
     </StackPageShell>
   );
 }

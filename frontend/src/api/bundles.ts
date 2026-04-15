@@ -30,6 +30,7 @@ export type ListBundlesOptions = {
 
 export type ProjectBundleListRow = {
   name: string;
+  slug: string;
   project_environment_slug: string | null;
   project_environment_name: string | null;
 };
@@ -61,6 +62,8 @@ export async function listProjectBundles(
 }
 
 export type BundlePayload = {
+  name: string;
+  slug: string;
   secrets: Record<string, string>;
   secret_flags: Record<string, boolean>;
   group_id: number | null;
@@ -78,12 +81,13 @@ export async function getBundle(name: string, scope?: ResourceScopeOpts): Promis
 
 export async function createBundle(body: {
   name: string;
+  slug?: string;
   project_slug: string;
   project_environment_slug: string;
   entries?: Record<string, unknown>;
   initial_paste?: string;
   import_kind?: ImportKind;
-}): Promise<{ id: number; name: string }> {
+}): Promise<{ id: number; name: string; slug: string }> {
   const csrf = await fetchCsrf();
   return apiFetch("/bundles", {
     method: "POST",
@@ -95,6 +99,8 @@ export async function createBundle(body: {
 export async function patchBundle(
   name: string,
   body: {
+    name?: string;
+    slug?: string;
     entries?: Record<string, unknown>;
     project_slug?: string | null;
     project_environment_slug?: string | null;

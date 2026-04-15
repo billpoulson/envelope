@@ -70,7 +70,7 @@ export default function ProjectStacksPage() {
   const envPath = `/projects/${encodeURIComponent(projectSlug)}/environments`;
   const qs = searchParams.toString() ? `?${searchParams.toString()}` : "";
   const items = rows.map((row) => {
-    const href = `${base}/${encodeURIComponent(row.name)}/edit${qs}`;
+    const href = `${base}/${encodeURIComponent(row.slug)}/edit${qs}`;
     return {
       name: row.name,
       href,

@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.db import get_db
 from app.deps import get_api_key
 from app.models import ApiKey, Bundle, Certificate, SealedSecret, SealedSecretRecipient
-from app.services.bundles import normalize_env_key, validate_bundle_name
+from app.services.bundles import normalize_env_key, validate_bundle_path_segment
 from app.services.scope_resolution import fetch_bundle_for_path
 from app.services.scopes import can_read_bundle, can_write_bundle, parse_scopes_json
 
@@ -56,7 +56,7 @@ def _bundle_project_name_slug(bundle: Bundle) -> tuple[str | None, str | None]:
 
 
 async def _get_bundle_or_404(session: AsyncSession, name: str, scope: ResourcePathScope) -> Bundle:
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     return await fetch_bundle_for_path(
         session,
         name,
@@ -78,6 +78,7 @@ async def list_sealed_secrets(
     if not can_read_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pname,
         project_slug=pslug,
@@ -125,6 +126,7 @@ async def upsert_sealed_secret(
     if not can_write_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pname,
         project_slug=pslug,
@@ -200,6 +202,7 @@ async def delete_sealed_secret(
     if not can_write_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pname,
         project_slug=pslug,

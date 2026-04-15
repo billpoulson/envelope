@@ -95,6 +95,7 @@ export default function StackKeyGraphPage() {
   return (
     <StackPageShell
       stackName={stackName}
+      displayName={stackQ.data?.name}
       subnavSlug={subnavSlug}
       linkSearch={location.search}
       subtitle="Key graph — merged variables by layer"

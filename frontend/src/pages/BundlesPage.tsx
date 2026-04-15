@@ -16,17 +16,18 @@ export default function BundlesPage() {
     );
   }
 
-  const names = q.data ?? [];
-  const items = names.map((n) => ({
-    name: n,
-    href: `/bundles/${encodeURIComponent(n)}/edit`,
+  /** URL path segments (bundle slugs; legacy bundles resolve the same segment). */
+  const slugs = q.data ?? [];
+  const items = slugs.map((seg) => ({
+    name: seg,
+    href: `/bundles/${encodeURIComponent(seg)}/edit`,
   }));
 
   return (
     <div>
       <PageHeader
         title="Bundles"
-        subtitle={names.length > 0 ? `${names.length} total` : undefined}
+        subtitle={slugs.length > 0 ? `${slugs.length} total` : undefined}
       />
       <p className="mb-6 max-w-2xl text-sm leading-relaxed text-slate-400">
         Bundles belong to a project. Open a project to create new ones, or jump to a bundle below

@@ -7,7 +7,7 @@ import re
 from typing import Any, NamedTuple
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,7 +17,7 @@ from app.services.bundles import (
     load_bundle_entries_by_id,
     load_bundle_secrets_by_bundle_id,
     normalize_env_key,
-    validate_bundle_name,
+    validate_bundle_path_segment,
 )
 from app.services.project_environments import UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL
 
@@ -67,6 +67,11 @@ _STACK_NAME_MAX_LEN = 256
 # Human-readable titles (spaces allowed). Block path/reserved/shell-hostile characters.
 _STACK_NAME_FORBIDDEN = re.compile(r'[/\\<>:"|?*\x00-\x1f]')
 
+_STACK_SLUG_MAX_LEN = 128
+_STACK_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+# Keep in sync with app.db._migrate_sqlite_bundle_stacks_slug reserved set.
+RESERVED_STACK_SLUGS = frozenset({"new"})
+
 
 def normalize_layer_aliases_map(raw: dict[str, str] | None) -> dict[str, str] | None:
     """Validate and normalize layer alias map (export name -> source key). Returns None if empty."""
@@ -94,8 +99,8 @@ def normalize_layer_aliases_map(raw: dict[str, str] | None) -> dict[str, str] | 
     return out or None
 
 
-def validate_stack_name(name: str) -> None:
-    """Stack names may include spaces and common punctuation; bundle names stay stricter."""
+def validate_stack_display_name(name: str) -> None:
+    """Display title: may include spaces and common punctuation (unlike URL slug)."""
     if not name.strip():
         raise HTTPException(status_code=400, detail="Stack name is required")
     if len(name) > _STACK_NAME_MAX_LEN:
@@ -110,6 +115,52 @@ def validate_stack_name(name: str) -> None:
         )
 
 
+def validate_stack_name(name: str) -> None:
+    """Backward-compatible alias for :func:`validate_stack_display_name`."""
+    validate_stack_display_name(name)
+
+
+def validate_stack_slug(slug: str) -> None:
+    """URL-safe stack identifier (per project environment), like project slugs."""
+    s = slug.strip()
+    if not s or len(s) > _STACK_SLUG_MAX_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stack slug must be 1–{_STACK_SLUG_MAX_LEN} characters after trim.",
+        )
+    if not _STACK_SLUG_RE.match(s):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Stack slug: start with a letter or number; "
+                "then lowercase letters, numbers, ., _, - only."
+            ),
+        )
+    if s in RESERVED_STACK_SLUGS:
+        raise HTTPException(status_code=400, detail=f"Stack slug {s!r} is reserved.")
+
+
+def stack_slug_suggestion_from_display_name(name: str) -> str:
+    """Default slug from a display title (for create / hints only)."""
+    s = name.lower().strip()
+    s = re.sub(r"[^a-z0-9._-]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-") or "stack"
+    if s in RESERVED_STACK_SLUGS:
+        s = f"{s}-stack"
+    return s[:_STACK_SLUG_MAX_LEN]
+
+
+def validate_stack_path_segment(raw: str) -> None:
+    """Accept slug (preferred) or legacy display name used in old URLs."""
+    s = raw.strip()
+    if not s:
+        raise HTTPException(status_code=400, detail="Stack path is required")
+    try:
+        validate_stack_slug(s)
+    except HTTPException:
+        validate_stack_display_name(s)
+
+
 async def get_stack_by_name(
     session: AsyncSession,
     name: str,
@@ -119,7 +170,7 @@ async def get_stack_by_name(
 ) -> BundleStack | None:
     from app.services.scope_resolution import fetch_stack_for_path
 
-    validate_stack_name(name)
+    validate_stack_path_segment(name)
     try:
         st0 = await fetch_stack_for_path(
             session,
@@ -155,10 +206,13 @@ async def resolve_bundle_id_for_stack_layer(
 ) -> int:
     """Pick the bundle row for this stack's environment (exact env, else shared unassigned)."""
     bn = bundle_name.strip()
-    validate_bundle_name(bn)
+    validate_bundle_path_segment(bn)
     r = await session.execute(
         select(Bundle)
-        .where(Bundle.group_id == stack.group_id, Bundle.name == bn)
+        .where(
+            Bundle.group_id == stack.group_id,
+            or_(Bundle.slug == bn, Bundle.name == bn),
+        )
         .options(selectinload(Bundle.project_environment))
     )
     candidates = list(r.scalars().all())
@@ -588,7 +642,7 @@ async def replace_stack_layers(
         bn = spec.bundle.strip()
         keys = spec.keys
         lbl = normalize_layer_label(spec.label)
-        validate_bundle_name(bn)
+        validate_bundle_path_segment(bn)
         bid = await resolve_bundle_id_for_stack_layer(session, st_full, bn)
         if keys is not None and len(keys) == 0:
             raise HTTPException(

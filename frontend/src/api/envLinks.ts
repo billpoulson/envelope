@@ -3,6 +3,8 @@ import { apiFetch } from "./client";
 export type EnvLinkResolveResponse = {
   resource: "bundle" | "stack";
   name: string;
+  /** Stack URL segment when resource is stack; null for bundles. */
+  slug: string | null;
   /** Present when the bundle/stack belongs to a project. */
   project_slug: string | null;
   /** With `project_slug`: environment slug, or `__unassigned__` when not assigned. */

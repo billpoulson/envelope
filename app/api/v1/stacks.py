@@ -37,7 +37,10 @@ from app.services.stacks import (
     normalize_layer_aliases_map,
     replace_stack_layers,
     stack_key_graph_payload_for_stack,
-    validate_stack_name,
+    stack_slug_suggestion_from_display_name,
+    validate_stack_display_name,
+    validate_stack_path_segment,
+    validate_stack_slug,
     validate_through_layer_position,
 )
 
@@ -119,6 +122,8 @@ def _coerce_legacy_string_layers(data: Any) -> Any:
 
 class CreateStackBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=256)
+    """URL segment (optional; derived from name when omitted)."""
+    slug: str | None = Field(None, max_length=128)
     layers: list[StackLayerIn] = Field(..., min_length=1)
     group_id: int | None = None
     project_slug: str | None = None
@@ -132,6 +137,7 @@ class CreateStackBody(BaseModel):
 
 class PatchStackBody(BaseModel):
     name: str | None = None
+    slug: str | None = None
     layers: list[StackLayerIn] | None = None
     group_id: int | None = None
     project_slug: str | None = None
@@ -140,6 +146,13 @@ class PatchStackBody(BaseModel):
     @field_validator("name")
     @classmethod
     def strip_stack_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return v.strip()
+
+    @field_validator("slug")
+    @classmethod
+    def strip_stack_slug(cls, v: str | None) -> str | None:
         if v is None:
             return None
         return v.strip()
@@ -162,10 +175,12 @@ def _stack_layers_to_specs(layers: list[StackLayerIn]) -> list[LayerSpec]:
 
 
 def _serialize_stack_layer(layer: BundleStackLayer) -> dict[str, Any]:
+    b = layer.bundle
+    bref = (getattr(b, "slug", None) or "").strip() or b.name
     if getattr(layer, "keys_mode", "all") != "pick" or not layer.selected_keys_json:
-        d: dict[str, Any] = {"bundle": layer.bundle.name, "keys": "*"}
+        d: dict[str, Any] = {"bundle": bref, "keys": "*"}
     else:
-        d = {"bundle": layer.bundle.name, "keys": json.loads(layer.selected_keys_json)}
+        d = {"bundle": bref, "keys": json.loads(layer.selected_keys_json)}
     raw = getattr(layer, "layer_label", None)
     if isinstance(raw, str) and raw.strip():
         d["label"] = raw.strip()
@@ -207,6 +222,7 @@ async def _ensure_can_export_stack(
     if not can_read_stack(
         scopes,
         stack_name=stack.name,
+        stack_slug=stack.slug,
         group_id=stack.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -220,6 +236,7 @@ async def _ensure_can_export_stack(
         if not can_read_bundle(
             scopes,
             bundle_name=b.name,
+            bundle_slug=b.slug,
             group_id=b.group_id,
             project_name=pn_b,
             project_slug=ps_b,
@@ -234,6 +251,7 @@ def _stack_list_row(s: BundleStack) -> dict[str, str | None]:
     pe = s.project_environment
     return {
         "name": s.name,
+        "slug": s.slug,
         "project_environment_slug": pe.slug if pe else None,
         "project_environment_name": pe.name if pe else None,
     }
@@ -296,7 +314,7 @@ async def list_stacks(
     if scopes_allow_admin(scopes):
         if with_environment and has_ps:
             return [_stack_list_row(s) for s in rows]
-        return [s.name for s in rows]
+        return [s.slug for s in rows]
     out_str: list[str] = []
     out_detail: list[dict[str, str | None]] = []
     for s in rows:
@@ -305,6 +323,7 @@ async def list_stacks(
         if can_read_stack(
             scopes,
             stack_name=s.name,
+            stack_slug=s.slug,
             group_id=s.group_id,
             project_name=pn,
             project_slug=ps,
@@ -312,7 +331,7 @@ async def list_stacks(
             if with_environment and has_ps:
                 out_detail.append(_stack_list_row(s))
             else:
-                out_str.append(s.name)
+                out_str.append(s.slug)
     return out_detail if (with_environment and has_ps) else out_str
 
 
@@ -322,8 +341,11 @@ async def create_stack(
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str | int | None]:
-    name = body.name.strip()
-    validate_stack_name(name)
+    display_name = body.name.strip()
+    validate_stack_display_name(display_name)
+    slug_raw = (body.slug or "").strip()
+    slug_out = slug_raw or stack_slug_suggestion_from_display_name(display_name)
+    validate_stack_slug(slug_out)
     scopes = parse_scopes_json(key.scopes)
     has_ps = body.project_slug is not None and str(body.project_slug).strip()
     has_gid = body.group_id is not None
@@ -352,7 +374,8 @@ async def create_stack(
         pslug = g.slug
     if not can_create_stack(
         scopes,
-        stack_name=name,
+        stack_name=display_name,
+        stack_slug=slug_out,
         group_id=gid,
         project_name=pname,
         project_slug=pslug,
@@ -364,14 +387,21 @@ async def create_stack(
         slug=body.project_environment_slug,
         resource="stack",
     )
-    dup_q = select(BundleStack.id).where(BundleStack.group_id == gid, BundleStack.name == name)
+    dup_q = select(BundleStack.id).where(BundleStack.group_id == gid, BundleStack.name == display_name)
     if env_fk is None:
         dup_q = dup_q.where(BundleStack.project_environment_id.is_(None))
     else:
         dup_q = dup_q.where(BundleStack.project_environment_id == env_fk)
     if (await session.execute(dup_q)).scalar_one_or_none() is not None:
-        raise HTTPException(status_code=409, detail="Stack already exists in this environment")
-    st = BundleStack(name=name, group_id=gid, project_environment_id=env_fk)
+        raise HTTPException(status_code=409, detail="Stack name already exists in this environment")
+    dup_slug = select(BundleStack.id).where(BundleStack.group_id == gid, BundleStack.slug == slug_out)
+    if env_fk is None:
+        dup_slug = dup_slug.where(BundleStack.project_environment_id.is_(None))
+    else:
+        dup_slug = dup_slug.where(BundleStack.project_environment_id == env_fk)
+    if (await session.execute(dup_slug)).scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Stack slug already exists in this environment")
+    st = BundleStack(name=display_name, slug=slug_out, group_id=gid, project_environment_id=env_fk)
     session.add(st)
     await session.flush()
     await replace_stack_layers(session, st.id, _stack_layers_to_specs(body.layers))
@@ -388,6 +418,7 @@ async def create_stack(
     return {
         "id": st.id,
         "name": st.name,
+        "slug": st.slug,
         "group_id": st.group_id,
         "project_slug": out_slug,
         "project_environment_slug": env_slug,
@@ -401,7 +432,7 @@ async def get_stack(
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    validate_stack_name(name)
+    validate_stack_path_segment(name)
     st = await _load_stack_for_api(session, name, scope)
     scopes = parse_scopes_json(key.scopes)
     pn = st.group.name if st.group else None
@@ -409,6 +440,7 @@ async def get_stack(
     if not can_read_stack(
         scopes,
         stack_name=st.name,
+        stack_slug=st.slug,
         group_id=st.group_id,
         project_name=pn,
         project_slug=ps,
@@ -426,6 +458,7 @@ async def get_stack(
         env_slug = pe.slug if pe else None
     return {
         "name": st.name,
+        "slug": st.slug,
         "group_id": st.group_id,
         "project_slug": out_slug,
         "project_environment_slug": env_slug,
@@ -445,7 +478,7 @@ async def get_stack_key_graph(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Merged key graph for stack layers (same payload as legacy web `/key-graph/data`)."""
-    validate_stack_name(name)
+    validate_stack_path_segment(name)
     st = await _load_stack_for_api(session, name, scope)
     scopes = parse_scopes_json(key.scopes)
     pn = st.group.name if st.group else None
@@ -453,6 +486,7 @@ async def get_stack_key_graph(
     if not can_read_stack(
         scopes,
         stack_name=st.name,
+        stack_slug=st.slug,
         group_id=st.group_id,
         project_name=pn,
         project_slug=ps,
@@ -471,7 +505,7 @@ async def patch_stack(
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str | int | None]:
-    validate_stack_name(name)
+    validate_stack_path_segment(name)
     if not body.model_fields_set:
         raise HTTPException(status_code=400, detail="No fields to patch")
     scopes = parse_scopes_json(key.scopes)
@@ -481,6 +515,7 @@ async def patch_stack(
     if not can_write_stack(
         scopes,
         stack_name=st.name,
+        stack_slug=st.slug,
         group_id=st.group_id,
         project_name=pn,
         project_slug=ps,
@@ -488,7 +523,7 @@ async def patch_stack(
         raise HTTPException(status_code=403, detail="Insufficient scope for this stack")
     if "name" in body.model_fields_set and body.name is not None:
         new_name = body.name
-        validate_stack_name(new_name)
+        validate_stack_display_name(new_name)
         if new_name != st.name:
             dup_q = select(BundleStack.id).where(
                 BundleStack.group_id == st.group_id,
@@ -500,8 +535,24 @@ async def patch_stack(
                 dup_q = dup_q.where(BundleStack.project_environment_id == st.project_environment_id)
             existing_id = (await session.execute(dup_q)).scalar_one_or_none()
             if existing_id is not None and existing_id != st.id:
-                raise HTTPException(status_code=409, detail="Stack already exists in this environment")
+                raise HTTPException(status_code=409, detail="Stack name already exists in this environment")
             st.name = new_name
+    if "slug" in body.model_fields_set and body.slug is not None:
+        new_slug = body.slug
+        validate_stack_slug(new_slug)
+        if new_slug != st.slug:
+            dup_sq = select(BundleStack.id).where(
+                BundleStack.group_id == st.group_id,
+                BundleStack.slug == new_slug,
+            )
+            if st.project_environment_id is None:
+                dup_sq = dup_sq.where(BundleStack.project_environment_id.is_(None))
+            else:
+                dup_sq = dup_sq.where(BundleStack.project_environment_id == st.project_environment_id)
+            existing_sid = (await session.execute(dup_sq)).scalar_one_or_none()
+            if existing_sid is not None and existing_sid != st.id:
+                raise HTTPException(status_code=409, detail="Stack slug already exists in this environment")
+            st.slug = new_slug
     prior_group_id = st.group_id
     prior_env_id = st.project_environment_id
     target_gid = st.group_id
@@ -533,6 +584,7 @@ async def patch_stack(
         if not can_create_stack(
             scopes,
             stack_name=st.name,
+            stack_slug=st.slug,
             group_id=target_gid,
             project_name=new_pn,
             project_slug=new_ps,
@@ -585,6 +637,7 @@ async def patch_stack(
         env_slug = pe.slug if pe else None
     return {
         "name": st.name,
+        "slug": st.slug,
         "group_id": st.group_id,
         "project_slug": out_slug,
         "project_environment_slug": env_slug,
@@ -598,7 +651,7 @@ async def delete_stack(
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    validate_stack_name(name)
+    validate_stack_path_segment(name)
     scopes = parse_scopes_json(key.scopes)
     st = await _load_stack_for_api(session, name, scope)
     pn = st.group.name if st.group else None
@@ -606,6 +659,7 @@ async def delete_stack(
     if not can_write_stack(
         scopes,
         stack_name=st.name,
+        stack_slug=st.slug,
         group_id=st.group_id,
         project_name=pn,
         project_slug=ps,
@@ -626,25 +680,26 @@ async def export_stack(
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    validate_stack_name(name)
+    validate_stack_path_segment(name)
     st = await get_stack_by_name(session, name, **_stack_scope_query(scope))
     if st is None:
         raise HTTPException(status_code=404, detail="Stack not found")
     scopes = parse_scopes_json(key.scopes)
     await _ensure_can_export_stack(session, st, scopes)
     secrets_map = await load_stack_secrets(session, st)
+    safe_fn = st.slug or name
     if format == "json":
         body = json.dumps(secrets_map, sort_keys=True, indent=2) + "\n"
         return Response(
             content=body,
             media_type="application/json",
-            headers={"Content-Disposition": f'attachment; filename="{name}.json"'},
+            headers={"Content-Disposition": f'attachment; filename="{safe_fn}.json"'},
         )
     text = format_secrets_dotenv(secrets_map)
     return Response(
         content=text,
         media_type="text/plain; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{name}.env"'},
+        headers={"Content-Disposition": f'attachment; filename="{safe_fn}.env"'},
     )
 
 
@@ -657,7 +712,7 @@ async def list_stack_env_links(
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> list[dict[str, int | str | None]]:
-    validate_stack_name(name)
+    validate_stack_path_segment(name)
     st = await _load_stack_for_api(session, name, scope)
     scopes = parse_scopes_json(auth.scopes)
     pn = st.group.name if st.group else None
@@ -665,6 +720,7 @@ async def list_stack_env_links(
     if not can_write_stack(
         scopes,
         stack_name=st.name,
+        stack_slug=st.slug,
         group_id=st.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -712,7 +768,7 @@ async def create_stack_env_link(
     session: AsyncSession = Depends(get_db),
     body: StackEnvLinkCreateIn = Body(default_factory=StackEnvLinkCreateIn),
 ) -> dict[str, str]:
-    validate_stack_name(name)
+    validate_stack_path_segment(name)
     st = await _load_stack_for_api(session, name, scope)
     scopes = parse_scopes_json(auth.scopes)
     pn = st.group.name if st.group else None
@@ -720,6 +776,7 @@ async def create_stack_env_link(
     if not can_write_stack(
         scopes,
         stack_name=st.name,
+        stack_slug=st.slug,
         group_id=st.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -752,7 +809,7 @@ async def delete_stack_env_link(
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    validate_stack_name(name)
+    validate_stack_path_segment(name)
     st = await _load_stack_for_api(session, name, scope)
     scopes = parse_scopes_json(auth.scopes)
     pn = st.group.name if st.group else None
@@ -760,6 +817,7 @@ async def delete_stack_env_link(
     if not can_write_stack(
         scopes,
         stack_name=st.name,
+        stack_slug=st.slug,
         group_id=st.group_id,
         project_name=pn,
         project_slug=pslug,

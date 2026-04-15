@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -33,13 +33,13 @@ async def fetch_bundle_for_path(
     project_slug: str | None,
     environment_slug: str | None,
 ) -> Bundle:
-    from app.services.bundles import validate_bundle_name
+    from app.services.bundles import validate_bundle_path_segment
 
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     nm = name.strip()
     r = await session.execute(
         select(Bundle)
-        .where(Bundle.name == nm)
+        .where(or_(Bundle.slug == nm, Bundle.name == nm))
         .options(selectinload(Bundle.group), selectinload(Bundle.project_environment))
     )
     rows = list(r.scalars().all())
@@ -91,13 +91,13 @@ async def fetch_stack_for_path(
     project_slug: str | None,
     environment_slug: str | None,
 ) -> BundleStack:
-    from app.services.stacks import validate_stack_name
+    from app.services.stacks import validate_stack_path_segment
 
-    validate_stack_name(name)
+    validate_stack_path_segment(name)
     nm = name.strip()
     r = await session.execute(
         select(BundleStack)
-        .where(BundleStack.name == nm)
+        .where(or_(BundleStack.slug == nm, BundleStack.name == nm))
         .options(selectinload(BundleStack.group), selectinload(BundleStack.project_environment))
     )
     rows = list(r.scalars().all())

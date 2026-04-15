@@ -40,7 +40,7 @@ export default function ProjectBundlesPage() {
   const needsEnvironment = envsLoaded && envCount === 0;
 
   const items = rows.map((row) => {
-    const href = `${base}/${encodeURIComponent(row.name)}/edit${qs}`;
+    const href = `${base}/${encodeURIComponent(row.slug)}/edit${qs}`;
     return {
       name: row.name,
       href,

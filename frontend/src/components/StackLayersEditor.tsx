@@ -178,7 +178,7 @@ export function StackLayersEditor({ bundleNames, bundleKeyScope, layers, onChang
   >({});
   const [filter, setFilter] = useState<Record<number, string>>({});
   /** `true` = layer body is expanded */
-  const [layerExpanded, setLayerExpanded] = useState<boolean[]>(() => layers.map(() => true));
+  const [layerExpanded, setLayerExpanded] = useState<boolean[]>(() => layers.map(() => false));
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
@@ -186,7 +186,7 @@ export function StackLayersEditor({ bundleNames, bundleKeyScope, layers, onChang
     setLayerExpanded((prev) => {
       if (prev.length === layers.length) return prev;
       if (layers.length > prev.length) {
-        return [...prev, ...Array(layers.length - prev.length).fill(true)];
+        return [...prev, ...Array(layers.length - prev.length).fill(false)];
       }
       return prev.slice(0, layers.length);
     });

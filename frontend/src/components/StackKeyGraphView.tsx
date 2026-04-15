@@ -8,7 +8,12 @@ import {
   type MouseEvent,
 } from "react";
 import { Link } from "react-router-dom";
-import { deleteSecret, upsertSecret, type ResourceScopeOpts } from "@/api/bundles";
+import {
+  deleteBundle,
+  deleteSecret,
+  upsertSecret,
+  type ResourceScopeOpts,
+} from "@/api/bundles";
 import { patchStack, type StackKeyGraphPayload, type StackLayer } from "@/api/stacks";
 import { bundleScopeForApi } from "@/projectEnv";
 import {
@@ -179,6 +184,8 @@ export function StackKeyGraphView({
           targets: { layerIndex: number; label: string; bundle: string }[];
         };
         remove?: { bundleName: string; keyName: string; bundleEnvironmentSlug: string | null };
+        /** Layer column header — remove layer from stack or delete the bundle. */
+        layerHeader?: { layerIndex: number };
         aliasesLayer?: { layerIndex: number };
       }
   >(null);
@@ -224,6 +231,9 @@ export function StackKeyGraphView({
   const [removeErr, setRemoveErr] = useState<string | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
 
+  const [layerHeaderErr, setLayerHeaderErr] = useState<string | null>(null);
+  const [layerHeaderBusy, setLayerHeaderBusy] = useState(false);
+
   const [dragMove, setDragMove] = useState<DragMovePayload | null>(null);
   const [dragOverDrop, setDragOverDrop] = useState<{ key: string; li: number } | null>(null);
 
@@ -233,6 +243,7 @@ export function StackKeyGraphView({
   const [aliasBusy, setAliasBusy] = useState(false);
 
   const canEditAliases = Boolean(stackName?.trim()) && stackLayers.length > 0;
+  const canEditStackLayers = Boolean(stackName?.trim()) && stackLayers.length > 0;
 
   const openAliasModal = useCallback(
     (layerIndex: number) => {
@@ -371,6 +382,58 @@ export function StackKeyGraphView({
     }
   }, [aliasEditLayers, aliasModalLayer, onRefetch, stackName, stackScope]);
 
+  const executeRemoveLayerFromStack = useCallback(
+    async (layerIndex: number) => {
+      const sn = stackName?.trim();
+      if (!sn || stackLayers.length === 0) return;
+      const label = String(data.layers[layerIndex]?.label || "").trim() || `Layer ${layerIndex + 1}`;
+      const bundle = String(data.layers[layerIndex]?.bundle || "").trim() || "(no bundle)";
+      const msg = `Remove ${label} (${bundle}) from this stack? The bundle is not deleted.`;
+      if (!confirm(msg)) return;
+      setLayerHeaderErr(null);
+      setLayerHeaderBusy(true);
+      try {
+        const next = stackLayers.filter((_, i) => i !== layerIndex);
+        if (next.length < 1) {
+          setLayerHeaderErr("A stack must keep at least one layer.");
+          return;
+        }
+        await patchStack(sn, { layers: next }, stackScope);
+        setCtx(null);
+        onRefetch();
+      } catch (e: unknown) {
+        setLayerHeaderErr(formatApiError(e));
+      } finally {
+        setLayerHeaderBusy(false);
+      }
+    },
+    [data.layers, onRefetch, stackLayers, stackName, stackScope],
+  );
+
+  const executeDeleteBundleForLayer = useCallback(
+    async (layerIndex: number) => {
+      const bundleName = String(data.layers[layerIndex]?.bundle || "").trim();
+      if (!bundleName) {
+        setLayerHeaderErr("This layer has no bundle to delete.");
+        return;
+      }
+      const msg = `Delete bundle “${bundleName}” entirely? All variables in this bundle are removed. Other stacks or envs that use this bundle will be affected.`;
+      if (!confirm(msg)) return;
+      setLayerHeaderErr(null);
+      setLayerHeaderBusy(true);
+      try {
+        await deleteBundle(bundleName, stackScope);
+        setCtx(null);
+        onRefetch();
+      } catch (e: unknown) {
+        setLayerHeaderErr(formatApiError(e));
+      } finally {
+        setLayerHeaderBusy(false);
+      }
+    },
+    [data.layers, onRefetch, stackScope],
+  );
+
   if (n === 0) {
     return <p className="text-slate-400">This stack has no layers.</p>;
   }
@@ -400,10 +463,14 @@ export function StackKeyGraphView({
             until then values appear as <code className="text-slate-300">(secret)</code>.
           </li>
           <li>
+            <strong className="text-slate-300">Right-click a layer header</strong> to remove that layer from this stack
+            or delete its bundle entirely, or (except the bottom layer) open{" "}
+            <strong className="text-slate-300">Key aliases for this layer</strong>.
+          </li>
+          <li>
             <strong className="text-slate-300">Drag</strong> using the grip beside a value onto another layer’s{" "}
             <strong className="text-slate-300">empty</strong> cell (same row) to move the variable to that bundle.
-            Or <strong className="text-slate-300">right-click</strong> for View secret, Edit, Define, Move,{" "}
-            <strong className="text-slate-300">Key aliases for this layer</strong> (layers after the bottom), or{" "}
+            Or <strong className="text-slate-300">right-click a cell</strong> for View secret, Edit, Define, Move, or{" "}
             <strong className="text-slate-300">Remove from bundle</strong> (deletes the variable from that bundle for
             all stacks).
           </li>
@@ -415,6 +482,11 @@ export function StackKeyGraphView({
       ) : null}
       {removeErr ? (
         <p className="rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-300">{removeErr}</p>
+      ) : null}
+      {layerHeaderErr ? (
+        <p className="rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+          {layerHeaderErr}
+        </p>
       ) : null}
 
       <div className="flex flex-wrap items-center gap-4 border-b border-border/40 pb-3">
@@ -448,11 +520,17 @@ export function StackKeyGraphView({
                   key={L.position}
                   className={`border-l border-border/40 px-1 py-1 align-bottom transition-[width] ${collapsed[li] ? "max-w-[3.5rem]" : "min-w-[12rem] w-[14rem]"}`}
                   onContextMenu={(e) => {
-                    if (!canEditAliases || li === 0) return;
+                    if (!canEditStackLayers) return;
                     e.preventDefault();
                     e.stopPropagation();
+                    setLayerHeaderErr(null);
                     setTimeout(() => {
-                      setCtx({ x: e.clientX, y: e.clientY, aliasesLayer: { layerIndex: li } });
+                      setCtx({
+                        x: e.clientX,
+                        y: e.clientY,
+                        layerHeader: { layerIndex: li },
+                        ...(li > 0 && canEditAliases ? { aliasesLayer: { layerIndex: li } } : {}),
+                      });
                     }, 0);
                   }}
                 >
@@ -878,6 +956,35 @@ export function StackKeyGraphView({
           style={{ left: ctx.x, top: ctx.y }}
           onClick={(e) => e.stopPropagation()}
         >
+          {ctx.layerHeader ? (
+            <>
+              <button
+                type="button"
+                disabled={layerHeaderBusy}
+                className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/10 disabled:opacity-50"
+                onClick={() => {
+                  const li = ctx.layerHeader!.layerIndex;
+                  void executeRemoveLayerFromStack(li);
+                }}
+              >
+                Remove from stack…
+              </button>
+              <button
+                type="button"
+                disabled={
+                  layerHeaderBusy ||
+                  !String(data.layers[ctx.layerHeader.layerIndex]?.bundle || "").trim()
+                }
+                className="block w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                onClick={() => {
+                  const li = ctx.layerHeader!.layerIndex;
+                  void executeDeleteBundleForLayer(li);
+                }}
+              >
+                Delete bundle…
+              </button>
+            </>
+          ) : null}
           {ctx.viewSecret ? (
             <button
               type="button"
@@ -956,15 +1063,18 @@ export function StackKeyGraphView({
             </button>
           ) : null}
           {ctx.aliasesLayer ? (
-            <button
-              type="button"
-              className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/10"
-              onClick={() => {
-                openAliasModal(ctx.aliasesLayer!.layerIndex);
-              }}
-            >
-              Key aliases for this layer…
-            </button>
+            <>
+              {ctx.layerHeader ? <div className="border-t border-border/40" /> : null}
+              <button
+                type="button"
+                className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/10"
+                onClick={() => {
+                  openAliasModal(ctx.aliasesLayer!.layerIndex);
+                }}
+              >
+                Key aliases for this layer…
+              </button>
+            </>
           ) : null}
         </div>
       ) : null}

@@ -267,6 +267,142 @@ def _migrate_sqlite_bundles_stacks_scoped_names(sync_conn) -> None:
         )
 
 
+_RESERVED_STACK_SLUGS = frozenset({"new"})
+
+
+def _derive_stack_slug_candidate(raw_name: str, used: set[str]) -> str:
+    """Deterministic URL slug from a legacy stack name; avoids collisions within *used*."""
+    import re
+
+    s = raw_name.lower().strip()
+    s = re.sub(r"[^a-z0-9._-]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-") or "stack"
+    if s in _RESERVED_STACK_SLUGS:
+        s = f"{s}-stack"
+    base = s[:128]
+    cand = base
+    n = 2
+    while cand in used:
+        suf = f"-{n}"
+        room = 128 - len(suf)
+        cand = (base[:room] + suf) if room > 0 else suf[-128:]
+        n += 1
+    used.add(cand)
+    return cand
+
+
+def _migrate_sqlite_bundle_stacks_slug(sync_conn) -> None:
+    """Add bundle_stacks.slug (URL identifier); backfill from name; add scoped unique indexes."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    if "bundle_stacks" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("bundle_stacks")}
+    if "slug" not in cols:
+        sync_conn.execute(text("ALTER TABLE bundle_stacks ADD COLUMN slug VARCHAR(128) DEFAULT ''"))
+
+    r = sync_conn.execute(
+        text(
+            "SELECT id, name, group_id, project_environment_id FROM bundle_stacks "
+            "WHERE slug IS NULL OR slug = ''"
+        )
+    )
+    rows = list(r)
+    if rows:
+        groups: dict[tuple[int | None, int], set[str]] = {}
+        r2 = sync_conn.execute(
+            text(
+                "SELECT group_id, project_environment_id, slug FROM bundle_stacks "
+                "WHERE slug IS NOT NULL AND slug != ''"
+            )
+        )
+        for row2 in r2:
+            gid, peid, slug = row2[0], row2[1], row2[2]
+            key = (gid, peid if peid is not None else -1)
+            groups.setdefault(key, set()).add(slug)
+
+        for row in rows:
+            _id, name, gid, peid = row[0], row[1], row[2], row[3]
+            key = (gid, peid if peid is not None else -1)
+            used = groups.setdefault(key, set())
+            slug = _derive_stack_slug_candidate(name, used)
+            sync_conn.execute(
+                text("UPDATE bundle_stacks SET slug = :slug WHERE id = :id"),
+                {"slug": slug, "id": _id},
+            )
+
+    sync_conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_bundle_stacks_scoped_group_slug_env "
+            "ON bundle_stacks(group_id, slug, ifnull(project_environment_id, 0)) "
+            "WHERE group_id IS NOT NULL AND slug != ''"
+        )
+    )
+    sync_conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_bundle_stacks_legacy_slug "
+            "ON bundle_stacks(slug) WHERE group_id IS NULL AND slug != ''"
+        )
+    )
+
+
+def _migrate_sqlite_bundles_slug(sync_conn) -> None:
+    """Add bundles.slug (URL identifier); backfill from name; add scoped unique indexes."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    if "bundles" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("bundles")}
+    if "slug" not in cols:
+        sync_conn.execute(text("ALTER TABLE bundles ADD COLUMN slug VARCHAR(128) DEFAULT ''"))
+
+    r = sync_conn.execute(
+        text(
+            "SELECT id, name, group_id, project_environment_id FROM bundles "
+            "WHERE slug IS NULL OR slug = ''"
+        )
+    )
+    rows = list(r)
+    if rows:
+        groups: dict[tuple[int | None, int], set[str]] = {}
+        r2 = sync_conn.execute(
+            text(
+                "SELECT group_id, project_environment_id, slug FROM bundles "
+                "WHERE slug IS NOT NULL AND slug != ''"
+            )
+        )
+        for row2 in r2:
+            gid, peid, slug = row2[0], row2[1], row2[2]
+            key = (gid, peid if peid is not None else -1)
+            groups.setdefault(key, set()).add(slug)
+
+        for row in rows:
+            _id, name, gid, peid = row[0], row[1], row[2], row[3]
+            key = (gid, peid if peid is not None else -1)
+            used = groups.setdefault(key, set())
+            slug = _derive_stack_slug_candidate(name, used)
+            sync_conn.execute(
+                text("UPDATE bundles SET slug = :slug WHERE id = :id"),
+                {"slug": slug, "id": _id},
+            )
+
+    sync_conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_bundles_scoped_group_slug_env "
+            "ON bundles(group_id, slug, ifnull(project_environment_id, 0)) "
+            "WHERE group_id IS NOT NULL AND slug != ''"
+        )
+    )
+    sync_conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_bundles_legacy_slug "
+            "ON bundles(slug) WHERE group_id IS NULL AND slug != ''"
+        )
+    )
+
+
 async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
@@ -280,3 +416,5 @@ async def init_db() -> None:
             await conn.run_sync(_migrate_sqlite_stack_env_links_slice)
             await conn.run_sync(_migrate_sqlite_bundles_stacks_project_environment)
             await conn.run_sync(_migrate_sqlite_bundles_stacks_scoped_names)
+            await conn.run_sync(_migrate_sqlite_bundle_stacks_slug)
+            await conn.run_sync(_migrate_sqlite_bundles_slug)

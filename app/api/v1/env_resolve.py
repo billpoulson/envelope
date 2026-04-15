@@ -69,6 +69,7 @@ async def resolve_env_link_by_digest(
         if not can_write_bundle(
             scopes,
             bundle_name=bundle.name,
+            bundle_slug=bundle.slug,
             group_id=bundle.group_id,
             project_name=pn,
             project_slug=pslug,
@@ -84,6 +85,7 @@ async def resolve_env_link_by_digest(
         return {
             "resource": "bundle",
             "name": bundle.name,
+            "slug": bundle.slug,
             "project_slug": pslug,
             "environment_slug": env_slug,
         }
@@ -105,6 +107,7 @@ async def resolve_env_link_by_digest(
         if not can_write_stack(
             scopes,
             stack_name=stack.name,
+            stack_slug=stack.slug,
             group_id=stack.group_id,
             project_name=pn,
             project_slug=pslug,
@@ -120,6 +123,7 @@ async def resolve_env_link_by_digest(
         return {
             "resource": "stack",
             "name": stack.name,
+            "slug": stack.slug,
             "project_slug": pslug,
             "environment_slug": env_slug,
         }

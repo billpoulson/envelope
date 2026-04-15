@@ -72,8 +72,10 @@ class Bundle(Base):
     __tablename__ = "bundles"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    # Unique per (project group, name, environment) — see SQLite migration indexes.
+    # Display title; unique per (project group, name, environment) — see SQLite migration indexes.
     name: Mapped[str] = mapped_column(String(256), index=True)
+    # Stable URL/API segment (lowercase a-z0-9._-), like stacks; unique per project env scope.
+    slug: Mapped[str] = mapped_column(String(128), index=True, default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -106,8 +108,10 @@ class BundleStack(Base):
     __tablename__ = "bundle_stacks"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    # Unique per (project group, name, environment) — see SQLite migration indexes.
+    # Display title (may repeat across projects; unique per project env scope — see migrations).
     name: Mapped[str] = mapped_column(String(256), index=True)
+    # Stable URL/API segment (lowercase a-z0-9._-), like project slugs; unique per project env scope.
+    slug: Mapped[str] = mapped_column(String(128), index=True, default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

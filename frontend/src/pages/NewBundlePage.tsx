@@ -16,6 +16,7 @@ export default function NewBundlePage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
   const [importKind, setImportKind] = useState<ImportKind>("skip");
   const [initialPaste, setInitialPaste] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +37,7 @@ export default function NewBundlePage() {
   // Same route element is reused when only :projectSlug changes (or on return navigation); clear stale paste/import.
   useLayoutEffect(() => {
     setName("");
+    setSlug("");
     setImportKind("skip");
     setInitialPaste("");
     setError(null);
@@ -53,27 +55,29 @@ export default function NewBundlePage() {
       const trimmedPaste = initialPaste.trim();
       const skipImport = importKind === "skip" || !trimmedPaste;
       const envSlug = selectedEnvSlug.trim();
-      const bundleNameTrim = name.trim();
+      const displayName = name.trim();
+      const slugTrim = slug.trim();
       if (!envSlug) {
         throw new Error("Select an environment for this bundle.");
       }
-      await createBundle({
-        name: bundleNameTrim,
+      const created = await createBundle({
+        name: displayName,
+        ...(slugTrim ? { slug: slugTrim } : {}),
         project_slug: projectSlug,
         project_environment_slug: envSlug,
         ...(skipImport
           ? { import_kind: "skip" as const }
           : { import_kind: importKind, initial_paste: initialPaste }),
       });
-      return { envSlug, bundleNameTrim };
+      return { envSlug, bundleSlug: created.slug };
     },
-    onSuccess: async ({ envSlug, bundleNameTrim }) => {
+    onSuccess: async ({ envSlug, bundleSlug }) => {
       await qc.invalidateQueries({ queryKey: ["bundles"] });
       const sp = new URLSearchParams(location.search);
       sp.set("env", envSlug);
       const qs = sp.toString();
       navigate({
-        pathname: `/projects/${encodeURIComponent(projectSlug)}/bundles/${encodeURIComponent(bundleNameTrim)}/edit`,
+        pathname: `/projects/${encodeURIComponent(projectSlug)}/bundles/${encodeURIComponent(bundleSlug)}/edit`,
         search: qs ? `?${qs}` : "",
       });
     },
@@ -149,17 +153,38 @@ export default function NewBundlePage() {
         </div>
         <div>
           <label htmlFor="bn" className="mb-1 block text-sm text-slate-400">
-            Bundle name
+            Name
           </label>
           <input
             id="bn"
-            className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm text-slate-200"
+            className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 text-sm text-slate-200"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
-            pattern="[a-zA-Z0-9._\-]+"
-            placeholder="myapp-prod"
+            placeholder="Production API"
+            autoComplete="off"
           />
+          <p className="mt-1 text-xs text-slate-500">
+            Display title. Avoid: <span className="font-mono">/ \ : * ? &quot; &lt; &gt; |</span>
+          </p>
+        </div>
+        <div>
+          <label htmlFor="bundle-new-slug" className="mb-1 block text-sm text-slate-400">
+            Slug <span className="font-normal text-slate-600">(optional)</span>
+          </label>
+          <input
+            id="bundle-new-slug"
+            className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm text-slate-200"
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            placeholder="Derived from name if empty"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            URL segment: lowercase letters, numbers, <code className="text-slate-400">.</code>,{" "}
+            <code className="text-slate-400">_</code>, <code className="text-slate-400">-</code>
+          </p>
         </div>
         <fieldset className="space-y-2">
           <legend className="text-sm text-slate-400">Initial variables</legend>

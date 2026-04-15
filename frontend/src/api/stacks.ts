@@ -11,6 +11,7 @@ export type ListStacksOptions = {
 
 export type ProjectStackListRow = {
   name: string;
+  slug: string;
   project_environment_slug: string | null;
   project_environment_name: string | null;
 };
@@ -50,6 +51,7 @@ export type StackLayer = {
 
 export type StackDetail = {
   name: string;
+  slug: string;
   group_id: number | null;
   project_slug: string | null;
   project_environment_slug: string | null;
@@ -65,10 +67,11 @@ export async function getStack(name: string, scope?: ResourceScopeOpts): Promise
 
 export async function createStack(body: {
   name: string;
+  slug?: string;
   project_slug: string;
   project_environment_slug: string;
   layers: StackLayer[];
-}): Promise<{ id: number; name: string }> {
+}): Promise<{ id: number; name: string; slug: string }> {
   const csrf = await fetchCsrf();
   return apiFetch("/stacks", {
     method: "POST",
@@ -81,6 +84,7 @@ export async function patchStack(
   name: string,
   body: {
     name?: string;
+    slug?: string;
     project_slug?: string | null;
     project_environment_slug?: string | null;
     layers?: StackLayer[];

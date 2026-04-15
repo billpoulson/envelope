@@ -4,7 +4,7 @@ from typing import Any, Literal, cast
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 
 from app.api.resource_scope import ResourcePathScope
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +37,7 @@ from app.services.bundles import (
     IMPORT_KIND_VALUES,
     ImportKind,
     bulk_upsert_bundle_secrets,
+    bundle_slug_suggestion_from_display_name,
     coerce_value_to_string,
     dedupe_entry_rows,
     encode_stored_value,
@@ -49,7 +50,9 @@ from app.services.bundles import (
     normalize_env_key,
     parse_bundle_entries_dict,
     parse_bundle_initial_paste,
-    validate_bundle_name,
+    validate_bundle_display_name,
+    validate_bundle_path_segment,
+    validate_bundle_slug,
 )
 from app.services.env_links import new_env_link_token
 from app.services.scope_resolution import fetch_bundle_for_path
@@ -76,6 +79,7 @@ class BundlePassphraseBody(BaseModel):
 
 class CreateBundleBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=256)
+    slug: str | None = Field(None, max_length=128)
     # Optional initial keys (same rules as JSON paste: strings secret by default;
     # use {"K": {"value": "x", "secret": false}} or _plaintext_keys)
     entries: dict[str, Any] | None = None
@@ -91,12 +95,29 @@ class CreateBundleBody(BaseModel):
 
 
 class PatchBundleBody(BaseModel):
+    name: str | None = None
+    slug: str | None = None
     group_id: int | None = None
     project_slug: str | None = None
     # Same shape as POST /bundles `entries`: strings default to secret; use
     # {"KEY": {"value": "x", "secret": false}} or `_plaintext_keys` for plain rows.
     entries: dict[str, Any] | None = None
     project_environment_slug: str | None = None
+
+
+    @field_validator("name")
+    @classmethod
+    def strip_bundle_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return v.strip()
+
+    @field_validator("slug")
+    @classmethod
+    def strip_bundle_slug(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return v.strip()
 
 
 class UpsertSecretBody(BaseModel):
@@ -113,6 +134,7 @@ def _bundle_list_row(b: Bundle) -> dict[str, str | None]:
     pe = b.project_environment
     return {
         "name": b.name,
+        "slug": b.slug,
         "project_environment_slug": pe.slug if pe else None,
         "project_environment_name": pe.name if pe else None,
     }
@@ -175,7 +197,7 @@ async def list_bundles(
     if scopes_allow_admin(scopes):
         if with_environment and has_ps:
             return [_bundle_list_row(b) for b in rows]
-        return [b.name for b in rows]
+        return [b.slug for b in rows]
     out_str: list[str] = []
     out_detail: list[dict[str, str | None]] = []
     for b in rows:
@@ -184,12 +206,14 @@ async def list_bundles(
         if can_read_bundle(
             scopes,
             bundle_name=b.name,
+            bundle_slug=b.slug,
             group_id=b.group_id,
             project_name=pn,
             project_slug=ps,
         ) or can_write_bundle(
             scopes,
             bundle_name=b.name,
+            bundle_slug=b.slug,
             group_id=b.group_id,
             project_name=pn,
             project_slug=ps,
@@ -197,7 +221,7 @@ async def list_bundles(
             if with_environment and has_ps:
                 out_detail.append(_bundle_list_row(b))
             else:
-                out_str.append(b.name)
+                out_str.append(b.slug)
     return out_detail if (with_environment and has_ps) else out_str
 
 
@@ -207,8 +231,11 @@ async def create_bundle(
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str | int | None]:
-    name = body.name.strip()
-    validate_bundle_name(name)
+    display_name = body.name.strip()
+    validate_bundle_display_name(display_name)
+    slug_raw = (body.slug or "").strip()
+    slug_out = slug_raw or bundle_slug_suggestion_from_display_name(display_name)
+    validate_bundle_slug(slug_out)
     scopes = parse_scopes_json(key.scopes)
     entry_rows: list[tuple[str, str, bool]] = []
     kind_in = (body.import_kind or "skip").strip() or "skip"
@@ -257,7 +284,8 @@ async def create_bundle(
         pslug = g.slug
     if not can_create_bundle(
         scopes,
-        bundle_name=name,
+        bundle_name=display_name,
+        bundle_slug=slug_out,
         group_id=gid,
         project_name=pname,
         project_slug=pslug,
@@ -269,14 +297,21 @@ async def create_bundle(
         slug=body.project_environment_slug,
         resource="bundle",
     )
-    dup_q = select(Bundle.id).where(Bundle.group_id == gid, Bundle.name == name)
+    dup_q = select(Bundle.id).where(Bundle.group_id == gid, Bundle.name == display_name)
     if env_fk is None:
         dup_q = dup_q.where(Bundle.project_environment_id.is_(None))
     else:
         dup_q = dup_q.where(Bundle.project_environment_id == env_fk)
     if (await session.execute(dup_q)).scalar_one_or_none() is not None:
-        raise HTTPException(status_code=409, detail="Bundle already exists in this environment")
-    b = Bundle(name=name, group_id=gid, project_environment_id=env_fk)
+        raise HTTPException(status_code=409, detail="Bundle name already exists in this environment")
+    dup_slug = select(Bundle.id).where(Bundle.group_id == gid, Bundle.slug == slug_out)
+    if env_fk is None:
+        dup_slug = dup_slug.where(Bundle.project_environment_id.is_(None))
+    else:
+        dup_slug = dup_slug.where(Bundle.project_environment_id == env_fk)
+    if (await session.execute(dup_slug)).scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Bundle slug already exists in this environment")
+    b = Bundle(name=display_name, slug=slug_out, group_id=gid, project_environment_id=env_fk)
     session.add(b)
     await session.flush()
     if entry_rows:
@@ -297,6 +332,7 @@ async def create_bundle(
     return {
         "id": b.id,
         "name": b.name,
+        "slug": b.slug,
         "group_id": b.group_id,
         "project_slug": out_slug,
         "project_environment_slug": env_slug,
@@ -311,7 +347,7 @@ async def patch_bundle(
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str | int | None]:
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     if not body.model_fields_set:
         raise HTTPException(status_code=400, detail="No fields to patch")
     scopes = parse_scopes_json(key.scopes)
@@ -326,11 +362,44 @@ async def patch_bundle(
     if not can_write_bundle(
         scopes,
         bundle_name=b.name,
+        bundle_slug=b.slug,
         group_id=b.group_id,
         project_name=pn,
         project_slug=ps,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
+    if "name" in body.model_fields_set and body.name is not None:
+        new_name = body.name
+        validate_bundle_display_name(new_name)
+        if new_name != b.name:
+            dup_q = select(Bundle.id).where(
+                Bundle.group_id == b.group_id,
+                Bundle.name == new_name,
+            )
+            if b.project_environment_id is None:
+                dup_q = dup_q.where(Bundle.project_environment_id.is_(None))
+            else:
+                dup_q = dup_q.where(Bundle.project_environment_id == b.project_environment_id)
+            existing_id = (await session.execute(dup_q)).scalar_one_or_none()
+            if existing_id is not None and existing_id != b.id:
+                raise HTTPException(status_code=409, detail="Bundle name already exists in this environment")
+            b.name = new_name
+    if "slug" in body.model_fields_set and body.slug is not None:
+        new_slug = body.slug
+        validate_bundle_slug(new_slug)
+        if new_slug != b.slug:
+            dup_sq = select(Bundle.id).where(
+                Bundle.group_id == b.group_id,
+                Bundle.slug == new_slug,
+            )
+            if b.project_environment_id is None:
+                dup_sq = dup_sq.where(Bundle.project_environment_id.is_(None))
+            else:
+                dup_sq = dup_sq.where(Bundle.project_environment_id == b.project_environment_id)
+            existing_sid = (await session.execute(dup_sq)).scalar_one_or_none()
+            if existing_sid is not None and existing_sid != b.id:
+                raise HTTPException(status_code=409, detail="Bundle slug already exists in this environment")
+            b.slug = new_slug
     prior_group_id = b.group_id
     prior_env_id = b.project_environment_id
     target_gid = b.group_id
@@ -362,6 +431,7 @@ async def patch_bundle(
         if not can_create_bundle(
             scopes,
             bundle_name=b.name,
+            bundle_slug=b.slug,
             group_id=target_gid,
             project_name=new_pn,
             project_slug=new_ps,
@@ -414,6 +484,7 @@ async def patch_bundle(
         env_slug = pe.slug if pe else None
     return {
         "name": b.name,
+        "slug": b.slug,
         "group_id": b.group_id,
         "project_slug": out_slug,
         "project_environment_slug": env_slug,
@@ -427,7 +498,7 @@ async def delete_bundle(
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     scopes = parse_scopes_json(key.scopes)
     b = await fetch_bundle_for_path(
         session,
@@ -440,6 +511,7 @@ async def delete_bundle(
     if not can_write_bundle(
         scopes,
         bundle_name=b.name,
+        bundle_slug=b.slug,
         group_id=b.group_id,
         project_name=pn,
         project_slug=ps,
@@ -464,6 +536,7 @@ async def get_bundle_decrypted(
     if not can_read_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -472,7 +545,8 @@ async def get_bundle_decrypted(
     secrets_map = {k: v[0] for k, v in entries.items()}
     secret_flags = {k: v[1] for k, v in entries.items()}
     return {
-        "name": name,
+        "name": bundle.name,
+        "slug": bundle.slug,
         "secrets": secrets_map,
         "secret_flags": secret_flags,
         "group_id": bundle.group_id,
@@ -492,7 +566,7 @@ async def get_bundle_key_names(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, list[str]]:
     """Sorted key names from bundle secrets (not sealed secrets); for stack layer UI and automation."""
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     bundle = await fetch_bundle_for_path(
         session,
         name,
@@ -505,6 +579,7 @@ async def get_bundle_key_names(
     if not can_read_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -531,6 +606,7 @@ async def export_bundle(
     if not can_read_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -559,7 +635,7 @@ async def export_bundle_backup_json(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Structured JSON backup for merge import (includes format id)."""
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     bundle, entries = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(key.scopes)
     pn = bundle.group.name if bundle.group else None
@@ -567,6 +643,7 @@ async def export_bundle_backup_json(
     if not can_read_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -595,7 +672,7 @@ async def export_bundle_backup_encrypted(
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     bundle, entries = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(key.scopes)
     pn = bundle.group.name if bundle.group else None
@@ -603,6 +680,7 @@ async def export_bundle_backup_encrypted(
     if not can_read_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -641,7 +719,7 @@ async def _import_bundle_backup_merge_core(
     session: AsyncSession,
     scope: ResourcePathScope,
 ) -> dict[str, str | int]:
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     if body.format != BUNDLE_BACKUP_FORMAT:
         raise HTTPException(status_code=400, detail="unsupported backup format")
     if body.bundle.strip() != name.strip():
@@ -653,6 +731,7 @@ async def _import_bundle_backup_merge_core(
     if not can_write_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -702,7 +781,7 @@ async def import_bundle_backup_encrypted(
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str | int]:
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="empty file")
@@ -736,6 +815,7 @@ async def upsert_secret(
     if not can_write_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -781,6 +861,7 @@ async def encrypt_plain_secret(
     if not can_write_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -806,6 +887,7 @@ async def declassify_encrypted_secret(
     if not can_write_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -831,6 +913,7 @@ async def delete_secret(
     if not can_write_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -858,7 +941,7 @@ async def list_bundle_env_links(
 
     The raw URL segment is never stored; compare hashes to pick ``id`` for ``DELETE``.
     """
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     bundle, _ = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
@@ -866,6 +949,7 @@ async def list_bundle_env_links(
     if not can_write_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -898,7 +982,7 @@ async def create_bundle_env_link(
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """Create an opaque URL (no project/bundle names) that downloads this bundle as .env or JSON."""
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     bundle, _ = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
@@ -906,6 +990,7 @@ async def create_bundle_env_link(
     if not can_write_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,
@@ -929,7 +1014,7 @@ async def delete_bundle_env_link(
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    validate_bundle_name(name)
+    validate_bundle_path_segment(name)
     bundle, _ = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
@@ -937,6 +1022,7 @@ async def delete_bundle_env_link(
     if not can_write_bundle(
         scopes,
         bundle_name=bundle.name,
+        bundle_slug=bundle.slug,
         group_id=bundle.group_id,
         project_name=pn,
         project_slug=pslug,

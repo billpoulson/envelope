@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { Pencil } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { listProjectEnvironments } from "@/api/projectEnvironments";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/api/bundles";
 import { BundlePageShell } from "@/components/BundlePageShell";
 import { BundleVarActionsMenu } from "@/components/BundleVarActionsMenu";
+import { EditNameSlugModal } from "@/components/EditNameSlugModal";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 import { envSearchParam, keyParamFromSearch, resourceScopeFromNav } from "@/projectEnv";
@@ -47,6 +49,9 @@ export default function BundleVariablesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [actionsMenuKey, setActionsMenuKey] = useState<string | null>(null);
   const urlKeyConsumedRef = useRef(false);
+  const [displayName, setDisplayName] = useState("");
+  const [bundleSlug, setBundleSlug] = useState("");
+  const [bundleDetailsOpen, setBundleDetailsOpen] = useState(false);
 
   const projectSlugForEnv = projectSlugParam ?? q.data?.project_slug ?? "";
   const envsQ = useQuery({
@@ -60,6 +65,60 @@ export default function BundleVariablesPage() {
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["bundle", bundleName] });
       setErr(null);
+    },
+    onError: (e: unknown) => setErr(formatApiError(e)),
+  });
+
+  useLayoutEffect(() => {
+    if (q.data && !bundleDetailsOpen) {
+      setDisplayName(q.data.name);
+      setBundleSlug(q.data.slug);
+    }
+  }, [q.data, bundleDetailsOpen]);
+
+  function openBundleDetails() {
+    if (!q.data) return;
+    setErr(null);
+    setDisplayName(q.data.name);
+    setBundleSlug(q.data.slug);
+    setBundleDetailsOpen(true);
+  }
+
+  const saveDetailsM = useMutation({
+    mutationFn: async () => {
+      const d = q.data;
+      if (!d) throw new Error("Missing bundle");
+      const dn = displayName.trim();
+      const ss = bundleSlug.trim();
+      const body: { name?: string; slug?: string } = {};
+      if (dn !== d.name) body.name = dn;
+      if (ss !== d.slug) body.slug = ss;
+      if (Object.keys(body).length === 0) {
+        return { ss, slugChanged: ss !== bundleName, skipped: true as const };
+      }
+      await patchBundle(bundleName, body, resourceScope);
+      return { ss, slugChanged: ss !== bundleName, skipped: false as const };
+    },
+    onSuccess: async (result) => {
+      setBundleDetailsOpen(false);
+      if (result.skipped) return;
+      await qc.invalidateQueries({ queryKey: ["bundle"] });
+      await qc.invalidateQueries({ queryKey: ["bundles"] });
+      setErr(null);
+      const { ss, slugChanged } = result;
+      if (slugChanged && projectSlugParam) {
+        const sp = new URLSearchParams(location.search);
+        const qs = sp.toString();
+        navigate(
+          {
+            pathname: `/projects/${encodeURIComponent(projectSlugParam)}/bundles/${encodeURIComponent(ss)}/edit`,
+            search: qs ? `?${qs}` : "",
+          },
+          { replace: true },
+        );
+      } else if (slugChanged) {
+        navigate(`/bundles/${encodeURIComponent(ss)}/edit${location.search}`, { replace: true });
+      }
     },
     onError: (e: unknown) => setErr(formatApiError(e)),
   });
@@ -166,10 +225,22 @@ export default function BundleVariablesPage() {
   return (
     <BundlePageShell
       bundleName={bundleName}
+      displayName={data.name}
       subnavSlug={subnavProjectSlug}
       linkSearch={location.search}
       subtitle="Variables"
       tertiaryLink={{ to: `${bundlesListTo}${location.search}`, label: "← Bundles" }}
+      titleAccessory={
+        <button
+          type="button"
+          className="rounded-md border border-border/60 p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
+          title="Edit name and slug"
+          aria-label="Edit name and slug"
+          onClick={openBundleDetails}
+        >
+          <Pencil className="h-4 w-4" aria-hidden />
+        </button>
+      }
       belowSubnav={
         <>
           <Button type="button" variant="secondary" onClick={() => void copyKeys()}>
@@ -181,7 +252,7 @@ export default function BundleVariablesPage() {
         </>
       }
     >
-      {err ? <p className="mb-4 text-sm text-red-400">{err}</p> : null}
+      {err && !bundleDetailsOpen ? <p className="mb-4 text-sm text-red-400">{err}</p> : null}
 
       {projectSlug && !envAssignmentLocked ? (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
@@ -277,6 +348,20 @@ export default function BundleVariablesPage() {
           </tbody>
         </table>
       </div>
+
+      <EditNameSlugModal
+        open={bundleDetailsOpen}
+        onClose={() => setBundleDetailsOpen(false)}
+        title="Bundle name & slug"
+        nameValue={displayName}
+        slugValue={bundleSlug}
+        onNameChange={setDisplayName}
+        onSlugChange={setBundleSlug}
+        onSave={() => saveDetailsM.mutate()}
+        savePending={saveDetailsM.isPending}
+        error={err}
+        saveLabel="Save"
+      />
 
       {addOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">

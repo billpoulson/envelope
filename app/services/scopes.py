@@ -126,10 +126,19 @@ def _project_suffix_match(
     return _glob_match(suffix, project_name)
 
 
+def _bundle_scope_matches(pat: str, bundle_name: str, bundle_slug: str | None) -> bool:
+    if _glob_match(pat, bundle_name):
+        return True
+    if bundle_slug and _glob_match(pat, bundle_slug):
+        return True
+    return False
+
+
 def can_read_bundle(
     scopes: list[str],
     *,
     bundle_name: str,
+    bundle_slug: str | None = None,
     group_id: int | None,
     project_name: str | None,
     project_slug: str | None = None,
@@ -139,7 +148,7 @@ def can_read_bundle(
     for s in scopes:
         if s.startswith(_READ_BUNDLE):
             pat = s[len(_READ_BUNDLE) :]
-            if pat and _glob_match(pat, bundle_name):
+            if pat and _bundle_scope_matches(pat, bundle_name, bundle_slug):
                 return True
         if group_id is not None and project_name is not None and s.startswith(_READ_PROJECT):
             suf = s[len(_READ_PROJECT) :]
@@ -152,6 +161,7 @@ def can_write_bundle(
     scopes: list[str],
     *,
     bundle_name: str,
+    bundle_slug: str | None = None,
     group_id: int | None,
     project_name: str | None,
     project_slug: str | None = None,
@@ -161,7 +171,7 @@ def can_write_bundle(
     for s in scopes:
         if s.startswith(_WRITE_BUNDLE):
             pat = s[len(_WRITE_BUNDLE) :]
-            if pat and _glob_match(pat, bundle_name):
+            if pat and _bundle_scope_matches(pat, bundle_name, bundle_slug):
                 return True
         if group_id is not None and project_name is not None and s.startswith(_WRITE_PROJECT):
             suf = s[len(_WRITE_PROJECT) :]
@@ -170,10 +180,19 @@ def can_write_bundle(
     return False
 
 
+def _stack_scope_matches(pat: str, stack_name: str, stack_slug: str | None) -> bool:
+    if _glob_match(pat, stack_name):
+        return True
+    if stack_slug and _glob_match(pat, stack_slug):
+        return True
+    return False
+
+
 def can_read_stack(
     scopes: list[str],
     *,
     stack_name: str,
+    stack_slug: str | None = None,
     group_id: int | None,
     project_name: str | None,
     project_slug: str | None = None,
@@ -183,7 +202,7 @@ def can_read_stack(
     for s in scopes:
         if s.startswith(_READ_STACK):
             pat = s[len(_READ_STACK) :]
-            if pat and _glob_match(pat, stack_name):
+            if pat and _stack_scope_matches(pat, stack_name, stack_slug):
                 return True
         if group_id is not None and project_name is not None and s.startswith(_READ_PROJECT):
             suf = s[len(_READ_PROJECT) :]
@@ -196,6 +215,7 @@ def can_write_stack(
     scopes: list[str],
     *,
     stack_name: str,
+    stack_slug: str | None = None,
     group_id: int | None,
     project_name: str | None,
     project_slug: str | None = None,
@@ -205,7 +225,7 @@ def can_write_stack(
     for s in scopes:
         if s.startswith(_WRITE_STACK):
             pat = s[len(_WRITE_STACK) :]
-            if pat and _glob_match(pat, stack_name):
+            if pat and _stack_scope_matches(pat, stack_name, stack_slug):
                 return True
         if group_id is not None and project_name is not None and s.startswith(_WRITE_PROJECT):
             suf = s[len(_WRITE_PROJECT) :]
@@ -218,6 +238,7 @@ def can_create_stack(
     scopes: list[str],
     *,
     stack_name: str,
+    stack_slug: str | None = None,
     group_id: int | None,
     project_name: str | None,
     project_slug: str | None = None,
@@ -228,7 +249,7 @@ def can_create_stack(
     name_ok = any(
         s.startswith(_WRITE_STACK)
         and s[len(_WRITE_STACK) :]
-        and _glob_match(s[len(_WRITE_STACK) :], stack_name)
+        and _stack_scope_matches(s[len(_WRITE_STACK) :], stack_name, stack_slug)
         for s in scopes
     )
     if group_id is None:
@@ -285,6 +306,7 @@ def can_create_bundle(
     scopes: list[str],
     *,
     bundle_name: str,
+    bundle_slug: str | None = None,
     group_id: int | None,
     project_name: str | None,
     project_slug: str | None = None,
@@ -295,7 +317,7 @@ def can_create_bundle(
     name_ok = any(
         s.startswith(_WRITE_BUNDLE)
         and s[len(_WRITE_BUNDLE) :]
-        and _glob_match(s[len(_WRITE_BUNDLE) :], bundle_name)
+        and _bundle_scope_matches(s[len(_WRITE_BUNDLE) :], bundle_name, bundle_slug)
         for s in scopes
     )
     if group_id is None:

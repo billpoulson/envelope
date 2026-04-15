@@ -17,6 +17,7 @@ export default function StackNewPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
   const [bundle, setBundle] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [selectedEnvSlug, setSelectedEnvSlug] = useState("");
@@ -35,6 +36,7 @@ export default function StackNewPage() {
 
   useLayoutEffect(() => {
     setName("");
+    setSlug("");
     setBundle("");
     setErr(null);
   }, [projectSlug, location.key]);
@@ -61,7 +63,8 @@ export default function StackNewPage() {
   const m = useMutation({
     mutationFn: async () => {
       const envSlug = selectedEnvSlug.trim();
-      const stackNameTrim = name.trim();
+      const displayName = name.trim();
+      const slugTrim = slug.trim();
       const bottomBundle = bundle.trim();
       if (!envSlug) {
         throw new Error("Select an environment for this stack.");
@@ -69,21 +72,22 @@ export default function StackNewPage() {
       if (!bottomBundle) {
         throw new Error("Select a bottom bundle.");
       }
-      await createStack({
-        name: stackNameTrim,
+      const created = await createStack({
+        name: displayName,
+        ...(slugTrim ? { slug: slugTrim } : {}),
         project_slug: projectSlug,
         project_environment_slug: envSlug,
         layers: [{ bundle: bottomBundle, keys: "*" } satisfies StackLayer],
       });
-      return { envSlug, stackNameTrim };
+      return { envSlug, stackSlug: created.slug };
     },
-    onSuccess: async ({ envSlug, stackNameTrim }) => {
+    onSuccess: async ({ envSlug, stackSlug }) => {
       await qc.invalidateQueries({ queryKey: ["stacks"] });
       const sp = new URLSearchParams(location.search);
       sp.set("env", envSlug);
       const qs = sp.toString();
       navigate({
-        pathname: `/projects/${encodeURIComponent(projectSlug)}/stacks/${encodeURIComponent(stackNameTrim)}/edit`,
+        pathname: `/projects/${encodeURIComponent(projectSlug)}/stacks/${encodeURIComponent(stackSlug)}/edit`,
         search: qs ? `?${qs}` : "",
       });
     },
@@ -196,16 +200,38 @@ export default function StackNewPage() {
             }}
           >
             <div>
-              <label className="mb-1 block text-sm text-slate-400">Stack name</label>
+              <label className="mb-1 block text-sm text-slate-400" htmlFor="stack-new-name">
+                Name
+              </label>
               <input
-                className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm"
+                id="stack-new-name"
+                className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 text-sm text-slate-200"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
+                autoComplete="off"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Spaces and punctuation are fine. Not allowed:{" "}
+                Display title. Spaces and punctuation are fine. Not allowed:{" "}
                 <span className="font-mono">/ \ : * ? &quot; &lt; &gt; |</span>
+              </p>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm text-slate-400" htmlFor="stack-new-slug">
+                Slug <span className="font-normal text-slate-600">(optional)</span>
+              </label>
+              <input
+                id="stack-new-slug"
+                className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm text-slate-200"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value)}
+                placeholder="Derived from name if empty"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                URL segment: lowercase letters, numbers, <code className="text-slate-400">.</code>,{" "}
+                <code className="text-slate-400">_</code>, <code className="text-slate-400">-</code>
               </p>
             </div>
             <div>
