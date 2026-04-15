@@ -3,6 +3,17 @@
  * These helpers mirror app/services/env_links.py (token_sha256_hex).
  */
 
+/**
+ * If the field contains only a 64-digit hex digest (optional spaces), return lowercase hex.
+ * Otherwise null — not a pasted `token_sha256` from the list UI.
+ */
+export function parseDigestOnlyInput(raw: string): string | null {
+  const compact = raw.trim().replace(/\s+/g, "").toLowerCase();
+  if (compact.length !== 64) return null;
+  if (!/^[0-9a-f]{64}$/.test(compact)) return null;
+  return compact;
+}
+
 /** Lowercase hex SHA-256 of UTF-8 bytes of `text`. Requires a secure context for subtle crypto. */
 export async function sha256HexUtf8(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);

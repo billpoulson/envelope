@@ -779,6 +779,41 @@ class StacksHttpTests(unittest.TestCase):
                 hashlib.sha256(path_slice.encode("utf-8")).hexdigest(),
             )
 
+    def test_env_link_resolve_by_digest(self) -> None:
+        """GET /api/v1/env-links/resolve maps token_sha256 → bundle for navigation."""
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"resolv-{nonce}"
+        with TestClient(app) as client:
+            client.post(
+                "/api/v1/projects",
+                json={"name": f"Resolve proj {nonce}", "slug": slug},
+                headers=hj,
+            )
+            _ensure_default_environment(client, hj, slug)
+            client.post(
+                "/api/v1/bundles",
+                json={
+                    "name": f"rb-{nonce}",
+                    "project_slug": slug,
+                    "project_environment_slug": "default",
+                    "entries": {"K": "v"},
+                },
+                headers=hj,
+            )
+            lr = client.post(f"/api/v1/bundles/rb-{nonce}/env-links", headers=h)
+            self.assertEqual(lr.status_code, 201, lr.text)
+            path = lr.json()["url"].split("/env/")[-1].split("?")[0]
+            digest = hashlib.sha256(path.encode("utf-8")).hexdigest()
+            rr = client.get(f"/api/v1/env-links/resolve?token_sha256={digest}", headers=h)
+            self.assertEqual(rr.status_code, 200, rr.text)
+            j = rr.json()
+            self.assertEqual(j["resource"], "bundle")
+            self.assertEqual(j["name"], f"rb-{nonce}")
+            self.assertEqual(j["project_slug"], slug)
+            self.assertEqual(j["environment_slug"], "default")
+
 
 class AuthJsonApiTests(unittest.TestCase):
     """JSON auth routes and session-backed /api/v1 access for the React admin."""
