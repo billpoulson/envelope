@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { getStack, getStackKeyGraph } from "@/api/stacks";
 import { StackKeyGraphView } from "@/components/StackKeyGraphView";
 import { StackPageShell } from "@/components/StackPageShell";
+import { envSearchParam, resourceScopeFromNav } from "@/projectEnv";
 
 function Centered({ children }: { children: ReactNode }) {
   return (
@@ -18,16 +19,20 @@ export default function StackKeyGraphPage() {
     projectSlug?: string;
     stackName: string;
   }>();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const envTag = envSearchParam(searchParams.get("env")) ?? "";
+  const resourceScope = resourceScopeFromNav(projectSlugParam, searchParams.get("env"));
   const qc = useQueryClient();
   const [showSecrets, setShowSecrets] = useState(false);
   const stackQ = useQuery({
-    queryKey: ["stack", stackName],
-    queryFn: () => getStack(stackName),
+    queryKey: ["stack", stackName, projectSlugParam ?? "", envTag],
+    queryFn: () => getStack(stackName, resourceScope),
     enabled: !!stackName,
   });
   const q = useQuery({
-    queryKey: ["stack-key-graph", stackName, showSecrets],
-    queryFn: () => getStackKeyGraph(stackName, showSecrets),
+    queryKey: ["stack-key-graph", stackName, showSecrets, projectSlugParam ?? "", envTag],
+    queryFn: () => getStackKeyGraph(stackName, showSecrets, resourceScope),
     enabled: !!stackName,
   });
 
@@ -91,19 +96,26 @@ export default function StackKeyGraphPage() {
     <StackPageShell
       stackName={stackName}
       subnavSlug={subnavSlug}
+      linkSearch={location.search}
       subtitle="Key graph — merged variables by layer"
-      tertiaryLink={{ to: editTo, label: "← Edit stack layers" }}
+      tertiaryLink={{ to: `${editTo}${location.search}`, label: "← Edit stack layers" }}
       fullBleed
     >
       <StackKeyGraphView
         data={data}
         stackName={stackName}
-        stackLayers={stackQ.data.layers}
+        projectSlug={projectSlugParam ?? projectSlug}
+        stackScope={resourceScope}
+        stackLayers={stackQ.data?.layers ?? []}
         showSecrets={showSecrets}
         onShowSecretsChange={setShowSecrets}
         onRefetch={() => {
-          void qc.invalidateQueries({ queryKey: ["stack-key-graph", stackName] });
-          void qc.invalidateQueries({ queryKey: ["stack", stackName] });
+          void qc.invalidateQueries({
+            queryKey: ["stack-key-graph", stackName, showSecrets, projectSlugParam ?? "", envTag],
+          });
+          void qc.invalidateQueries({
+            queryKey: ["stack", stackName, projectSlugParam ?? "", envTag],
+          });
         }}
       />
     </StackPageShell>

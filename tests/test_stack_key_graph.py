@@ -22,6 +22,7 @@ class StackKeyGraphPayloadTests(unittest.TestCase):
         self.assertEqual(len(p["layers"]), 1)
         self.assertEqual(p["layers"][0]["bundle"], "only")
         self.assertEqual(p["layers"][0]["bundle_edit_path"], "/bundles/only/edit")
+        self.assertIsNone(p["layers"][0].get("bundle_environment_slug"))
         self.assertIsNone(p["layers"][0].get("display_label"))
 
     def test_custom_layer_display_label(self) -> None:

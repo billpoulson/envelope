@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { listBundles } from "@/api/bundles";
+import { PageHeader } from "@/components/PageHeader";
 import { ResourceList } from "@/components/ResourceList";
 
 export default function BundlesPage() {
@@ -23,12 +24,10 @@ export default function BundlesPage() {
 
   return (
     <div>
-      <div className="mb-2">
-        <h1 className="text-2xl font-semibold tracking-tight text-white">Bundles</h1>
-        {names.length > 0 ? (
-          <p className="mt-1 text-sm text-slate-500">{names.length} total</p>
-        ) : null}
-      </div>
+      <PageHeader
+        title="Bundles"
+        subtitle={names.length > 0 ? `${names.length} total` : undefined}
+      />
       <p className="mb-6 max-w-2xl text-sm leading-relaxed text-slate-400">
         Bundles belong to a project. Open a project to create new ones, or jump to a bundle below
         (including bundles without a project group).

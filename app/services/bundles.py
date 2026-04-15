@@ -337,17 +337,14 @@ async def bulk_upsert_bundle_secrets(
 
 
 async def encrypt_plain_entry(
-    session: AsyncSession, bundle_name: str, key_name: str
+    session: AsyncSession, bundle_id: int, key_name: str
 ) -> None:
     """Re-store a plain-text row as Fernet ciphertext (same logical value)."""
-    validate_bundle_name(bundle_name)
     kn = key_name.strip()
     if not kn:
         raise HTTPException(status_code=400, detail="key_name required")
     r = await session.execute(
-        select(Secret)
-        .join(Bundle, Secret.bundle_id == Bundle.id)
-        .where(Bundle.name == bundle_name, Secret.key_name == kn)
+        select(Secret).where(Secret.bundle_id == bundle_id, Secret.key_name == kn)
     )
     row = r.scalar_one_or_none()
     if row is None:
@@ -426,17 +423,14 @@ async def upsert_bundle_secret_entry(
 
 
 async def declassify_secret_entry(
-    session: AsyncSession, bundle_name: str, key_name: str
+    session: AsyncSession, bundle_id: int, key_name: str
 ) -> None:
     """Re-store a Fernet-encrypted row as UTF-8 plaintext (same logical value)."""
-    validate_bundle_name(bundle_name)
     kn = key_name.strip()
     if not kn:
         raise HTTPException(status_code=400, detail="key_name required")
     r = await session.execute(
-        select(Secret)
-        .join(Bundle, Secret.bundle_id == Bundle.id)
-        .where(Bundle.name == bundle_name, Secret.key_name == kn)
+        select(Secret).where(Secret.bundle_id == bundle_id, Secret.key_name == kn)
     )
     row = r.scalar_one_or_none()
     if row is None:
@@ -452,15 +446,18 @@ async def declassify_secret_entry(
     row.is_secret = False
 
 
-async def load_bundle_entries(
-    session: AsyncSession, name: str
+async def load_bundle_entries_by_id(
+    session: AsyncSession, bundle_id: int
 ) -> tuple[Bundle, dict[str, tuple[str, bool]]]:
     """Returns map key -> (value, is_secret). Decrypts every row (export/API)."""
-    validate_bundle_name(name)
     r = await session.execute(
         select(Bundle)
-        .where(Bundle.name == name)
-        .options(selectinload(Bundle.secrets), selectinload(Bundle.group))
+        .where(Bundle.id == bundle_id)
+        .options(
+            selectinload(Bundle.secrets),
+            selectinload(Bundle.group),
+            selectinload(Bundle.project_environment),
+        )
     )
     bundle = r.scalar_one_or_none()
     if bundle is None:
@@ -476,15 +473,58 @@ async def load_bundle_entries(
     return bundle, out
 
 
+async def load_bundle_secrets_by_bundle_id(
+    session: AsyncSession, bundle_id: int
+) -> tuple[Bundle, dict[str, str]]:
+    bundle, ent = await load_bundle_entries_by_id(session, bundle_id)
+    return bundle, {k: v[0] for k, v in ent.items()}
+
+
+async def load_bundle_entries(
+    session: AsyncSession,
+    name: str,
+    *,
+    project_slug: str | None = None,
+    environment_slug: str | None = None,
+) -> tuple[Bundle, dict[str, tuple[str, bool]]]:
+    """Returns map key -> (value, is_secret). Decrypts every row (export/API)."""
+    from app.services.scope_resolution import fetch_bundle_for_path
+
+    validate_bundle_name(name)
+    b = await fetch_bundle_for_path(
+        session,
+        name,
+        project_slug=project_slug,
+        environment_slug=environment_slug,
+    )
+    return await load_bundle_entries_by_id(session, b.id)
+
+
 async def load_bundle_entries_list_masked(
-    session: AsyncSession, name: str
+    session: AsyncSession,
+    name: str,
+    *,
+    project_slug: str | None = None,
+    environment_slug: str | None = None,
 ) -> tuple[Bundle, dict[str, tuple[str | None, bool]]]:
     """Web list view: decrypt plaintext rows only; encrypted values are not loaded (None)."""
+    from app.services.scope_resolution import fetch_bundle_for_path
+
     validate_bundle_name(name)
+    resolved = await fetch_bundle_for_path(
+        session,
+        name,
+        project_slug=project_slug,
+        environment_slug=environment_slug,
+    )
     r = await session.execute(
         select(Bundle)
-        .where(Bundle.name == name)
-        .options(selectinload(Bundle.secrets), selectinload(Bundle.group))
+        .where(Bundle.id == resolved.id)
+        .options(
+            selectinload(Bundle.secrets),
+            selectinload(Bundle.group),
+            selectinload(Bundle.project_environment),
+        )
     )
     bundle = r.scalar_one_or_none()
     if bundle is None:
@@ -504,15 +544,12 @@ async def load_bundle_entries_list_masked(
 
 
 async def decrypt_bundle_entry_value(
-    session: AsyncSession, bundle_name: str, key_name: str
+    session: AsyncSession, bundle_id: int, key_name: str
 ) -> tuple[str, bool]:
     """Decrypt a single row (e.g. edit form); does not load other encrypted values."""
-    validate_bundle_name(bundle_name)
     kn = key_name.strip()
     r = await session.execute(
-        select(Secret)
-        .join(Bundle, Secret.bundle_id == Bundle.id)
-        .where(Bundle.name == bundle_name, Secret.key_name == kn)
+        select(Secret).where(Secret.bundle_id == bundle_id, Secret.key_name == kn)
     )
     s = r.scalar_one_or_none()
     if s is None:
@@ -526,19 +563,35 @@ async def decrypt_bundle_entry_value(
 
 
 async def load_bundle_secrets(
-    session: AsyncSession, name: str
+    session: AsyncSession,
+    name: str,
+    *,
+    project_slug: str | None = None,
+    environment_slug: str | None = None,
 ) -> tuple[Bundle, dict[str, str]]:
-    bundle, ent = await load_bundle_entries(session, name)
+    bundle, ent = await load_bundle_entries(
+        session, name, project_slug=project_slug, environment_slug=environment_slug
+    )
     return bundle, {k: v[0] for k, v in ent.items()}
 
 
-async def list_bundle_secret_key_names(session: AsyncSession, name: str) -> list[str]:
+async def list_bundle_secret_key_names(
+    session: AsyncSession,
+    name: str,
+    *,
+    project_slug: str | None = None,
+    environment_slug: str | None = None,
+) -> list[str]:
     """Sorted key names from `secrets` rows only (not sealed secrets)."""
+    from app.services.scope_resolution import fetch_bundle_for_path
+
     validate_bundle_name(name)
+    b = await fetch_bundle_for_path(
+        session, name, project_slug=project_slug, environment_slug=environment_slug
+    )
     r = await session.execute(
         select(Secret.key_name)
-        .join(Bundle, Secret.bundle_id == Bundle.id)
-        .where(Bundle.name == name)
+        .where(Secret.bundle_id == b.id)
         .order_by(Secret.key_name)
     )
     return [row[0] for row in r.all()]

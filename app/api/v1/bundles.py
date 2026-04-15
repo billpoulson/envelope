@@ -2,8 +2,10 @@ import json
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
+
+from app.api.resource_scope import ResourcePathScope
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy.orm import selectinload
@@ -11,7 +13,13 @@ from sqlalchemy.orm import selectinload
 from app.db import get_db
 from app.deps import get_api_key, get_fernet
 from app.limiter import limiter
-from app.models import ApiKey, Bundle, BundleEnvLink, BundleGroup, Secret
+from app.models import ApiKey, Bundle, BundleEnvLink, BundleGroup, ProjectEnvironment, Secret
+from app.services.project_environments import (
+    UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL,
+    get_project_environment_by_group_and_slug,
+    require_project_environment_id_for_create,
+    resolve_project_environment_fk,
+)
 from app.services.projects import get_project_by_slug_or_404, get_project_or_404
 from app.services.scopes import (
     can_create_bundle,
@@ -44,8 +52,13 @@ from app.services.bundles import (
     validate_bundle_name,
 )
 from app.services.env_links import new_env_link_token
+from app.services.scope_resolution import fetch_bundle_for_path
 
 router = APIRouter()
+
+
+def _bundle_scope_query(scope: ResourcePathScope) -> dict[str, str | None]:
+    return {"project_slug": scope.project_slug, "environment_slug": scope.environment_slug}
 
 BUNDLE_BACKUP_FORMAT = "envelope-bundle-backup-v1"
 
@@ -74,6 +87,7 @@ class CreateBundleBody(BaseModel):
     )
     group_id: int | None = None
     project_slug: str | None = None
+    project_environment_slug: str | None = None
 
 
 class PatchBundleBody(BaseModel):
@@ -82,6 +96,7 @@ class PatchBundleBody(BaseModel):
     # Same shape as POST /bundles `entries`: strings default to secret; use
     # {"KEY": {"value": "x", "secret": false}} or `_plaintext_keys` for plain rows.
     entries: dict[str, Any] | None = None
+    project_environment_slug: str | None = None
 
 
 class UpsertSecretBody(BaseModel):
@@ -94,22 +109,75 @@ def _pslug(group: BundleGroup | None) -> str | None:
     return group.slug if group else None
 
 
-@router.get("/bundles", response_model=list[str])
+def _bundle_list_row(b: Bundle) -> dict[str, str | None]:
+    pe = b.project_environment
+    return {
+        "name": b.name,
+        "project_environment_slug": pe.slug if pe else None,
+        "project_environment_name": pe.name if pe else None,
+    }
+
+
+@router.get("/bundles")
 async def list_bundles(
     project_slug: str | None = Query(None, description="If set, only bundles in this project"),
+    environment_slug: str | None = Query(
+        None,
+        description=(
+            "With project_slug: filter by environment slug, or "
+            f"'{UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL}' for bundles not assigned to an environment."
+        ),
+    ),
+    include_unassigned: bool = Query(
+        True,
+        description="With environment_slug (except the unassigned sentinel): also include bundles with no environment.",
+    ),
+    with_environment: bool = Query(
+        False,
+        description="If true (requires project_slug), return {name, project_environment_slug, project_environment_name} per row.",
+    ),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
-) -> list[str]:
+) -> list[str] | list[dict[str, str | None]]:
     scopes = parse_scopes_json(key.scopes)
-    q = select(Bundle).options(selectinload(Bundle.group)).order_by(Bundle.name)
+    has_ps = project_slug is not None and str(project_slug).strip()
+    if with_environment and not has_ps:
+        raise HTTPException(
+            status_code=400,
+            detail="with_environment=true requires project_slug",
+        )
+    q = select(Bundle).options(
+        selectinload(Bundle.group),
+        selectinload(Bundle.project_environment),
+    ).order_by(Bundle.name)
     if project_slug is not None and str(project_slug).strip():
         g = await get_project_by_slug_or_404(session, project_slug.strip())
         q = q.where(Bundle.group_id == g.id)
+        if environment_slug is not None and str(environment_slug).strip():
+            raw = str(environment_slug).strip()
+            if raw == UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL:
+                q = q.where(Bundle.project_environment_id.is_(None))
+            else:
+                env = await get_project_environment_by_group_and_slug(
+                    session, group_id=g.id, slug=raw
+                )
+                if include_unassigned:
+                    q = q.where(
+                        or_(
+                            Bundle.project_environment_id == env.id,
+                            Bundle.project_environment_id.is_(None),
+                        )
+                    )
+                else:
+                    q = q.where(Bundle.project_environment_id == env.id)
     r = await session.execute(q)
     rows = r.scalars().all()
     if scopes_allow_admin(scopes):
+        if with_environment and has_ps:
+            return [_bundle_list_row(b) for b in rows]
         return [b.name for b in rows]
-    out: list[str] = []
+    out_str: list[str] = []
+    out_detail: list[dict[str, str | None]] = []
     for b in rows:
         pn = b.group.name if b.group else None
         ps = _pslug(b.group)
@@ -126,8 +194,11 @@ async def list_bundles(
             project_name=pn,
             project_slug=ps,
         ):
-            out.append(b.name)
-    return out
+            if with_environment and has_ps:
+                out_detail.append(_bundle_list_row(b))
+            else:
+                out_str.append(b.name)
+    return out_detail if (with_environment and has_ps) else out_str
 
 
 @router.post("/bundles", status_code=201)
@@ -139,9 +210,6 @@ async def create_bundle(
     name = body.name.strip()
     validate_bundle_name(name)
     scopes = parse_scopes_json(key.scopes)
-    existing = await session.execute(select(Bundle.id).where(Bundle.name == name))
-    if existing.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=409, detail="Bundle already exists")
     entry_rows: list[tuple[str, str, bool]] = []
     kind_in = (body.import_kind or "skip").strip() or "skip"
     if body.entries is not None and (body.initial_paste or "").strip():
@@ -195,7 +263,20 @@ async def create_bundle(
         project_slug=pslug,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope to create this bundle")
-    b = Bundle(name=name, group_id=gid)
+    env_fk = await require_project_environment_id_for_create(
+        session,
+        group_id=gid,
+        slug=body.project_environment_slug,
+        resource="bundle",
+    )
+    dup_q = select(Bundle.id).where(Bundle.group_id == gid, Bundle.name == name)
+    if env_fk is None:
+        dup_q = dup_q.where(Bundle.project_environment_id.is_(None))
+    else:
+        dup_q = dup_q.where(Bundle.project_environment_id == env_fk)
+    if (await session.execute(dup_q)).scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Bundle already exists in this environment")
+    b = Bundle(name=name, group_id=gid, project_environment_id=env_fk)
     session.add(b)
     await session.flush()
     if entry_rows:
@@ -209,13 +290,24 @@ async def create_bundle(
     if b.group_id is not None:
         g2 = await session.get(BundleGroup, b.group_id)
         out_slug = g2.slug if g2 else None
-    return {"id": b.id, "name": b.name, "group_id": b.group_id, "project_slug": out_slug}
+    env_slug: str | None = None
+    if b.project_environment_id is not None:
+        pe = await session.get(ProjectEnvironment, b.project_environment_id)
+        env_slug = pe.slug if pe else None
+    return {
+        "id": b.id,
+        "name": b.name,
+        "group_id": b.group_id,
+        "project_slug": out_slug,
+        "project_environment_slug": env_slug,
+    }
 
 
 @router.patch("/bundles/{name}")
 async def patch_bundle(
     name: str,
     body: PatchBundleBody,
+    scope: ResourcePathScope = Depends(),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str | int | None]:
@@ -223,12 +315,12 @@ async def patch_bundle(
     if not body.model_fields_set:
         raise HTTPException(status_code=400, detail="No fields to patch")
     scopes = parse_scopes_json(key.scopes)
-    r = await session.execute(
-        select(Bundle).where(Bundle.name == name).options(selectinload(Bundle.group))
+    b = await fetch_bundle_for_path(
+        session,
+        name,
+        project_slug=scope.project_slug,
+        environment_slug=scope.environment_slug,
     )
-    b = r.scalar_one_or_none()
-    if b is None:
-        raise HTTPException(status_code=404, detail="Bundle not found")
     pn = b.group.name if b.group else None
     ps = _pslug(b.group)
     if not can_write_bundle(
@@ -239,6 +331,8 @@ async def patch_bundle(
         project_slug=ps,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
+    prior_group_id = b.group_id
+    prior_env_id = b.project_environment_id
     target_gid = b.group_id
     new_pn: str | None = pn
     new_ps: str | None = ps
@@ -276,7 +370,33 @@ async def patch_bundle(
                 status_code=403,
                 detail="Insufficient scope to set this project on the bundle",
             )
+    moving_project = target_gid != prior_group_id
     b.group_id = target_gid
+    if moving_project and "project_environment_slug" not in body.model_fields_set:
+        b.project_environment_id = None
+    if "project_environment_slug" in body.model_fields_set:
+        if body.project_environment_slug is None or (
+            isinstance(body.project_environment_slug, str) and not str(body.project_environment_slug).strip()
+        ):
+            new_env_id = None
+        else:
+            gid_now = b.group_id
+            if not gid_now:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Assign this bundle to a project before setting an environment",
+                )
+            new_env_id = await resolve_project_environment_fk(
+                session,
+                group_id=gid_now,
+                slug=body.project_environment_slug,
+            )
+        if not moving_project and prior_env_id is not None and new_env_id != prior_env_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Environment is already assigned; it cannot be changed or cleared.",
+            )
+        b.project_environment_id = new_env_id
     if "entries" in body.model_fields_set and body.entries is not None:
         entry_rows, err = parse_bundle_entries_dict(body.entries)
         if err:
@@ -288,23 +408,33 @@ async def patch_bundle(
     if b.group_id is not None:
         g2 = await session.get(BundleGroup, b.group_id)
         out_slug = g2.slug if g2 else None
-    return {"name": b.name, "group_id": b.group_id, "project_slug": out_slug}
+    env_slug: str | None = None
+    if b.project_environment_id is not None:
+        pe = await session.get(ProjectEnvironment, b.project_environment_id)
+        env_slug = pe.slug if pe else None
+    return {
+        "name": b.name,
+        "group_id": b.group_id,
+        "project_slug": out_slug,
+        "project_environment_slug": env_slug,
+    }
 
 
 @router.delete("/bundles/{name}", status_code=204)
 async def delete_bundle(
     name: str,
+    scope: ResourcePathScope = Depends(),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
     validate_bundle_name(name)
     scopes = parse_scopes_json(key.scopes)
-    r = await session.execute(
-        select(Bundle).where(Bundle.name == name).options(selectinload(Bundle.group))
+    b = await fetch_bundle_for_path(
+        session,
+        name,
+        project_slug=scope.project_slug,
+        environment_slug=scope.environment_slug,
     )
-    b = r.scalar_one_or_none()
-    if b is None:
-        raise HTTPException(status_code=404, detail="Bundle not found")
     pn = b.group.name if b.group else None
     ps = _pslug(b.group)
     if not can_write_bundle(
@@ -323,10 +453,11 @@ async def delete_bundle(
 @router.get("/bundles/{name}")
 async def get_bundle_decrypted(
     name: str,
+    scope: ResourcePathScope = Depends(),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    bundle, entries = await load_bundle_entries(session, name)
+    bundle, entries = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(key.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -347,23 +478,27 @@ async def get_bundle_decrypted(
         "group_id": bundle.group_id,
         "project_name": bundle.group.name if bundle.group else None,
         "project_slug": pslug,
+        "project_environment_slug": (
+            bundle.project_environment.slug if bundle.project_environment else None
+        ),
     }
 
 
 @router.get("/bundles/{name}/key-names")
 async def get_bundle_key_names(
     name: str,
+    scope: ResourcePathScope = Depends(),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, list[str]]:
     """Sorted key names from bundle secrets (not sealed secrets); for stack layer UI and automation."""
     validate_bundle_name(name)
-    r = await session.execute(
-        select(Bundle).where(Bundle.name == name).options(selectinload(Bundle.group))
+    bundle = await fetch_bundle_for_path(
+        session,
+        name,
+        project_slug=scope.project_slug,
+        environment_slug=scope.environment_slug,
     )
-    bundle = r.scalar_one_or_none()
-    if bundle is None:
-        raise HTTPException(status_code=404, detail="Bundle not found")
     scopes = parse_scopes_json(key.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -375,7 +510,7 @@ async def get_bundle_key_names(
         project_slug=pslug,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
-    keys = await list_bundle_secret_key_names(session, name)
+    keys = await list_bundle_secret_key_names(session, name, **_bundle_scope_query(scope))
     return {"keys": keys}
 
 
@@ -384,11 +519,12 @@ async def get_bundle_key_names(
 async def export_bundle(
     request: Request,
     name: str,
+    scope: ResourcePathScope = Depends(),
     format: Literal["dotenv", "json"] = Query("dotenv"),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    bundle, secrets_map = await load_bundle_secrets(session, name)
+    bundle, secrets_map = await load_bundle_secrets(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(key.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -418,12 +554,13 @@ async def export_bundle(
 @router.get("/bundles/{name}/backup")
 async def export_bundle_backup_json(
     name: str,
+    scope: ResourcePathScope = Depends(),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Structured JSON backup for merge import (includes format id)."""
     validate_bundle_name(name)
-    bundle, entries = await load_bundle_entries(session, name)
+    bundle, entries = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(key.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -454,11 +591,12 @@ async def export_bundle_backup_encrypted(
     request: Request,
     name: str,
     body: BundlePassphraseBody,
+    scope: ResourcePathScope = Depends(),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
     validate_bundle_name(name)
-    bundle, entries = await load_bundle_entries(session, name)
+    bundle, entries = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(key.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -496,20 +634,19 @@ async def export_bundle_backup_encrypted(
     )
 
 
-@router.put("/bundles/{name}/backup")
-async def import_bundle_backup_merge(
+async def _import_bundle_backup_merge_core(
     name: str,
     body: BundleBackupPayloadV1,
-    auth: ApiKey = Depends(get_api_key),
-    session: AsyncSession = Depends(get_db),
+    auth: ApiKey,
+    session: AsyncSession,
+    scope: ResourcePathScope,
 ) -> dict[str, str | int]:
-    """Merge secrets from a v1 JSON backup into the named bundle (upsert keys)."""
     validate_bundle_name(name)
     if body.format != BUNDLE_BACKUP_FORMAT:
         raise HTTPException(status_code=400, detail="unsupported backup format")
     if body.bundle.strip() != name.strip():
         raise HTTPException(status_code=400, detail="backup bundle name does not match path")
-    bundle, _ = await load_bundle_secrets(session, name)
+    bundle, _ = await load_bundle_secrets(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -542,6 +679,18 @@ async def import_bundle_backup_merge(
     return {"status": "ok", "updated": len(rows)}
 
 
+@router.put("/bundles/{name}/backup")
+async def import_bundle_backup_merge(
+    name: str,
+    body: BundleBackupPayloadV1,
+    scope: ResourcePathScope = Depends(),
+    auth: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, str | int]:
+    """Merge secrets from a v1 JSON backup into the named bundle (upsert keys)."""
+    return await _import_bundle_backup_merge_core(name, body, auth, session, scope)
+
+
 @router.post("/bundles/{name}/backup/import-encrypted", response_model=None)
 @limiter.limit("30/hour")
 async def import_bundle_backup_encrypted(
@@ -549,6 +698,7 @@ async def import_bundle_backup_encrypted(
     name: str,
     file: UploadFile = File(...),
     passphrase: str = Form(...),
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str | int]:
@@ -568,17 +718,18 @@ async def import_bundle_backup_encrypted(
         payload = BundleBackupPayloadV1.model_validate(data)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid backup payload: {e}") from e
-    return await import_bundle_backup_merge(name, payload, auth, session)
+    return await _import_bundle_backup_merge_core(name, payload, auth, session, scope)
 
 
 @router.post("/bundles/{name}/secrets", status_code=204)
 async def upsert_secret(
     name: str,
     body: UpsertSecretBody,
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    bundle, _ = await load_bundle_secrets(session, name)
+    bundle, _ = await load_bundle_secrets(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -619,10 +770,11 @@ async def upsert_secret(
 async def encrypt_plain_secret(
     name: str,
     key_name: str = Query(..., min_length=1, max_length=512),
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    bundle, _ = await load_bundle_secrets(session, name)
+    bundle, _ = await load_bundle_secrets(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -634,7 +786,7 @@ async def encrypt_plain_secret(
         project_slug=pslug,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
-    await encrypt_plain_entry(session, name, key_name)
+    await encrypt_plain_entry(session, bundle.id, key_name)
     await session.commit()
     return Response(status_code=204)
 
@@ -643,10 +795,11 @@ async def encrypt_plain_secret(
 async def declassify_encrypted_secret(
     name: str,
     key_name: str = Query(..., min_length=1, max_length=512),
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    bundle, _ = await load_bundle_secrets(session, name)
+    bundle, _ = await load_bundle_secrets(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -658,7 +811,7 @@ async def declassify_encrypted_secret(
         project_slug=pslug,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
-    await declassify_secret_entry(session, name, key_name)
+    await declassify_secret_entry(session, bundle.id, key_name)
     await session.commit()
     return Response(status_code=204)
 
@@ -667,10 +820,11 @@ async def declassify_encrypted_secret(
 async def delete_secret(
     name: str,
     key_name: str = Query(..., min_length=1, max_length=512),
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
-    bundle, _ = await load_bundle_secrets(session, name)
+    bundle, _ = await load_bundle_secrets(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -696,12 +850,13 @@ async def delete_secret(
 async def list_bundle_env_links(
     request: Request,
     name: str,
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> list[dict[str, int | str]]:
     """List opaque env links (id and created time only; raw URL path is never stored)."""
     validate_bundle_name(name)
-    bundle, _ = await load_bundle_entries(session, name)
+    bundle, _ = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -731,12 +886,13 @@ async def list_bundle_env_links(
 async def create_bundle_env_link(
     request: Request,
     name: str,
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """Create an opaque URL (no project/bundle names) that downloads this bundle as .env or JSON."""
     validate_bundle_name(name)
-    bundle, _ = await load_bundle_entries(session, name)
+    bundle, _ = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -762,11 +918,12 @@ async def create_bundle_env_link(
 async def delete_bundle_env_link(
     name: str,
     link_id: int,
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
     validate_bundle_name(name)
-    bundle, _ = await load_bundle_entries(session, name)
+    bundle, _ = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)

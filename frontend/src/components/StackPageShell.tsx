@@ -1,5 +1,12 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import {
+  pageHeaderBleedFullClasses,
+  pageHeaderBleedInsetClasses,
+  pageHeaderStripBaseClasses,
+  pageSubtitleClasses,
+  pageTitleMonoClasses,
+} from "@/components/PageHeader";
 import { StackSubnav } from "@/components/StackSubnav";
 
 export type StackTertiaryLink = { to: string; label: string };
@@ -7,6 +14,7 @@ export type StackTertiaryLink = { to: string; label: string };
 type Props = {
   stackName: string;
   subnavSlug?: string;
+  linkSearch?: string;
   subtitle: string;
   tertiaryLink?: StackTertiaryLink;
   /** Set when Layout renders this route full-width (no max-width column), e.g. layers, env links, key graph. */
@@ -20,27 +28,27 @@ type Props = {
 export function StackPageShell({
   stackName,
   subnavSlug,
+  linkSearch = "",
   subtitle,
   tertiaryLink,
   fullBleed,
   children,
 }: Props) {
-  const headerBleed = fullBleed
-    ? "px-4 backdrop-blur sm:px-6"
-    : "-mx-4 px-4 backdrop-blur sm:px-6";
+  const headerBleed = fullBleed ? pageHeaderBleedFullClasses : pageHeaderBleedInsetClasses;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header
-        className={`sticky top-0 z-10 mb-6 shrink-0 border-b border-border/60 bg-[#0b0f14]/95 py-4 ${headerBleed}`}
-      >
+      <header className={`${pageHeaderStripBaseClasses} ${headerBleed}`}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="break-all font-mono text-xl font-semibold tracking-tight text-white sm:text-2xl">
-              {stackName}
-            </h1>
-            <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>
+            <h1 className={pageTitleMonoClasses}>{stackName}</h1>
+            <p className={pageSubtitleClasses}>{subtitle}</p>
           </div>
-          <StackSubnav projectSlug={subnavSlug} stackName={stackName} variant="embedded" />
+          <StackSubnav
+            projectSlug={subnavSlug}
+            stackName={stackName}
+            variant="embedded"
+            linkSearch={linkSearch}
+          />
         </div>
         {tertiaryLink ? (
           <div className="mt-4">

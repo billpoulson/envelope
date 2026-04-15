@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { listStacks } from "@/api/stacks";
+import { PageHeader } from "@/components/PageHeader";
 import { ResourceList } from "@/components/ResourceList";
 
 export default function StacksPage() {
@@ -23,12 +24,10 @@ export default function StacksPage() {
 
   return (
     <div>
-      <div className="mb-2">
-        <h1 className="text-2xl font-semibold tracking-tight text-white">Stacks</h1>
-        {names.length > 0 ? (
-          <p className="mt-1 text-sm text-slate-500">{names.length} total</p>
-        ) : null}
-      </div>
+      <PageHeader
+        title="Stacks"
+        subtitle={names.length > 0 ? `${names.length} total` : undefined}
+      />
       <p className="mb-6 max-w-2xl text-sm leading-relaxed text-slate-400">
         Stacks are defined per project. Choose a project to create new ones, or open a stack below to
         edit layers, view the key graph, or manage env links.

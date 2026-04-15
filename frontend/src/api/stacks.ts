@@ -1,9 +1,43 @@
 import { apiFetch, getCsrfHeader } from "./client";
 import { fetchCsrf } from "./auth";
+import { appendResourceScope, type ResourceScopeOpts } from "./bundles";
 
-export async function listStacks(projectSlug?: string): Promise<string[]> {
-  const q = projectSlug ? `?project_slug=${encodeURIComponent(projectSlug)}` : "";
+export type { ResourceScopeOpts };
+
+export type ListStacksOptions = {
+  environmentSlug?: string;
+  includeUnassigned?: boolean;
+};
+
+export type ProjectStackListRow = {
+  name: string;
+  project_environment_slug: string | null;
+  project_environment_name: string | null;
+};
+
+export async function listStacks(
+  projectSlug?: string,
+  opts?: ListStacksOptions,
+): Promise<string[]> {
+  const params = new URLSearchParams();
+  if (projectSlug) params.set("project_slug", projectSlug);
+  if (opts?.environmentSlug) params.set("environment_slug", opts.environmentSlug);
+  if (opts?.includeUnassigned === false) params.set("include_unassigned", "false");
+  const q = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<string[]>(`/stacks${q}`, { method: "GET" });
+}
+
+export async function listProjectStacks(
+  projectSlug: string,
+  opts?: ListStacksOptions,
+): Promise<ProjectStackListRow[]> {
+  const params = new URLSearchParams();
+  params.set("project_slug", projectSlug);
+  params.set("with_environment", "true");
+  if (opts?.environmentSlug) params.set("environment_slug", opts.environmentSlug);
+  if (opts?.includeUnassigned === false) params.set("include_unassigned", "false");
+  const q = `?${params.toString()}`;
+  return apiFetch<ProjectStackListRow[]>(`/stacks${q}`, { method: "GET" });
 }
 
 export type StackLayer = {
@@ -18,16 +52,21 @@ export type StackDetail = {
   name: string;
   group_id: number | null;
   project_slug: string | null;
+  project_environment_slug: string | null;
   layers: StackLayer[];
 };
 
-export async function getStack(name: string): Promise<StackDetail> {
-  return apiFetch<StackDetail>(`/stacks/${encodeURIComponent(name)}`, { method: "GET" });
+export async function getStack(name: string, scope?: ResourceScopeOpts): Promise<StackDetail> {
+  return apiFetch<StackDetail>(
+    appendResourceScope(`/stacks/${encodeURIComponent(name)}`, scope),
+    { method: "GET" },
+  );
 }
 
 export async function createStack(body: {
   name: string;
   project_slug: string;
+  project_environment_slug: string;
   layers: StackLayer[];
 }): Promise<{ id: number; name: string }> {
   const csrf = await fetchCsrf();
@@ -40,19 +79,25 @@ export async function createStack(body: {
 
 export async function patchStack(
   name: string,
-  body: { name?: string; project_slug?: string | null; layers?: StackLayer[] },
+  body: {
+    name?: string;
+    project_slug?: string | null;
+    project_environment_slug?: string | null;
+    layers?: StackLayer[];
+  },
+  scope?: ResourceScopeOpts,
 ): Promise<void> {
   const csrf = await fetchCsrf();
-  await apiFetch(`/stacks/${encodeURIComponent(name)}`, {
+  await apiFetch(appendResourceScope(`/stacks/${encodeURIComponent(name)}`, scope), {
     method: "PATCH",
     headers: getCsrfHeader(csrf),
     json: body,
   });
 }
 
-export async function deleteStack(name: string): Promise<void> {
+export async function deleteStack(name: string, scope?: ResourceScopeOpts): Promise<void> {
   const csrf = await fetchCsrf();
-  await apiFetch(`/stacks/${encodeURIComponent(name)}`, {
+  await apiFetch(appendResourceScope(`/stacks/${encodeURIComponent(name)}`, scope), {
     method: "DELETE",
     headers: getCsrfHeader(csrf),
   });
@@ -65,6 +110,8 @@ export type StackKeyGraphPayload = {
     label: string;
     display_label?: string | null;
     bundle_edit_path?: string;
+    /** Which deployment environment this layer's bundle is tagged with (null = unassigned). */
+    bundle_environment_slug?: string | null;
   }[];
   rows: {
     key: string;
@@ -85,12 +132,17 @@ export type StackKeyGraphPayload = {
 export async function getStackKeyGraph(
   name: string,
   includeSecretValues = false,
+  scope?: ResourceScopeOpts,
 ): Promise<StackKeyGraphPayload> {
-  const q =
-    includeSecretValues === true
-      ? "?include_secret_values=true"
-      : "?include_secret_values=false";
-  return apiFetch(`/stacks/${encodeURIComponent(name)}/key-graph${q}`, { method: "GET" });
+  const p = new URLSearchParams();
+  p.set("include_secret_values", includeSecretValues ? "true" : "false");
+  if (scope?.projectSlug?.trim()) p.set("project_slug", scope.projectSlug.trim());
+  const e = scope?.environmentSlug?.trim();
+  if (e) p.set("environment_slug", e);
+  return apiFetch(
+    `/stacks/${encodeURIComponent(name)}/key-graph?${p.toString()}`,
+    { method: "GET" },
+  );
 }
 
 export type StackEnvLinkRow = {
@@ -100,28 +152,45 @@ export type StackEnvLinkRow = {
   slice_label: string | null;
 };
 
-export async function listStackEnvLinks(stackName: string): Promise<StackEnvLinkRow[]> {
-  return apiFetch<StackEnvLinkRow[]>(`/stacks/${encodeURIComponent(stackName)}/env-links`, {
-    method: "GET",
-  });
+export async function listStackEnvLinks(
+  stackName: string,
+  scope?: ResourceScopeOpts,
+): Promise<StackEnvLinkRow[]> {
+  return apiFetch<StackEnvLinkRow[]>(
+    appendResourceScope(`/stacks/${encodeURIComponent(stackName)}/env-links`, scope),
+    {
+      method: "GET",
+    },
+  );
 }
 
 export async function createStackEnvLink(
   stackName: string,
   throughLayerPosition: number | null,
+  scope?: ResourceScopeOpts,
 ): Promise<{ url: string; message: string }> {
   const csrf = await fetchCsrf();
-  return apiFetch(`/stacks/${encodeURIComponent(stackName)}/env-links`, {
-    method: "POST",
-    headers: getCsrfHeader(csrf),
-    json: { through_layer_position: throughLayerPosition },
-  });
+  return apiFetch(
+    appendResourceScope(`/stacks/${encodeURIComponent(stackName)}/env-links`, scope),
+    {
+      method: "POST",
+      headers: getCsrfHeader(csrf),
+      json: { through_layer_position: throughLayerPosition },
+    },
+  );
 }
 
-export async function deleteStackEnvLink(stackName: string, linkId: number): Promise<void> {
+export async function deleteStackEnvLink(
+  stackName: string,
+  linkId: number,
+  scope?: ResourceScopeOpts,
+): Promise<void> {
   const csrf = await fetchCsrf();
   await apiFetch(
-    `/stacks/${encodeURIComponent(stackName)}/env-links/${encodeURIComponent(String(linkId))}`,
+    appendResourceScope(
+      `/stacks/${encodeURIComponent(stackName)}/env-links/${encodeURIComponent(String(linkId))}`,
+      scope,
+    ),
     { method: "DELETE", headers: getCsrfHeader(csrf) },
   );
 }

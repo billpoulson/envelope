@@ -1,10 +1,18 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { BundleSubnav } from "@/components/BundleSubnav";
+import {
+  pageHeaderBleedInsetClasses,
+  pageHeaderStripBaseClasses,
+  pageSubtitleClasses,
+  pageTitleMonoClasses,
+} from "@/components/PageHeader";
 
 type Props = {
   bundleName: string;
   subnavSlug?: string;
+  /** Appends to bundle subnav links (e.g. `location.search` for `?env=`). */
+  linkSearch?: string;
   subtitle: string;
   tertiaryLink?: { to: string; label: string };
   /** Optional row below the subnav (e.g. Variables: Copy key names, Add entry). */
@@ -18,6 +26,7 @@ type Props = {
 export function BundlePageShell({
   bundleName,
   subnavSlug,
+  linkSearch = "",
   subtitle,
   tertiaryLink,
   belowSubnav,
@@ -25,16 +34,19 @@ export function BundlePageShell({
 }: Props) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="sticky top-0 z-10 -mx-4 mb-6 shrink-0 border-b border-border/60 bg-[#0b0f14]/95 px-4 py-4 backdrop-blur sm:px-6">
+      <header className={`${pageHeaderStripBaseClasses} ${pageHeaderBleedInsetClasses}`}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="break-all font-mono text-xl font-semibold tracking-tight text-white sm:text-2xl">
-              {bundleName}
-            </h1>
-            <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>
+            <h1 className={pageTitleMonoClasses}>{bundleName}</h1>
+            <p className={pageSubtitleClasses}>{subtitle}</p>
           </div>
           <div className="shrink-0">
-            <BundleSubnav projectSlug={subnavSlug} bundleName={bundleName} variant="embedded" />
+            <BundleSubnav
+              projectSlug={subnavSlug}
+              bundleName={bundleName}
+              variant="embedded"
+              linkSearch={linkSearch}
+            />
           </div>
         </div>
         {belowSubnav ? (

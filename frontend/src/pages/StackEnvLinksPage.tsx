@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   createStackEnvLink,
   deleteStackEnvLink,
@@ -10,21 +10,26 @@ import {
 import { StackPageShell } from "@/components/StackPageShell";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
+import { envSearchParam, resourceScopeFromNav } from "@/projectEnv";
 
 export default function StackEnvLinksPage() {
   const { projectSlug: projectSlugParam, stackName = "" } = useParams<{
     projectSlug?: string;
     stackName: string;
   }>();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const envTag = envSearchParam(searchParams.get("env")) ?? "";
+  const resourceScope = resourceScopeFromNav(projectSlugParam, envTag);
   const qc = useQueryClient();
   const stackQ = useQuery({
-    queryKey: ["stack", stackName],
-    queryFn: () => getStack(stackName),
+    queryKey: ["stack", stackName, projectSlugParam ?? "", envTag ?? ""],
+    queryFn: () => getStack(stackName, resourceScope),
     enabled: !!stackName,
   });
   const q = useQuery({
-    queryKey: ["stack-env-links", stackName],
-    queryFn: () => listStackEnvLinks(stackName),
+    queryKey: ["stack-env-links", stackName, projectSlugParam ?? "", envTag ?? ""],
+    queryFn: () => listStackEnvLinks(stackName, resourceScope),
     enabled: !!stackName,
   });
   const [err, setErr] = useState<string | null>(null);
@@ -35,7 +40,7 @@ export default function StackEnvLinksPage() {
 
   const createM = useMutation({
     mutationFn: (throughLayerPosition: number | null) =>
-      createStackEnvLink(stackName, throughLayerPosition),
+      createStackEnvLink(stackName, throughLayerPosition, resourceScope),
     onSuccess: (data, throughLayerPosition) => {
       setResultUrl(data.url);
       setLastCreatedThrough(throughLayerPosition);
@@ -46,7 +51,7 @@ export default function StackEnvLinksPage() {
   });
 
   const delM = useMutation({
-    mutationFn: (id: number) => deleteStackEnvLink(stackName, id),
+    mutationFn: (id: number) => deleteStackEnvLink(stackName, id, resourceScope),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["stack-env-links", stackName] }),
     onError: (e: unknown) => setErr(formatApiError(e)),
   });
@@ -92,8 +97,9 @@ export default function StackEnvLinksPage() {
     <StackPageShell
       stackName={stackName}
       subnavSlug={subnavSlug}
+      linkSearch={location.search}
       subtitle="Secret env URLs"
-      tertiaryLink={{ to: editTo, label: "← Edit stack layers" }}
+      tertiaryLink={{ to: `${editTo}${location.search}`, label: "← Edit stack layers" }}
       fullBleed
     >
       <h2 className="mb-2 text-lg font-medium text-white">Secret env URL</h2>

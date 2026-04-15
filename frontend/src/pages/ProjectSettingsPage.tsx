@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { deleteProject, listProjects, patchProject } from "@/api/projects";
+import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
@@ -61,18 +62,26 @@ export default function ProjectSettingsPage() {
   }
 
   const bundlesPath = `/projects/${encodeURIComponent(projectSlug)}/bundles`;
+  const environmentsPath = `/projects/${encodeURIComponent(projectSlug)}/environments`;
   const dirty =
     name.trim() !== project.name || slug.trim() !== project.slug;
 
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-semibold text-white">Project settings</h1>
-      <p className="mb-6 font-mono text-lg text-slate-300">{project.name}</p>
-      <p className="mb-8">
-        <Link className="text-accent underline hover:text-accent/90" to={bundlesPath}>
-          ← Bundles
-        </Link>
-      </p>
+      <PageHeader
+        title="Project settings"
+        subtitle={<span className="font-mono text-lg text-slate-300">{project.name}</span>}
+        below={
+          <p className="mb-8 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <Link className="text-accent underline hover:text-accent/90" to={bundlesPath}>
+              ← Bundles
+            </Link>
+            <Link className="text-accent underline hover:text-accent/90" to={environmentsPath}>
+              Environments
+            </Link>
+          </p>
+        }
+      />
 
       {err ? <p className="mb-4 text-sm text-red-400">{err}</p> : null}
 

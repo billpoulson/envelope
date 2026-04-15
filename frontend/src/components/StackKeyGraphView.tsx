@@ -8,8 +8,9 @@ import {
   type MouseEvent,
 } from "react";
 import { Link } from "react-router-dom";
-import { deleteSecret, upsertSecret } from "@/api/bundles";
+import { deleteSecret, upsertSecret, type ResourceScopeOpts } from "@/api/bundles";
 import { patchStack, type StackKeyGraphPayload, type StackLayer } from "@/api/stacks";
+import { bundleScopeForApi } from "@/projectEnv";
 import {
   editorToStackLayer,
   LayerAliasesBlock,
@@ -17,6 +18,7 @@ import {
   type LayerEditorState,
 } from "@/components/StackLayersEditor";
 import { Button } from "@/components/ui";
+import { appendQueryParam } from "@/util/appendQueryParam";
 import { formatApiError } from "@/util/apiError";
 import {
   graphCellHasValue,
@@ -90,6 +92,9 @@ type Props = {
   data: StackKeyGraphPayload;
   /** Stack name and layers for editing key aliases from the context menu (optional). */
   stackName?: string;
+  /** Project slug when under `/projects/...` — disambiguates bundle names. */
+  projectSlug?: string;
+  stackScope?: ResourceScopeOpts;
   stackLayers?: StackLayer[];
   showSecrets: boolean;
   onShowSecretsChange: (next: boolean) => void;
@@ -132,6 +137,8 @@ function CellValue({
 export function StackKeyGraphView({
   data,
   stackName,
+  projectSlug,
+  stackScope,
   stackLayers = [],
   showSecrets,
   onShowSecretsChange,
@@ -162,7 +169,7 @@ export function StackKeyGraphView({
         y: number;
         viewSecret?: { raw: string; title: string };
         editTo?: string;
-        define?: { bundleName: string; keyName: string };
+        define?: { bundleName: string; keyName: string; bundleEnvironmentSlug: string | null };
         move?: {
           key: string;
           sourceLi: number;
@@ -171,7 +178,7 @@ export function StackKeyGraphView({
           isSecret: boolean;
           targets: { layerIndex: number; label: string; bundle: string }[];
         };
-        remove?: { bundleName: string; keyName: string };
+        remove?: { bundleName: string; keyName: string; bundleEnvironmentSlug: string | null };
         aliasesLayer?: { layerIndex: number };
       }
   >(null);
@@ -193,6 +200,7 @@ export function StackKeyGraphView({
   const [defineBody, setDefineBody] = useState<{
     bundleName: string;
     keyName: string;
+    bundleEnvironmentSlug: string | null;
     value: string;
     isSecret: boolean;
   } | null>(null);
@@ -204,6 +212,7 @@ export function StackKeyGraphView({
   const [moveDialog, setMoveDialog] = useState<{
     key: string;
     sourceBundle: string;
+    sourceLayerIndex: number;
     value: string;
     isSecret: boolean;
     targets: { layerIndex: number; label: string; bundle: string }[];
@@ -240,11 +249,15 @@ export function StackKeyGraphView({
     setDefineErr(null);
     setDefineBusy(true);
     try {
-      await upsertSecret(defineBody.bundleName, {
-        key_name: defineBody.keyName,
-        value: defineBody.value,
-        is_secret: defineBody.isSecret,
-      });
+      await upsertSecret(
+        defineBody.bundleName,
+        {
+          key_name: defineBody.keyName,
+          value: defineBody.value,
+          is_secret: defineBody.isSecret,
+        },
+        bundleScopeForApi(projectSlug, defineBody.bundleEnvironmentSlug),
+      );
       setDefineOpen(false);
       setDefineBody(null);
       onRefetch();
@@ -253,19 +266,39 @@ export function StackKeyGraphView({
     } finally {
       setDefineBusy(false);
     }
-  }, [defineBody, onRefetch]);
+  }, [defineBody, onRefetch, projectSlug]);
 
   const executeMoveToBundle = useCallback(
-    async (payload: MoveValuePayload, targetBundle: string) => {
+    async (
+      payload: MoveValuePayload & { sourceLayerIndex: number },
+      targetLayerIndex: number,
+    ) => {
       setMoveErr(null);
       setMoveBusy(true);
       try {
-        await upsertSecret(targetBundle, {
-          key_name: payload.key,
-          value: payload.value,
-          is_secret: payload.isSecret,
-        });
-        await deleteSecret(payload.sourceBundle, payload.key);
+        const targetBundle = String(data.layers[targetLayerIndex]?.bundle || "");
+        const tgtSlug =
+          (
+            data.layers[targetLayerIndex] as { bundle_environment_slug?: string | null }
+          )?.bundle_environment_slug ?? null;
+        const srcSlug =
+          (
+            data.layers[payload.sourceLayerIndex] as { bundle_environment_slug?: string | null }
+          )?.bundle_environment_slug ?? null;
+        await upsertSecret(
+          targetBundle,
+          {
+            key_name: payload.key,
+            value: payload.value,
+            is_secret: payload.isSecret,
+          },
+          bundleScopeForApi(projectSlug, tgtSlug),
+        );
+        await deleteSecret(
+          payload.sourceBundle,
+          payload.key,
+          bundleScopeForApi(projectSlug, srcSlug),
+        );
         setMoveDialog(null);
         setMovePick(null);
         setDragMove(null);
@@ -277,7 +310,7 @@ export function StackKeyGraphView({
         setMoveBusy(false);
       }
     },
-    [onRefetch],
+    [data.layers, onRefetch, projectSlug],
   );
 
   const submitMove = useCallback(async () => {
@@ -288,19 +321,24 @@ export function StackKeyGraphView({
       {
         key: moveDialog.key,
         sourceBundle: moveDialog.sourceBundle,
+        sourceLayerIndex: moveDialog.sourceLayerIndex,
         value: moveDialog.value,
         isSecret: moveDialog.isSecret,
       },
-      tgt.bundle,
+      tgt.layerIndex,
     );
   }, [moveDialog, movePick, executeMoveToBundle]);
 
   const executeRemoveFromBundle = useCallback(
-    async (bundleName: string, keyName: string) => {
+    async (bundleName: string, keyName: string, bundleEnvironmentSlug: string | null) => {
       setRemoveErr(null);
       setRemoveBusy(true);
       try {
-        await deleteSecret(bundleName, keyName);
+        await deleteSecret(
+          bundleName,
+          keyName,
+          bundleScopeForApi(projectSlug, bundleEnvironmentSlug),
+        );
         setCtx(null);
         onRefetch();
       } catch (e: unknown) {
@@ -309,7 +347,7 @@ export function StackKeyGraphView({
         setRemoveBusy(false);
       }
     },
-    [onRefetch],
+    [onRefetch, projectSlug],
   );
 
   const submitAliasSave = useCallback(async () => {
@@ -317,9 +355,13 @@ export function StackKeyGraphView({
     setAliasErr(null);
     setAliasBusy(true);
     try {
-      await patchStack(stackName.trim(), {
-        layers: aliasEditLayers.map(editorToStackLayer),
-      });
+      await patchStack(
+        stackName.trim(),
+        {
+          layers: aliasEditLayers.map(editorToStackLayer),
+        },
+        stackScope,
+      );
       setAliasModalLayer(null);
       onRefetch();
     } catch (e: unknown) {
@@ -327,7 +369,7 @@ export function StackKeyGraphView({
     } finally {
       setAliasBusy(false);
     }
-  }, [aliasEditLayers, aliasModalLayer, onRefetch, stackName]);
+  }, [aliasEditLayers, aliasModalLayer, onRefetch, stackName, stackScope]);
 
   if (n === 0) {
     return <p className="text-slate-400">This stack has no layers.</p>;
@@ -525,7 +567,7 @@ export function StackKeyGraphView({
                       const isSec = cellSecrets[li] === true;
 
                       const editTo =
-                        hasVal && editBase ? `${editBase}?key=${encodeURIComponent(key)}` : "";
+                        hasVal && editBase ? appendQueryParam(editBase, "key", key) : "";
 
                       const moveTargets = hasVal
                         ? moveTargetsForCell(data.layers, cells, cellsSecretRedacted, li)
@@ -550,9 +592,19 @@ export function StackKeyGraphView({
                             ? { raw: String(v), title: `${key} · ${bundleName}` }
                             : undefined;
                         const canDefine = rowNoValueAnywhere && !!bundleName && !!editBase;
-                        const definePayload = canDefine ? { bundleName, keyName: key } : undefined;
+                        const bundleEnvSlug =
+                          (
+                            layerMeta as {
+                              bundle_environment_slug?: string | null;
+                            }
+                          ).bundle_environment_slug ?? null;
+                        const definePayload = canDefine
+                          ? { bundleName, keyName: key, bundleEnvironmentSlug: bundleEnvSlug }
+                          : undefined;
                         const removePayload =
-                          hasVal && bundleName ? { bundleName, keyName: key } : undefined;
+                          hasVal && bundleName
+                            ? { bundleName, keyName: key, bundleEnvironmentSlug: bundleEnvSlug }
+                            : undefined;
                         const aliasesPayload =
                           canEditAliases && li > 0 ? { layerIndex: li } : undefined;
                         if (
@@ -616,15 +668,15 @@ export function StackKeyGraphView({
                         if (!dragMove || moveBusy) return;
                         if (!isValidDropTarget(dragMove, key, li, cells, data.layers, cellsSecretRedacted))
                           return;
-                        const tgtBundle = String(data.layers[li]!.bundle);
                         await executeMoveToBundle(
                           {
                             key: dragMove.key,
                             sourceBundle: dragMove.sourceBundle,
+                            sourceLayerIndex: dragMove.sourceLi,
                             value: dragMove.value,
                             isSecret: dragMove.isSecret,
                           },
-                          tgtBundle,
+                          li,
                         );
                       };
 
@@ -779,8 +831,15 @@ export function StackKeyGraphView({
                                 title: `${key} · merged export`,
                               }
                             : undefined;
+                        const winMeta = win != null ? data.layers[win] : undefined;
+                        const winEnv =
+                          (
+                            winMeta as { bundle_environment_slug?: string | null } | undefined
+                          )?.bundle_environment_slug ?? null;
                         const removePayload =
-                          winBundle !== "" ? { bundleName: winBundle, keyName: key } : undefined;
+                          winBundle !== ""
+                            ? { bundleName: winBundle, keyName: key, bundleEnvironmentSlug: winEnv }
+                            : undefined;
                         if (!viewSecretPayload && !removePayload) return;
                         setTimeout(() => {
                           setCtx({
@@ -848,6 +907,7 @@ export function StackKeyGraphView({
                 setDefineBody({
                   bundleName: ctx.define!.bundleName,
                   keyName: ctx.define!.keyName,
+                  bundleEnvironmentSlug: ctx.define!.bundleEnvironmentSlug,
                   value: "",
                   isSecret: true,
                 });
@@ -869,6 +929,7 @@ export function StackKeyGraphView({
                 setMoveDialog({
                   key: m.key,
                   sourceBundle: m.sourceBundle,
+                  sourceLayerIndex: m.sourceLi,
                   value: m.value,
                   isSecret: m.isSecret,
                   targets: m.targets,
@@ -888,7 +949,7 @@ export function StackKeyGraphView({
                 const r = ctx.remove!;
                 const msg = `Remove "${r.keyName}" from bundle "${r.bundleName}"? This deletes the variable from that bundle; other stacks using this bundle will no longer see it.`;
                 if (!confirm(msg)) return;
-                void executeRemoveFromBundle(r.bundleName, r.keyName);
+                void executeRemoveFromBundle(r.bundleName, r.keyName, r.bundleEnvironmentSlug);
               }}
             >
               {removeBusy ? "Removing…" : "Remove from bundle…"}

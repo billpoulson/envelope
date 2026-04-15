@@ -1,6 +1,8 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+
+from app.api.resource_scope import ResourcePathScope
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +12,7 @@ from app.db import get_db
 from app.deps import get_api_key
 from app.models import ApiKey, Bundle, Certificate, SealedSecret, SealedSecretRecipient
 from app.services.bundles import normalize_env_key, validate_bundle_name
+from app.services.scope_resolution import fetch_bundle_for_path
 from app.services.scopes import can_read_bundle, can_write_bundle, parse_scopes_json
 
 router = APIRouter()
@@ -52,24 +55,24 @@ def _bundle_project_name_slug(bundle: Bundle) -> tuple[str | None, str | None]:
     return pname, pslug
 
 
-async def _get_bundle_or_404(session: AsyncSession, name: str) -> Bundle:
+async def _get_bundle_or_404(session: AsyncSession, name: str, scope: ResourcePathScope) -> Bundle:
     validate_bundle_name(name)
-    r = await session.execute(
-        select(Bundle).where(Bundle.name == name).options(selectinload(Bundle.group))
+    return await fetch_bundle_for_path(
+        session,
+        name,
+        project_slug=scope.project_slug,
+        environment_slug=scope.environment_slug,
     )
-    bundle = r.scalar_one_or_none()
-    if bundle is None:
-        raise HTTPException(status_code=404, detail="Bundle not found")
-    return bundle
 
 
 @router.get("/bundles/{name}/sealed-secrets", response_model=list[SealedSecretOut])
 async def list_sealed_secrets(
     name: str,
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> list[SealedSecretOut]:
-    bundle = await _get_bundle_or_404(session, name)
+    bundle = await _get_bundle_or_404(session, name, scope)
     scopes = parse_scopes_json(auth.scopes)
     pname, pslug = _bundle_project_name_slug(bundle)
     if not can_read_bundle(
@@ -112,10 +115,11 @@ async def list_sealed_secrets(
 async def upsert_sealed_secret(
     name: str,
     body: UpsertSealedSecretBody,
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> None:
-    bundle = await _get_bundle_or_404(session, name)
+    bundle = await _get_bundle_or_404(session, name, scope)
     scopes = parse_scopes_json(auth.scopes)
     pname, pslug = _bundle_project_name_slug(bundle)
     if not can_write_bundle(
@@ -186,10 +190,11 @@ async def upsert_sealed_secret(
 async def delete_sealed_secret(
     name: str,
     key_name: str,
+    scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
-    bundle = await _get_bundle_or_404(session, name)
+    bundle = await _get_bundle_or_404(session, name, scope)
     scopes = parse_scopes_json(auth.scopes)
     pname, pslug = _bundle_project_name_slug(bundle)
     if not can_write_bundle(

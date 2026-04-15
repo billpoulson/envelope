@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { PageHeader } from "@/components/PageHeader";
 
 function Section({
   id,
@@ -25,8 +26,9 @@ function Section({
 
 export default function TutorialPage() {
   return (
-    <div className="max-w-3xl">
-      <h1 className="mb-2 text-3xl font-semibold tracking-tight text-white">Tutorial</h1>
+    <div>
+      <PageHeader title="Tutorial" />
+      <div className="max-w-3xl">
       <p className="mb-8 text-slate-400">
         Envelope stores named groups of environment variables (like{" "}
         <code className="rounded bg-white/10 px-1 font-mono text-slate-200">.env</code> files), encrypts
@@ -177,6 +179,7 @@ export default function TutorialPage() {
             .
           </p>
         </Section>
+      </div>
       </div>
     </div>
   );

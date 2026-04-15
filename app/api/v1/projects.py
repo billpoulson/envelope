@@ -5,7 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import get_api_key
-from app.models import ApiKey, Bundle, BundleGroup
+from app.models import ApiKey, Bundle, BundleGroup, ProjectEnvironment
+from app.services.project_environments import (
+    next_available_env_slug,
+    slug_suggestion_from_name as env_slug_suggestion_from_name,
+    validate_environment_name,
+    validate_environment_slug,
+)
 from app.services.projects import (
     get_project_by_slug_or_404,
     next_available_slug,
@@ -32,6 +38,20 @@ class CreateProjectBody(BaseModel):
 class UpdateProjectBody(BaseModel):
     name: str | None = Field(None, max_length=256)
     slug: str | None = Field(None, max_length=128)
+
+
+class CreateProjectEnvironmentBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    slug: str | None = Field(None, max_length=64)
+
+
+class UpdateProjectEnvironmentBody(BaseModel):
+    name: str | None = Field(None, max_length=128)
+    slug: str | None = Field(None, max_length=64)
+
+
+class ReorderProjectEnvironmentsBody(BaseModel):
+    slugs: list[str] = Field(..., description="All environment slugs in desired order (top to bottom).")
 
 
 @router.get("/projects")
@@ -175,5 +195,236 @@ async def delete_project(
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this project")
     await session.execute(delete(BundleGroup).where(BundleGroup.id == g.id))
+    await session.commit()
+    return Response(status_code=204)
+
+
+def _can_view_project_environments(scopes: list[str], g: BundleGroup) -> bool:
+    if scopes_allow_admin(scopes):
+        return True
+    return can_read_project(
+        scopes,
+        project_id=g.id,
+        project_name=g.name,
+        project_slug=g.slug,
+    ) or can_write_project(
+        scopes,
+        project_id=g.id,
+        project_name=g.name,
+        project_slug=g.slug,
+    )
+
+
+@router.get("/projects/{project_slug}/environments")
+async def list_project_environments(
+    project_slug: str,
+    key: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> list[dict[str, int | str]]:
+    scopes = parse_scopes_json(key.scopes)
+    g = await get_project_by_slug_or_404(session, project_slug)
+    if not _can_view_project_environments(scopes, g):
+        raise HTTPException(status_code=403, detail="Insufficient scope for this project")
+    r = await session.execute(
+        select(ProjectEnvironment)
+        .where(ProjectEnvironment.group_id == g.id)
+        .order_by(ProjectEnvironment.sort_order, ProjectEnvironment.id)
+    )
+    rows = r.scalars().all()
+    return [
+        {
+            "id": e.id,
+            "name": e.name,
+            "slug": e.slug,
+            "sort_order": e.sort_order,
+        }
+        for e in rows
+    ]
+
+
+@router.post("/projects/{project_slug}/environments", status_code=201)
+async def create_project_environment(
+    project_slug: str,
+    body: CreateProjectEnvironmentBody,
+    key: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, int | str]:
+    scopes = parse_scopes_json(key.scopes)
+    g = await get_project_by_slug_or_404(session, project_slug)
+    if not can_write_project(
+        scopes,
+        project_id=g.id,
+        project_name=g.name,
+        project_slug=g.slug,
+    ):
+        raise HTTPException(status_code=403, detail="Insufficient scope for this project")
+
+    validate_environment_name(body.name)
+    name = body.name.strip()
+    if body.slug is not None and str(body.slug).strip():
+        slug = str(body.slug).strip()
+        validate_environment_slug(slug)
+        dup = await session.execute(
+            select(ProjectEnvironment.id).where(
+                ProjectEnvironment.group_id == g.id,
+                ProjectEnvironment.slug == slug,
+            )
+        )
+        if dup.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Environment slug already exists in this project")
+    else:
+        base = env_slug_suggestion_from_name(name)
+        validate_environment_slug(base)
+        slug = await next_available_env_slug(session, g.id, base)
+
+    rmax = await session.execute(
+        select(func.coalesce(func.max(ProjectEnvironment.sort_order), -1)).where(
+            ProjectEnvironment.group_id == g.id
+        )
+    )
+    next_sort = int(rmax.scalar_one()) + 1
+
+    e = ProjectEnvironment(
+        group_id=g.id,
+        name=name,
+        slug=slug,
+        sort_order=next_sort,
+    )
+    session.add(e)
+    await session.commit()
+    await session.refresh(e)
+    return {"id": e.id, "name": e.name, "slug": e.slug, "sort_order": e.sort_order}
+
+
+@router.patch("/projects/{project_slug}/environments/{env_slug}")
+async def update_project_environment(
+    project_slug: str,
+    env_slug: str,
+    body: UpdateProjectEnvironmentBody,
+    key: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, int | str]:
+    if body.name is None and body.slug is None:
+        raise HTTPException(status_code=400, detail="Provide at least one of: name, slug")
+
+    scopes = parse_scopes_json(key.scopes)
+    g = await get_project_by_slug_or_404(session, project_slug)
+    if not can_write_project(
+        scopes,
+        project_id=g.id,
+        project_name=g.name,
+        project_slug=g.slug,
+    ):
+        raise HTTPException(status_code=403, detail="Insufficient scope for this project")
+
+    r = await session.execute(
+        select(ProjectEnvironment).where(
+            ProjectEnvironment.group_id == g.id,
+            ProjectEnvironment.slug == env_slug,
+        )
+    )
+    e = r.scalar_one_or_none()
+    if e is None:
+        raise HTTPException(status_code=404, detail="Environment not found")
+
+    if body.name is not None:
+        validate_environment_name(body.name)
+        e.name = body.name.strip()
+
+    if body.slug is not None:
+        s = body.slug.strip()
+        validate_environment_slug(s)
+        dup = await session.execute(
+            select(ProjectEnvironment.id).where(
+                ProjectEnvironment.group_id == g.id,
+                ProjectEnvironment.slug == s,
+                ProjectEnvironment.id != e.id,
+            )
+        )
+        if dup.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Environment slug already exists in this project")
+        e.slug = s
+
+    await session.commit()
+    await session.refresh(e)
+    return {"id": e.id, "name": e.name, "slug": e.slug, "sort_order": e.sort_order}
+
+
+@router.put("/projects/{project_slug}/environments/order")
+async def reorder_project_environments(
+    project_slug: str,
+    body: ReorderProjectEnvironmentsBody,
+    key: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> list[dict[str, int | str]]:
+    scopes = parse_scopes_json(key.scopes)
+    g = await get_project_by_slug_or_404(session, project_slug)
+    if not can_write_project(
+        scopes,
+        project_id=g.id,
+        project_name=g.name,
+        project_slug=g.slug,
+    ):
+        raise HTTPException(status_code=403, detail="Insufficient scope for this project")
+
+    r = await session.execute(
+        select(ProjectEnvironment).where(ProjectEnvironment.group_id == g.id)
+    )
+    existing = {row.slug: row for row in r.scalars().all()}
+    if sorted(body.slugs) != sorted(existing.keys()):
+        raise HTTPException(
+            status_code=400,
+            detail="slugs must list every environment in this project exactly once",
+        )
+
+    for i, slug in enumerate(body.slugs):
+        existing[slug].sort_order = i
+
+    await session.commit()
+    r2 = await session.execute(
+        select(ProjectEnvironment)
+        .where(ProjectEnvironment.group_id == g.id)
+        .order_by(ProjectEnvironment.sort_order, ProjectEnvironment.id)
+    )
+    rows = r2.scalars().all()
+    return [
+        {
+            "id": e.id,
+            "name": e.name,
+            "slug": e.slug,
+            "sort_order": e.sort_order,
+        }
+        for e in rows
+    ]
+
+
+@router.delete("/projects/{project_slug}/environments/{env_slug}", status_code=204)
+async def delete_project_environment(
+    project_slug: str,
+    env_slug: str,
+    key: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    scopes = parse_scopes_json(key.scopes)
+    g = await get_project_by_slug_or_404(session, project_slug)
+    if not can_write_project(
+        scopes,
+        project_id=g.id,
+        project_name=g.name,
+        project_slug=g.slug,
+    ):
+        raise HTTPException(status_code=403, detail="Insufficient scope for this project")
+
+    r = await session.execute(
+        select(ProjectEnvironment).where(
+            ProjectEnvironment.group_id == g.id,
+            ProjectEnvironment.slug == env_slug,
+        )
+    )
+    e = r.scalar_one_or_none()
+    if e is None:
+        raise HTTPException(status_code=404, detail="Environment not found")
+
+    await session.delete(e)
     await session.commit()
     return Response(status_code=204)

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { createApiKey, deleteApiKey, listApiKeys } from "@/api/keys";
+import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
@@ -52,13 +53,16 @@ export default function ApiKeysPage() {
   const rows = q.data ?? [];
 
   return (
-    <div className="max-w-3xl space-y-8">
-      <div>
-        <h1 className="mb-2 text-2xl font-semibold text-white">API keys</h1>
-        <p className="text-slate-400">
-          Create keys with explicit scopes. The plaintext value is shown only once after creation.
-        </p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        title="API keys"
+        below={
+          <p className="text-slate-400">
+            Create keys with explicit scopes. The plaintext value is shown only once after creation.
+          </p>
+        }
+      />
+      <div className="max-w-3xl space-y-8">
 
       {err ? <p className="text-sm text-red-400">{err}</p> : null}
 
@@ -153,6 +157,7 @@ export default function ApiKeysPage() {
           </div>
         )}
       </section>
+      </div>
     </div>
   );
 }

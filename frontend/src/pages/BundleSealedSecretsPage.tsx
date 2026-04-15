@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   deleteSealedSecret,
   getBundle,
@@ -12,6 +12,7 @@ import { listCertificates } from "@/api/certificates";
 import { BundlePageShell } from "@/components/BundlePageShell";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
+import { envSearchParam, resourceScopeFromNav } from "@/projectEnv";
 
 const STEPS = 4;
 
@@ -26,15 +27,19 @@ export default function BundleSealedSecretsPage() {
     projectSlug?: string;
     bundleName: string;
   }>();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const envTag = envSearchParam(searchParams.get("env")) ?? "";
+  const resourceScope = resourceScopeFromNav(projectSlugParam, envTag);
   const qc = useQueryClient();
   const bq = useQuery({
-    queryKey: ["bundle", bundleName],
-    queryFn: () => getBundle(bundleName),
+    queryKey: ["bundle", bundleName, projectSlugParam ?? "", envTag ?? ""],
+    queryFn: () => getBundle(bundleName, resourceScope),
     enabled: !!bundleName && !projectSlugParam,
   });
   const q = useQuery({
-    queryKey: ["sealed", bundleName],
-    queryFn: () => listSealedSecrets(bundleName),
+    queryKey: ["sealed", bundleName, projectSlugParam ?? "", envTag ?? ""],
+    queryFn: () => listSealedSecrets(bundleName, resourceScope),
     enabled: !!bundleName,
   });
   const certQ = useQuery({
@@ -55,7 +60,7 @@ export default function BundleSealedSecretsPage() {
   const [wizardErr, setWizardErr] = useState<string | null>(null);
 
   const delM = useMutation({
-    mutationFn: (kn: string) => deleteSealedSecret(bundleName, kn),
+    mutationFn: (kn: string) => deleteSealedSecret(bundleName, kn, resourceScope),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["sealed", bundleName] }),
   });
 
@@ -85,14 +90,18 @@ export default function BundleSealedSecretsPage() {
       } catch (e: unknown) {
         throw new Error(e instanceof Error ? e.message : "Invalid recipients JSON");
       }
-      await upsertSealedSecret(bundleName, {
-        key_name: keyName.trim(),
-        enc_alg: encAlg.trim(),
-        payload_ciphertext: payloadCt.trim(),
-        payload_nonce: payloadNonce.trim(),
-        payload_aad: payloadAad.trim() ? payloadAad.trim() : null,
-        recipients,
-      });
+      await upsertSealedSecret(
+        bundleName,
+        {
+          key_name: keyName.trim(),
+          enc_alg: encAlg.trim(),
+          payload_ciphertext: payloadCt.trim(),
+          payload_nonce: payloadNonce.trim(),
+          payload_aad: payloadAad.trim() ? payloadAad.trim() : null,
+          recipients,
+        },
+        resourceScope,
+      );
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["sealed", bundleName] });
@@ -173,8 +182,9 @@ export default function BundleSealedSecretsPage() {
     <BundlePageShell
       bundleName={bundleName}
       subnavSlug={subnavSlug}
+      linkSearch={location.search}
       subtitle="Sealed secrets"
-      tertiaryLink={{ to: editTo, label: "← Variables" }}
+      tertiaryLink={{ to: `${editTo}${location.search}`, label: "← Variables" }}
     >
       <p className="mb-4 text-sm text-slate-400">
         Upload client-encrypted payloads and wrapped data keys for certificate recipients. The server stores

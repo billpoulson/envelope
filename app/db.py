@@ -182,6 +182,42 @@ def _migrate_sqlite_bundle_stack_layer_keys(sync_conn) -> None:
         sync_conn.execute(text("ALTER TABLE bundle_stack_layers ADD COLUMN aliases_json TEXT"))
 
 
+def _migrate_sqlite_bundles_stacks_project_environment(sync_conn) -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    if "bundles" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("bundles")}
+        if "project_environment_id" not in cols:
+            sync_conn.execute(
+                text(
+                    "ALTER TABLE bundles ADD COLUMN project_environment_id INTEGER "
+                    "REFERENCES project_environments(id) ON DELETE SET NULL"
+                )
+            )
+            sync_conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_bundles_project_environment_id "
+                    "ON bundles(project_environment_id)"
+                )
+            )
+    if "bundle_stacks" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("bundle_stacks")}
+        if "project_environment_id" not in cols:
+            sync_conn.execute(
+                text(
+                    "ALTER TABLE bundle_stacks ADD COLUMN project_environment_id INTEGER "
+                    "REFERENCES project_environments(id) ON DELETE SET NULL"
+                )
+            )
+            sync_conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_bundle_stacks_project_environment_id "
+                    "ON bundle_stacks(project_environment_id)"
+                )
+            )
+
+
 def _migrate_sqlite_stack_env_links_slice(sync_conn) -> None:
     from sqlalchemy import inspect, text
 
@@ -202,6 +238,35 @@ def _migrate_sqlite_stack_env_links_slice(sync_conn) -> None:
     )
 
 
+def _migrate_sqlite_bundles_stacks_scoped_names(sync_conn) -> None:
+    """Allow duplicate bundle/stack display names across environments within a project."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    for table in ("bundles", "bundle_stacks"):
+        if table not in insp.get_table_names():
+            continue
+        for idx in insp.get_indexes(table):
+            if not idx.get("unique"):
+                continue
+            cols = idx.get("column_names") or []
+            if cols == ["name"]:
+                sync_conn.execute(text(f'DROP INDEX IF EXISTS "{idx["name"]}"'))
+        sync_conn.execute(
+            text(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS uq_{table}_scoped_group_name_env "
+                f"ON {table}(group_id, name, ifnull(project_environment_id, 0)) "
+                f"WHERE group_id IS NOT NULL"
+            )
+        )
+        sync_conn.execute(
+            text(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS uq_{table}_legacy_name "
+                f"ON {table}(name) WHERE group_id IS NULL"
+            )
+        )
+
+
 async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
@@ -213,3 +278,5 @@ async def init_db() -> None:
             await conn.run_sync(_migrate_sqlite_bundle_groups_slug)
             await conn.run_sync(_migrate_sqlite_bundle_stack_layer_keys)
             await conn.run_sync(_migrate_sqlite_stack_env_links_slice)
+            await conn.run_sync(_migrate_sqlite_bundles_stacks_project_environment)
+            await conn.run_sync(_migrate_sqlite_bundles_stacks_scoped_names)

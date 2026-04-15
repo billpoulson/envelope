@@ -23,6 +23,32 @@ class BundleGroup(Base):
 
     bundles: Mapped[list["Bundle"]] = relationship(back_populates="group")
     stacks: Mapped[list["BundleStack"]] = relationship(back_populates="group")
+    environments: Mapped[list["ProjectEnvironment"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
+
+
+class ProjectEnvironment(Base):
+    """Named deployment stage / environment within a project (e.g. Local, CI, Prod)."""
+
+    __tablename__ = "project_environments"
+    __table_args__ = (UniqueConstraint("group_id", "slug", name="uq_project_environment_slug"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("bundle_groups.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    group: Mapped["BundleGroup"] = relationship(back_populates="environments")
+    bundles: Mapped[list["Bundle"]] = relationship(back_populates="project_environment")
+    stacks: Mapped[list["BundleStack"]] = relationship(back_populates="project_environment")
 
 
 class BundleEnvLink(Base):
@@ -46,15 +72,22 @@ class Bundle(Base):
     __tablename__ = "bundles"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    # Unique per (project group, name, environment) — see SQLite migration indexes.
+    name: Mapped[str] = mapped_column(String(256), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     group_id: Mapped[int | None] = mapped_column(
         ForeignKey("bundle_groups.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    project_environment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_environments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     group: Mapped["BundleGroup | None"] = relationship(back_populates="bundles")
+    project_environment: Mapped["ProjectEnvironment | None"] = relationship(
+        back_populates="bundles"
+    )
     secrets: Mapped[list["Secret"]] = relationship(
         back_populates="bundle", cascade="all, delete-orphan"
     )
@@ -73,15 +106,22 @@ class BundleStack(Base):
     __tablename__ = "bundle_stacks"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    # Unique per (project group, name, environment) — see SQLite migration indexes.
+    name: Mapped[str] = mapped_column(String(256), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     group_id: Mapped[int | None] = mapped_column(
         ForeignKey("bundle_groups.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    project_environment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_environments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     group: Mapped["BundleGroup | None"] = relationship(back_populates="stacks")
+    project_environment: Mapped["ProjectEnvironment | None"] = relationship(
+        back_populates="stacks"
+    )
     layers: Mapped[list["BundleStackLayer"]] = relationship(
         back_populates="stack",
         cascade="all, delete-orphan",

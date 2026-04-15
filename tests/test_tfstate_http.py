@@ -31,6 +31,15 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
 
 
+def _ensure_default_environment(client: TestClient, hj: dict[str, str], project_slug: str) -> None:
+    r = client.post(
+        f"/api/v1/projects/{project_slug}/environments",
+        json={"name": "Default", "slug": "default"},
+        headers=hj,
+    )
+    assert r.status_code == 201, r.text
+
+
 class BackupRestoreHttpTests(unittest.TestCase):
     """Full-database GET /system/backup/database and POST /system/restore/database."""
 
@@ -49,10 +58,15 @@ class BackupRestoreHttpTests(unittest.TestCase):
         h = {"Authorization": f"Bearer {self._token}"}
         hj = {**h, "Content-Type": "application/json"}
         project = {"name": "Backup restore proj", "slug": "brrestore"}
-        bundle_body = {"name": "restore-marker-bundle", "project_slug": "brrestore"}
+        bundle_body = {
+            "name": "restore-marker-bundle",
+            "project_slug": "brrestore",
+            "project_environment_slug": "default",
+        }
         with TestClient(app) as client:
             pr = client.post("/api/v1/projects", json=project, headers=hj)
             self.assertEqual(pr.status_code, 201, pr.text)
+            _ensure_default_environment(client, hj, "brrestore")
             br = client.post("/api/v1/bundles", json=bundle_body, headers=hj)
             self.assertEqual(br.status_code, 201, br.text)
 
@@ -189,9 +203,14 @@ class TfstateHttpTests(unittest.TestCase):
                 headers=h_admin_json,
             )
             self.assertEqual(cp.status_code, 201, cp.text)
+            _ensure_default_environment(client, h_admin_json, project_slug)
             cb = client.post(
                 "/api/v1/bundles",
-                json={"name": bundle_name, "project_slug": project_slug},
+                json={
+                    "name": bundle_name,
+                    "project_slug": project_slug,
+                    "project_environment_slug": "default",
+                },
                 headers=h_admin_json,
             )
             self.assertEqual(cb.status_code, 201, cb.text)
@@ -266,9 +285,14 @@ class TfstateHttpTests(unittest.TestCase):
                 headers=h_admin,
             )
             self.assertEqual(cp.status_code, 201, cp.text)
+            _ensure_default_environment(client, h_admin, project_slug)
             cb = client.post(
                 "/api/v1/bundles",
-                json={"name": bundle_name, "project_slug": project_slug},
+                json={
+                    "name": bundle_name,
+                    "project_slug": project_slug,
+                    "project_environment_slug": "default",
+                },
                 headers=h_admin,
             )
             self.assertEqual(cb.status_code, 201, cb.text)
@@ -297,6 +321,73 @@ class StacksHttpTests(unittest.TestCase):
 
     _token = "tfstate-http-test-admin-key"
 
+    def test_patch_bundle_environment_locked_after_assignment(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"envlock-{nonce}"
+        with TestClient(app) as client:
+            client.post(
+                "/api/v1/projects",
+                json={"name": f"Env lock {nonce}", "slug": slug},
+                headers=hj,
+            )
+            _ensure_default_environment(client, hj, slug)
+            er = client.post(
+                f"/api/v1/projects/{slug}/environments",
+                json={"name": "Staging", "slug": "staging"},
+                headers=hj,
+            )
+            self.assertEqual(er.status_code, 201, er.text)
+            br = client.post(
+                "/api/v1/bundles",
+                json={
+                    "name": f"eb-{nonce}",
+                    "project_slug": slug,
+                    "project_environment_slug": "default",
+                },
+                headers=hj,
+            )
+            self.assertEqual(br.status_code, 201, br.text)
+            pr = client.patch(
+                f"/api/v1/bundles/eb-{nonce}",
+                json={"project_environment_slug": "staging"},
+                params={"project_slug": slug, "environment_slug": "default"},
+                headers=hj,
+            )
+            self.assertEqual(pr.status_code, 400, pr.text)
+            self.assertIn("already assigned", pr.json()["detail"].lower())
+
+    def test_create_bundle_and_stack_require_project_environment(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        slug = f"reqenv-{nonce}"
+        with TestClient(app) as client:
+            client.post(
+                "/api/v1/projects",
+                json={"name": f"Req env {nonce}", "slug": slug},
+                headers=hj,
+            )
+            br = client.post(
+                "/api/v1/bundles",
+                json={"name": f"b-{nonce}", "project_slug": slug},
+                headers=hj,
+            )
+            self.assertEqual(br.status_code, 400)
+            self.assertIn("project_environment_slug", br.json()["detail"].lower())
+            sr = client.post(
+                "/api/v1/stacks",
+                json={
+                    "name": f"s-{nonce}",
+                    "project_slug": slug,
+                    "layers": [{"bundle": f"b-{nonce}", "keys": "*"}],
+                },
+                headers=hj,
+            )
+            self.assertEqual(sr.status_code, 400)
+            self.assertIn("project_environment_slug", sr.json()["detail"].lower())
+
     def test_stack_merge_last_layer_wins(self) -> None:
         h = {"Authorization": f"Bearer {self._token}"}
         hj = {**h, "Content-Type": "application/json"}
@@ -308,11 +399,13 @@ class StacksHttpTests(unittest.TestCase):
                 json={"name": f"Stack Proj {nonce}", "slug": slug},
                 headers=hj,
             )
+            _ensure_default_environment(client, hj, slug)
             client.post(
                 "/api/v1/bundles",
                 json={
                     "name": f"stack-base-{nonce}",
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "entries": {"FOO": "from-base", "ONLY_BASE": "yes"},
                 },
                 headers=hj,
@@ -322,6 +415,7 @@ class StacksHttpTests(unittest.TestCase):
                 json={
                     "name": f"stack-top-{nonce}",
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "entries": {"FOO": "from-top", "ONLY_TOP": "yes"},
                 },
                 headers=hj,
@@ -331,6 +425,7 @@ class StacksHttpTests(unittest.TestCase):
                 json={
                     "name": f"merge-stack-{nonce}",
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "layers": [f"stack-base-{nonce}", f"stack-top-{nonce}"],
                 },
                 headers=hj,
@@ -355,11 +450,13 @@ class StacksHttpTests(unittest.TestCase):
                 json={"name": f"Pick Proj {nonce}", "slug": slug},
                 headers=hj,
             )
+            _ensure_default_environment(client, hj, slug)
             client.post(
                 "/api/v1/bundles",
                 json={
                     "name": f"sb-{nonce}",
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "entries": {"FOO": "from-base-foo", "BAR": "from-base-bar"},
                 },
                 headers=hj,
@@ -369,6 +466,7 @@ class StacksHttpTests(unittest.TestCase):
                 json={
                     "name": f"st-{nonce}",
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "entries": {"FOO": "from-top-foo", "ONLY_TOP": "yes"},
                 },
                 headers=hj,
@@ -378,6 +476,7 @@ class StacksHttpTests(unittest.TestCase):
                 json={
                     "name": f"pick-stack-{nonce}",
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "layers": [
                         {"bundle": f"sb-{nonce}", "keys": "*"},
                         {"bundle": f"st-{nonce}", "keys": ["FOO"]},
@@ -404,14 +503,25 @@ class StacksHttpTests(unittest.TestCase):
                 json={"name": f"Scope Proj {nonce}", "slug": slug},
                 headers=hj,
             )
+            _ensure_default_environment(client, hj, slug)
             client.post(
                 "/api/v1/bundles",
-                json={"name": f"scope-a-{nonce}", "project_slug": slug, "entries": {"K": "a"}},
+                json={
+                    "name": f"scope-a-{nonce}",
+                    "project_slug": slug,
+                    "project_environment_slug": "default",
+                    "entries": {"K": "a"},
+                },
                 headers=hj,
             )
             client.post(
                 "/api/v1/bundles",
-                json={"name": f"scope-b-{nonce}", "project_slug": slug, "entries": {"K": "b"}},
+                json={
+                    "name": f"scope-b-{nonce}",
+                    "project_slug": slug,
+                    "project_environment_slug": "default",
+                    "entries": {"K": "b"},
+                },
                 headers=hj,
             )
             client.post(
@@ -419,6 +529,7 @@ class StacksHttpTests(unittest.TestCase):
                 json={
                     "name": f"scope-stack-{nonce}",
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "layers": [f"scope-a-{nonce}", f"scope-b-{nonce}"],
                 },
                 headers=hj,
@@ -451,14 +562,25 @@ class StacksHttpTests(unittest.TestCase):
                 json={"name": f"CRUD Proj {nonce}", "slug": slug},
                 headers=hj,
             )
+            _ensure_default_environment(client, hj, slug)
             client.post(
                 "/api/v1/bundles",
-                json={"name": f"c1-{nonce}", "project_slug": slug, "entries": {"X": "1"}},
+                json={
+                    "name": f"c1-{nonce}",
+                    "project_slug": slug,
+                    "project_environment_slug": "default",
+                    "entries": {"X": "1"},
+                },
                 headers=hj,
             )
             client.post(
                 "/api/v1/bundles",
-                json={"name": f"c2-{nonce}", "project_slug": slug, "entries": {"X": "2"}},
+                json={
+                    "name": f"c2-{nonce}",
+                    "project_slug": slug,
+                    "project_environment_slug": "default",
+                    "entries": {"X": "2"},
+                },
                 headers=hj,
             )
             cr = client.post(
@@ -466,6 +588,7 @@ class StacksHttpTests(unittest.TestCase):
                 json={
                     "name": f"crud-s-{nonce}",
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "layers": [f"c1-{nonce}"],
                 },
                 headers=hj,
@@ -537,14 +660,25 @@ class StacksHttpTests(unittest.TestCase):
                 json={"name": f"Env Proj {nonce}", "slug": slug},
                 headers=hj,
             )
+            _ensure_default_environment(client, hj, slug)
             client.post(
                 "/api/v1/bundles",
-                json={"name": f"e1-{nonce}", "project_slug": slug, "entries": {"Z": "1"}},
+                json={
+                    "name": f"e1-{nonce}",
+                    "project_slug": slug,
+                    "project_environment_slug": "default",
+                    "entries": {"Z": "1"},
+                },
                 headers=hj,
             )
             client.post(
                 "/api/v1/bundles",
-                json={"name": f"e2-{nonce}", "project_slug": slug, "entries": {"Z": "2"}},
+                json={
+                    "name": f"e2-{nonce}",
+                    "project_slug": slug,
+                    "project_environment_slug": "default",
+                    "entries": {"Z": "2"},
+                },
                 headers=hj,
             )
             client.post(
@@ -552,6 +686,7 @@ class StacksHttpTests(unittest.TestCase):
                 json={
                     "name": f"env-stack-{nonce}",
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "layers": [f"e1-{nonce}", f"e2-{nonce}"],
                 },
                 headers=hj,
@@ -575,14 +710,25 @@ class StacksHttpTests(unittest.TestCase):
                 json={"name": f"Slice Proj {nonce}", "slug": slug},
                 headers=hj,
             )
+            _ensure_default_environment(client, hj, slug)
             client.post(
                 "/api/v1/bundles",
-                json={"name": f"s1-{nonce}", "project_slug": slug, "entries": {"Z": "bottom"}},
+                json={
+                    "name": f"s1-{nonce}",
+                    "project_slug": slug,
+                    "project_environment_slug": "default",
+                    "entries": {"Z": "bottom"},
+                },
                 headers=hj,
             )
             client.post(
                 "/api/v1/bundles",
-                json={"name": f"s2-{nonce}", "project_slug": slug, "entries": {"Z": "top"}},
+                json={
+                    "name": f"s2-{nonce}",
+                    "project_slug": slug,
+                    "project_environment_slug": "default",
+                    "entries": {"Z": "top"},
+                },
                 headers=hj,
             )
             client.post(
@@ -590,6 +736,7 @@ class StacksHttpTests(unittest.TestCase):
                 json={
                     "name": f"slice-stack-{nonce}",
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "layers": [f"s1-{nonce}", f"s2-{nonce}"],
                 },
                 headers=hj,
@@ -669,9 +816,10 @@ class StackKeyGraphApiTests(unittest.TestCase):
                 headers=hj,
             )
             self.assertEqual(pr.status_code, 201, pr.text)
+            _ensure_default_environment(client, hj, slug)
             br = client.post(
                 "/api/v1/bundles",
-                json={"name": bname, "project_slug": slug},
+                json={"name": bname, "project_slug": slug, "project_environment_slug": "default"},
                 headers=hj,
             )
             self.assertEqual(br.status_code, 201, br.text)
@@ -680,6 +828,7 @@ class StackKeyGraphApiTests(unittest.TestCase):
                 json={
                     "name": sname,
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "layers": [{"bundle": bname, "keys": "*"}],
                 },
                 headers=hj,
@@ -710,11 +859,13 @@ class StackKeyGraphApiTests(unittest.TestCase):
                 headers=hj,
             )
             self.assertEqual(pr.status_code, 201, pr.text)
+            _ensure_default_environment(client, hj, slug)
             br0 = client.post(
                 "/api/v1/bundles",
                 json={
                     "name": base_b,
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "entries": {"OIDC_KEY": "the-oidc-value"},
                 },
                 headers=hj,
@@ -722,7 +873,7 @@ class StackKeyGraphApiTests(unittest.TestCase):
             self.assertEqual(br0.status_code, 201, br0.text)
             br1 = client.post(
                 "/api/v1/bundles",
-                json={"name": top_b, "project_slug": slug},
+                json={"name": top_b, "project_slug": slug, "project_environment_slug": "default"},
                 headers=hj,
             )
             self.assertEqual(br1.status_code, 201, br1.text)
@@ -731,6 +882,7 @@ class StackKeyGraphApiTests(unittest.TestCase):
                 json={
                     "name": sname,
                     "project_slug": slug,
+                    "project_environment_slug": "default",
                     "layers": [
                         {"bundle": base_b, "keys": "*"},
                         {

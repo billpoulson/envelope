@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { apiFetch, getCsrfHeader } from "@/api/client";
 import { fetchCsrf } from "@/api/auth";
+import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 
 export default function NewProjectPage() {
@@ -30,8 +31,9 @@ export default function NewProjectPage() {
   });
 
   return (
-    <div className="mx-auto max-w-lg">
-      <h1 className="mb-6 text-2xl font-semibold text-white">New project</h1>
+    <div>
+      <PageHeader title="New project" />
+      <div className="mx-auto max-w-lg">
       <form
         className="space-y-4"
         onSubmit={(ev) => {
@@ -74,6 +76,7 @@ export default function NewProjectPage() {
           </Link>
         </div>
       </form>
+      </div>
     </div>
   );
 }

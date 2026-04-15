@@ -16,6 +16,7 @@ import LoginPage from "@/pages/LoginPage";
 import NewBundlePage from "@/pages/NewBundlePage";
 import NewProjectPage from "@/pages/NewProjectPage";
 import ProjectBundlesPage from "@/pages/ProjectBundlesPage";
+import ProjectEnvironmentsPage from "@/pages/ProjectEnvironmentsPage";
 import ProjectSettingsPage from "@/pages/ProjectSettingsPage";
 import ProjectStacksPage from "@/pages/ProjectStacksPage";
 import ProjectsPage from "@/pages/ProjectsPage";
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/new" element={<NewProjectPage />} />
           <Route path="/projects/:projectSlug/settings" element={<ProjectSettingsPage />} />
+          <Route path="/projects/:projectSlug/environments" element={<ProjectEnvironmentsPage />} />
           <Route path="/projects/:projectSlug/bundles" element={<ProjectBundlesPage />} />
           <Route path="/projects/:projectSlug/bundles/new" element={<NewBundlePage />} />
           <Route

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { listProjects } from "@/api/projects";
+import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 
 export default function ProjectsPage() {
@@ -21,12 +22,14 @@ export default function ProjectsPage() {
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-white">Projects</h1>
-        <Link to="/projects/new">
-          <Button>New project</Button>
-        </Link>
-      </div>
+      <PageHeader
+        title="Projects"
+        actions={
+          <Link to="/projects/new">
+            <Button>New project</Button>
+          </Link>
+        }
+      />
       {rows.length === 0 ? (
         <p className="text-slate-400">No projects yet.</p>
       ) : (

@@ -14,11 +14,12 @@ from sqlalchemy.orm import selectinload
 from app.models import Bundle, BundleStack, BundleStackLayer
 from app.paths import url_path
 from app.services.bundles import (
-    load_bundle_entries,
-    load_bundle_secrets,
+    load_bundle_entries_by_id,
+    load_bundle_secrets_by_bundle_id,
     normalize_env_key,
     validate_bundle_name,
 )
+from app.services.project_environments import UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL
 
 _ALIAS_MAX_PER_LAYER = 64
 _ENV_KEY_MAX_LEN = 512
@@ -110,20 +111,83 @@ def validate_stack_name(name: str) -> None:
 
 
 async def get_stack_by_name(
-    session: AsyncSession, name: str
+    session: AsyncSession,
+    name: str,
+    *,
+    project_slug: str | None = None,
+    environment_slug: str | None = None,
 ) -> BundleStack | None:
+    from app.services.scope_resolution import fetch_stack_for_path
+
     validate_stack_name(name)
+    try:
+        st0 = await fetch_stack_for_path(
+            session,
+            name,
+            project_slug=project_slug,
+            environment_slug=environment_slug,
+        )
+    except HTTPException as e:
+        if e.status_code == 404:
+            return None
+        raise
     r = await session.execute(
         select(BundleStack)
-        .where(BundleStack.name == name)
+        .where(BundleStack.id == st0.id)
         .options(
             selectinload(BundleStack.layers)
             .selectinload(BundleStackLayer.bundle)
             .selectinload(Bundle.group),
+            selectinload(BundleStack.layers)
+            .selectinload(BundleStackLayer.bundle)
+            .selectinload(Bundle.project_environment),
             selectinload(BundleStack.group),
+            selectinload(BundleStack.project_environment),
         )
     )
     return r.scalar_one_or_none()
+
+
+async def resolve_bundle_id_for_stack_layer(
+    session: AsyncSession,
+    stack: BundleStack,
+    bundle_name: str,
+) -> int:
+    """Pick the bundle row for this stack's environment (exact env, else shared unassigned)."""
+    bn = bundle_name.strip()
+    validate_bundle_name(bn)
+    r = await session.execute(
+        select(Bundle)
+        .where(Bundle.group_id == stack.group_id, Bundle.name == bn)
+        .options(selectinload(Bundle.project_environment))
+    )
+    candidates = list(r.scalars().all())
+    if not candidates:
+        raise HTTPException(status_code=400, detail=f"Bundle not found: {bn}")
+    if stack.project_environment_id is None:
+        matching = [b for b in candidates if b.project_environment_id is None]
+        if len(matching) == 1:
+            return matching[0].id
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Ambiguous bundle {bn!r}: assign this stack to an environment, "
+                "or ensure only one unassigned bundle uses this name in the project."
+            ),
+        )
+    exact = [b for b in candidates if b.project_environment_id == stack.project_environment_id]
+    if exact:
+        return exact[0].id
+    shared = [b for b in candidates if b.project_environment_id is None]
+    if shared:
+        return shared[0].id
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"No bundle {bn!r} for this stack's environment "
+            "(and no shared unassigned bundle with that name)."
+        ),
+    )
 
 
 def _layer_key_filter(layer: BundleStackLayer, secrets_map: dict[str, str]) -> dict[str, str]:
@@ -235,7 +299,7 @@ async def load_stack_secrets(session: AsyncSession, stack: BundleStack) -> dict[
     merged: dict[str, str] = {}
     for layer in layers:
         prefix = dict(merged)
-        _, sm = await load_bundle_secrets(session, layer.bundle.name)
+        _, sm = await load_bundle_secrets_by_bundle_id(session, layer.bundle_id)
         sm = _layer_key_filter(layer, sm)
         al = _parse_layer_aliases_json(layer)
         if al:
@@ -273,7 +337,7 @@ async def load_stack_secrets_through(
         if layer.position > through_layer_position:
             break
         prefix = dict(merged)
-        _, sm = await load_bundle_secrets(session, layer.bundle.name)
+        _, sm = await load_bundle_secrets_by_bundle_id(session, layer.bundle_id)
         sm = _layer_key_filter(layer, sm)
         al = _parse_layer_aliases_json(layer)
         if al:
@@ -289,7 +353,7 @@ async def load_stack_layer_secret_maps(
     layers = sorted(stack.layers, key=lambda L: L.position)
     out: list[dict[str, str]] = []
     for layer in layers:
-        _, sm = await load_bundle_secrets(session, layer.bundle.name)
+        _, sm = await load_bundle_secrets_by_bundle_id(session, layer.bundle_id)
         sm = _layer_key_filter(layer, sm)
         out.append(dict(sm))
     return out
@@ -303,7 +367,7 @@ async def load_stack_layer_entry_maps(
     out: list[dict[str, tuple[str, bool]]] = []
     merged_below: dict[str, tuple[str, bool]] = {}
     for layer in layers:
-        _, ent = await load_bundle_entries(session, layer.bundle.name)
+        _, ent = await load_bundle_entries_by_id(session, layer.bundle_id)
         ent = _layer_entry_filter(layer, ent)
         row = dict(ent)
         al = _parse_layer_aliases_json(layer)
@@ -329,6 +393,7 @@ def stack_key_graph_payload(
     layer_bundle_edit_paths: list[str] | None = None,
     layer_display_labels: list[str | None] | None = None,
     layer_alias_maps: list[dict[str, str]] | None = None,
+    layer_bundle_env_slugs: list[str | None] | None = None,
     *,
     include_secret_values: bool = True,
 ) -> dict[str, Any]:
@@ -435,6 +500,9 @@ def stack_key_graph_payload(
         edit_path = ""
         if layer_bundle_edit_paths and i < len(layer_bundle_edit_paths):
             edit_path = layer_bundle_edit_paths[i]
+        env_slug: str | None = None
+        if layer_bundle_env_slugs and i < len(layer_bundle_env_slugs):
+            env_slug = layer_bundle_env_slugs[i]
         layers_meta.append(
             {
                 "bundle": layer_bundle_names[i],
@@ -442,6 +510,7 @@ def stack_key_graph_payload(
                 "label": lab,
                 "display_label": custom,
                 "bundle_edit_path": edit_path,
+                "bundle_environment_slug": env_slug,
             }
         )
 
@@ -470,20 +539,32 @@ async def stack_key_graph_payload_for_stack(
         b = L.bundle
         g = getattr(b, "group", None)
         if g is not None and getattr(g, "slug", None):
+            pe = getattr(b, "project_environment", None)
+            env_q = (
+                f"?env={pe.slug}"
+                if pe is not None
+                else f"?env={UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL}"
+            )
             edit_paths.append(
-                url_path(f"/projects/{g.slug}/bundles/{b.name}/edit")
+                url_path(f"/projects/{g.slug}/bundles/{b.name}/edit{env_q}")
             )
         else:
             edit_paths.append(url_path(f"/bundles/{b.name}/edit"))
         raw = getattr(L, "layer_label", None)
         labels.append(raw.strip() if isinstance(raw, str) and raw.strip() else None)
     layer_alias_maps = [_parse_layer_aliases_json(L) for L in layers_sorted]
+    env_slugs: list[str | None] = []
+    for L in layers_sorted:
+        b = L.bundle
+        pe_b = getattr(b, "project_environment", None)
+        env_slugs.append(pe_b.slug if pe_b else None)
     return stack_key_graph_payload(
         maps,
         names,
         edit_paths,
         labels,
         layer_alias_maps,
+        env_slugs,
         include_secret_values=include_secret_values,
     )
 
@@ -495,15 +576,20 @@ async def replace_stack_layers(
 ) -> None:
     """Replace all layers; order is bottom → top (last wins on key overlap)."""
     await session.execute(delete(BundleStackLayer).where(BundleStackLayer.stack_id == stack_id))
+    r_stack = await session.execute(
+        select(BundleStack)
+        .where(BundleStack.id == stack_id)
+        .options(selectinload(BundleStack.project_environment))
+    )
+    st_full = r_stack.scalar_one_or_none()
+    if st_full is None:
+        raise HTTPException(status_code=500, detail="Stack not found")
     for pos, spec in enumerate(layers):
         bn = spec.bundle.strip()
         keys = spec.keys
         lbl = normalize_layer_label(spec.label)
         validate_bundle_name(bn)
-        r = await session.execute(select(Bundle.id).where(Bundle.name == bn))
-        bid = r.scalar_one_or_none()
-        if bid is None:
-            raise HTTPException(status_code=400, detail=f"Bundle not found: {bn}")
+        bid = await resolve_bundle_id_for_stack_layer(session, st_full, bn)
         if keys is not None and len(keys) == 0:
             raise HTTPException(
                 status_code=400,

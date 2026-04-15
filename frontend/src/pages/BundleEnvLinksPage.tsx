@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   createBundleEnvLink,
   deleteBundleEnvLink,
@@ -9,28 +9,33 @@ import {
 } from "@/api/bundles";
 import { BundlePageShell } from "@/components/BundlePageShell";
 import { Button } from "@/components/ui";
+import { envSearchParam, resourceScopeFromNav } from "@/projectEnv";
 
 export default function BundleEnvLinksPage() {
   const { projectSlug: projectSlugParam, bundleName = "" } = useParams<{
     projectSlug?: string;
     bundleName: string;
   }>();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const envTag = envSearchParam(searchParams.get("env")) ?? "";
+  const resourceScope = resourceScopeFromNav(projectSlugParam, envTag);
   const qc = useQueryClient();
   const bq = useQuery({
-    queryKey: ["bundle", bundleName],
-    queryFn: () => getBundle(bundleName),
+    queryKey: ["bundle", bundleName, projectSlugParam ?? "", envTag ?? ""],
+    queryFn: () => getBundle(bundleName, resourceScope),
     enabled: !!bundleName && !projectSlugParam,
   });
   const q = useQuery({
-    queryKey: ["bundle-env-links", bundleName],
-    queryFn: () => listBundleEnvLinks(bundleName),
+    queryKey: ["bundle-env-links", bundleName, projectSlugParam ?? "", envTag ?? ""],
+    queryFn: () => listBundleEnvLinks(bundleName, resourceScope),
     enabled: !!bundleName,
   });
   const [lastUrl, setLastUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const createM = useMutation({
-    mutationFn: () => createBundleEnvLink(bundleName),
+    mutationFn: () => createBundleEnvLink(bundleName, resourceScope),
     onSuccess: (data) => {
       setLastUrl(data.url);
       void qc.invalidateQueries({ queryKey: ["bundle-env-links", bundleName] });
@@ -40,7 +45,7 @@ export default function BundleEnvLinksPage() {
   });
 
   const delM = useMutation({
-    mutationFn: (id: number) => deleteBundleEnvLink(bundleName, id),
+    mutationFn: (id: number) => deleteBundleEnvLink(bundleName, id, resourceScope),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["bundle-env-links", bundleName] }),
   });
 
@@ -70,8 +75,9 @@ export default function BundleEnvLinksPage() {
     <BundlePageShell
       bundleName={bundleName}
       subnavSlug={subnavSlug}
+      linkSearch={location.search}
       subtitle="Secret env URLs"
-      tertiaryLink={{ to: editTo, label: "← Variables" }}
+      tertiaryLink={{ to: `${editTo}${location.search}`, label: "← Variables" }}
     >
       {err ? <p className="mb-4 text-red-400">{err}</p> : null}
       {lastUrl ? (

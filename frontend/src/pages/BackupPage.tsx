@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { downloadEncryptedBackup, restoreDatabase } from "@/api/system";
+import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 
 /**
@@ -39,14 +40,17 @@ export default function BackupPage() {
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
 
   return (
-    <div className="max-w-xl space-y-8">
-      <div>
-        <h1 className="mb-2 text-2xl font-semibold text-white">Backup</h1>
-        <p className="text-slate-400">
-          Full SQLite snapshots (admin only). Raw download is unencrypted; passphrase export wraps the
-          database for safer transport.
-        </p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        title="Backup"
+        below={
+          <p className="text-slate-400">
+            Full SQLite snapshots (admin only). Raw download is unencrypted; passphrase export wraps the
+            database for safer transport.
+          </p>
+        }
+      />
+      <div className="max-w-xl space-y-8">
 
       {err ? <p className="text-sm text-red-400">{err}</p> : null}
       {ok ? <p className="text-sm text-green-400">{ok}</p> : null}
@@ -159,6 +163,7 @@ export default function BackupPage() {
           </Button>
         </div>
       </section>
+      </div>
     </div>
   );
 }

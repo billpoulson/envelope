@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { createCertificate, deleteCertificate, listCertificates } from "@/api/certificates";
+import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
@@ -41,14 +42,17 @@ export default function CertificatesPage() {
   const rows = q.data ?? [];
 
   return (
-    <div className="max-w-3xl space-y-8">
-      <div>
-        <h1 className="mb-2 text-2xl font-semibold text-white">Certificates</h1>
-        <p className="text-slate-400">
-          Register recipient certificates for sealed secrets. Used when wrapping data keys for specific
-          operators.
-        </p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        title="Certificates"
+        below={
+          <p className="text-slate-400">
+            Register recipient certificates for sealed secrets. Used when wrapping data keys for specific
+            operators.
+          </p>
+        }
+      />
+      <div className="max-w-3xl space-y-8">
 
       {err ? <p className="text-sm text-red-400">{err}</p> : null}
 
@@ -122,6 +126,7 @@ export default function CertificatesPage() {
           </ul>
         )}
       </section>
+      </div>
     </div>
   );
 }

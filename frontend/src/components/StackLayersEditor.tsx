@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { listBundleKeyNames } from "@/api/bundles";
+import { type DragEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { listBundleKeyNames, type ResourceScopeOpts } from "@/api/bundles";
 import type { StackLayer } from "@/api/stacks";
 import { Button } from "@/components/ui";
 
@@ -65,6 +65,7 @@ function forwardedAliasExportNames(layers: LayerEditorState[], belowIndex: numbe
 async function unionForwardedKeyNames(
   layers: LayerEditorState[],
   belowIndex: number,
+  bundleKeyScope?: ResourceScopeOpts,
 ): Promise<string[]> {
   const out = new Set<string>();
   for (let j = 0; j < belowIndex; j++) {
@@ -72,7 +73,7 @@ async function unionForwardedKeyNames(
     const bn = L.bundle.trim();
     if (!bn) continue;
     if (L.mode === "all") {
-      const keys = await listBundleKeyNames(bn);
+      const keys = await listBundleKeyNames(bn, bundleKeyScope);
       keys.forEach((k) => {
         const s = k.trim();
         if (s) out.add(s);
@@ -88,6 +89,30 @@ async function unionForwardedKeyNames(
     out.add(t);
   }
   return [...out].sort((a, b) => a.localeCompare(b));
+}
+
+function reorderArray<T>(arr: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) return arr;
+  const next = arr.slice();
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item!);
+  return next;
+}
+
+function reorderStringRecord(
+  rec: Record<number, string>,
+  length: number,
+  from: number,
+  to: number,
+): Record<number, string> {
+  const vals = Array.from({ length }, (_, i) => rec[i] ?? "");
+  const [x] = vals.splice(from, 1);
+  vals.splice(to, 0, x!);
+  const out: Record<number, string> = {};
+  vals.forEach((v, i) => {
+    if (v) out[i] = v;
+  });
+  return out;
 }
 
 /** Bundles not used on other layers; always includes this row's current bundle if set. */
@@ -113,17 +138,18 @@ function bundleNamesForLayerSelect(
 async function loadPickKeyData(
   layers: LayerEditorState[],
   index: number,
+  bundleKeyScope?: ResourceScopeOpts,
 ): Promise<{ keys: string[]; native: Set<string> }> {
   const L = layers[index];
   const bn = L.bundle.trim();
   if (!bn) return { keys: [], native: new Set() };
-  const nativeArr = await listBundleKeyNames(bn);
+  const nativeArr = await listBundleKeyNames(bn, bundleKeyScope);
   const native = new Set(nativeArr.map((k) => k.trim()).filter(Boolean));
   if (index === 0) {
     const keys = [...native].sort((a, b) => a.localeCompare(b));
     return { keys, native };
   }
-  const forwarded = await unionForwardedKeyNames(layers, index);
+  const forwarded = await unionForwardedKeyNames(layers, index, bundleKeyScope);
   const seen = new Set<string>();
   const combined: string[] = [];
   const add = (k: string) => {
@@ -140,15 +166,31 @@ async function loadPickKeyData(
 
 type Props = {
   bundleNames: string[];
+  /** When bundle names repeat per environment, pass project + env for key-name lookups. */
+  bundleKeyScope?: ResourceScopeOpts;
   layers: LayerEditorState[];
   onChange: (next: LayerEditorState[]) => void;
 };
 
-export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
+export function StackLayersEditor({ bundleNames, bundleKeyScope, layers, onChange }: Props) {
   const [keyData, setKeyData] = useState<
     Record<number, { keys: string[]; native: Set<string> } | "loading" | "error">
   >({});
   const [filter, setFilter] = useState<Record<number, string>>({});
+  /** `true` = layer body is expanded */
+  const [layerExpanded, setLayerExpanded] = useState<boolean[]>(() => layers.map(() => true));
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    setLayerExpanded((prev) => {
+      if (prev.length === layers.length) return prev;
+      if (layers.length > prev.length) {
+        return [...prev, ...Array(layers.length - prev.length).fill(true)];
+      }
+      return prev.slice(0, layers.length);
+    });
+  }, [layers.length]);
 
   const layersKey = useMemo(() => JSON.stringify(layers), [layers]);
 
@@ -186,7 +228,7 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [layersKey]);
+  }, [layersKey, bundleKeyScope]);
 
   const updateLayer = useCallback(
     (index: number, patch: Partial<LayerEditorState>) => {
@@ -195,14 +237,46 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
     [layers, onChange],
   );
 
+  const reorderLayers = useCallback(
+    (from: number, to: number) => {
+      if (from === to) return;
+      onChange(reorderArray(layers, from, to));
+      setLayerExpanded((e) => reorderArray(e, from, to));
+      setFilter((f) => reorderStringRecord(f, layers.length, from, to));
+    },
+    [layers, onChange],
+  );
+
   const move = (index: number, dir: -1 | 1) => {
     const j = index + dir;
     if (j < 0 || j >= layers.length) return;
-    const copy = layers.slice();
-    const t = copy[index]!;
-    copy[index] = copy[j]!;
-    copy[j] = t;
-    onChange(copy);
+    reorderLayers(index, j);
+  };
+
+  const onLayerDragStart = (e: DragEvent, index: number) => {
+    setDraggingIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(index));
+  };
+
+  const onLayerDragOver = (e: DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverIndex(index);
+  };
+
+  const onLayerDrop = (e: DragEvent, toIndex: number) => {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData("text/plain");
+    const from = Number.parseInt(raw, 10);
+    if (Number.isNaN(from) || from === toIndex) {
+      setDraggingIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+    reorderLayers(from, toIndex);
+    setDraggingIndex(null);
+    setDragOverIndex(null);
   };
 
   const addLayer = () => {
@@ -210,11 +284,24 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
       ...layers,
       { bundle: "", mode: "all", selected: [], label: "", aliasRows: [] },
     ]);
+    setLayerExpanded((e) => [...e, true]);
   };
 
   const removeLayer = (index: number) => {
     if (layers.length <= 1) return;
     onChange(layers.filter((_, i) => i !== index));
+    setLayerExpanded((e) => e.filter((_, i) => i !== index));
+    setFilter((f) => {
+      const next: Record<number, string> = {};
+      for (const [ks, v] of Object.entries(f)) {
+        const k = Number(ks);
+        if (Number.isNaN(k)) continue;
+        if (k === index) continue;
+        const j = k > index ? k - 1 : k;
+        next[j] = v;
+      }
+      return next;
+    });
   };
 
   const opts = bundleNames.length ? bundleNames : [];
@@ -224,7 +311,9 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
       <p className="text-sm text-slate-400">
         Choose a bundle per layer, then <strong className="text-slate-300">all keys</strong> or{" "}
         <strong className="text-slate-300">selected keys</strong>. Bottom layer first; top layer wins on
-        duplicates. Each list only shows bundles not already used on another layer in this stack.
+        duplicates. Each list only shows bundles not already used on another layer in this stack. Use{" "}
+        <strong className="text-slate-300">▶/▼</strong> to collapse a layer, and drag the grip handle to
+        reorder (or use ↑↓).
       </p>
       {layers.map((layer, index) => {
         const rowBundleOpts = bundleNamesForLayerSelect(opts, layers, index);
@@ -236,24 +325,73 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
           kd && kd !== "loading" && kd !== "error" ? kd.keys : [];
         const native =
           kd && kd !== "loading" && kd !== "error" ? kd.native : new Set<string>();
+        const isExpanded = layerExpanded[index] !== false;
+        const isDragOver = dragOverIndex === index && draggingIndex !== null && draggingIndex !== index;
+        const isDragging = draggingIndex === index;
 
         return (
           <div
             key={index}
-            className="rounded-xl border border-border/70 bg-[#0b0f14]/90 p-4 shadow-sm"
+            className={`rounded-xl border bg-[#0b0f14]/90 p-4 shadow-sm transition-colors ${
+              isDragOver ? "border-accent/60 ring-2 ring-accent/25" : "border-border/70"
+            } ${isDragging ? "opacity-60" : ""}`}
+            onDragOver={(e) => onLayerDragOver(e, index)}
+            onDrop={(e) => onLayerDrop(e, index)}
           >
             <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-sm text-white">
-                  {badge}
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-border/80 px-1.5 py-0.5 text-slate-400 hover:bg-white/10"
+                  title={isExpanded ? "Collapse layer" : "Expand layer"}
+                  aria-expanded={isExpanded}
+                  onClick={() =>
+                    setLayerExpanded((prev) => {
+                      const next = prev.slice();
+                      next[index] = !isExpanded;
+                      return next;
+                    })
+                  }
+                >
+                  <span className="sr-only">{isExpanded ? "Collapse" : "Expand"}</span>
+                  <span aria-hidden="true">{isExpanded ? "▼" : "▶"}</span>
+                </button>
+                <span
+                  className="inline-flex cursor-grab select-none items-center text-slate-500 hover:text-slate-300 active:cursor-grabbing"
+                  title="Drag to reorder"
+                  draggable
+                  onDragStart={(e) => onLayerDragStart(e, index)}
+                  onDragEnd={() => {
+                    setDraggingIndex(null);
+                    setDragOverIndex(null);
+                  }}
+                  aria-hidden
+                >
+                  <svg width="12" height="18" viewBox="0 0 12 18" className="shrink-0" aria-hidden>
+                    {[3, 9, 15].flatMap((y) =>
+                      [3, 9].map((cx) => (
+                        <circle key={`${cx}-${y}`} cx={cx} cy={y} r="1.5" fill="currentColor" />
+                      )),
+                    )}
+                  </svg>
                 </span>
-                <span className="ml-2 text-xs text-slate-500">
-                  {index === 0
-                    ? "Bottom"
-                    : index === layers.length - 1
-                      ? "Top — wins on duplicate keys"
-                      : "Middle"}
-                </span>
+                <div className="min-w-0">
+                  <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-sm text-white">
+                    {badge}
+                  </span>
+                  <span className="ml-2 text-xs text-slate-500">
+                    {index === 0
+                      ? "Bottom"
+                      : index === layers.length - 1
+                        ? "Top — wins on duplicate keys"
+                        : "Middle"}
+                  </span>
+                  {!isExpanded && layer.bundle.trim() ? (
+                    <span className="ml-2 truncate font-mono text-xs text-slate-400" title={layer.bundle}>
+                      · {layer.bundle}
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <div className="flex flex-wrap gap-1">
                 {index > 0 ? (
@@ -288,6 +426,8 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
               </div>
             </div>
 
+            {isExpanded ? (
+              <>
             <div className="mb-3">
               <label className="mb-1 block text-xs text-slate-500">Layer name (optional)</label>
               <input
@@ -450,6 +590,14 @@ export function StackLayersEditor({ bundleNames, layers, onChange }: Props) {
                 updateLayer={updateLayer}
               />
             ) : null}
+              </>
+            ) : (
+              <p className="text-xs text-slate-500">
+                {layer.bundle.trim()
+                  ? "Collapsed — expand to edit this layer."
+                  : "Collapsed — expand to choose a bundle and variables."}
+              </p>
+            )}
           </div>
         );
       })}
