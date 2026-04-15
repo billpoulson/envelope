@@ -7,15 +7,17 @@ import { listStacks } from "@/api/stacks";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
-type AccessMode = "admin" | "terraform" | "scoped";
-type ScopedResource = "project" | "bundle" | "stack";
+type AccessMode = "admin" | "scoped" | "terraform_project" | "terraform_legacy";
+type ScopedResource = "project" | "bundle" | "stack" | "terraform_state";
 type Perm = "read" | "write";
-type WizardStep = "name" | "access" | "scope" | "review";
+/** Remote state at /tfstate/projects/… — apply needs GET + POST (read + write scopes). */
+type TerraformStateAccess = "read" | "write" | "apply";
+type WizardStep = "name" | "access" | "scope" | "tf_project" | "review";
 
-function buildScopes(args: {
-  access: AccessMode;
+type ScopeDraft = {
   resource: ScopedResource;
   perm: Perm;
+  terraformAccess: TerraformStateAccess;
   projectScopeMode: "all" | "one";
   projectSlug: string;
   bundleScopeMode: "all" | "one";
@@ -24,29 +26,76 @@ function buildScopes(args: {
   stackScopeMode: "all" | "one";
   stackProjectFilter: string;
   stackSlug: string;
-}): string[] {
-  if (args.access === "admin") return ["admin"];
-  if (args.access === "terraform") return ["terraform:http_state"];
-  const p = args.perm === "read" ? "read" : "write";
-  if (args.resource === "project") {
-    if (args.projectScopeMode === "all") return [`${p}:project:*`];
-    const slug = args.projectSlug.trim();
+};
+
+const defaultScopeDraft = (): ScopeDraft => ({
+  resource: "bundle",
+  perm: "read",
+  terraformAccess: "apply",
+  projectScopeMode: "all",
+  projectSlug: "",
+  bundleScopeMode: "all",
+  bundleProjectFilter: "",
+  bundleSlug: "",
+  stackScopeMode: "all",
+  stackProjectFilter: "",
+  stackSlug: "",
+});
+
+/** One scope string from the scoped builder (throws if incomplete). Not used for terraform_state — use scopesToAddFromDraft. */
+function scopeFromDraft(d: ScopeDraft): string {
+  if (d.resource === "terraform_state") {
+    throw new Error("Use scopesToAddFromDraft for Terraform state.");
+  }
+  const p = d.perm === "read" ? "read" : "write";
+  if (d.resource === "project") {
+    if (d.projectScopeMode === "all") return `${p}:project:*`;
+    const slug = d.projectSlug.trim();
     if (!slug) throw new Error("Pick a project.");
-    return [`${p}:project:slug:${slug}`];
+    return `${p}:project:slug:${slug}`;
   }
-  if (args.resource === "bundle") {
-    if (args.bundleScopeMode === "all") return [`${p}:bundle:*`];
-    const b = args.bundleSlug.trim();
+  if (d.resource === "bundle") {
+    if (d.bundleScopeMode === "all") return `${p}:bundle:*`;
+    const b = d.bundleSlug.trim();
     if (!b) throw new Error("Pick a bundle.");
-    return [`${p}:bundle:${b}`];
+    return `${p}:bundle:${b}`;
   }
-  if (args.resource === "stack") {
-    if (args.stackScopeMode === "all") return [`${p}:stack:*`];
-    const s = args.stackSlug.trim();
+  if (d.resource === "stack") {
+    if (d.stackScopeMode === "all") return `${p}:stack:*`;
+    const s = d.stackSlug.trim();
     if (!s) throw new Error("Pick a stack.");
-    return [`${p}:stack:${s}`];
+    return `${p}:stack:${s}`;
   }
-  return ["read:bundle:*"];
+  return "read:bundle:*";
+}
+
+/** Scopes to add for the current draft (Terraform state may add read + write). */
+function scopesToAddFromDraft(d: ScopeDraft): string[] {
+  if (d.resource !== "terraform_state") {
+    return [scopeFromDraft(d)];
+  }
+  if (d.projectScopeMode === "all") {
+    if (d.terraformAccess === "read") return ["read:project:*"];
+    if (d.terraformAccess === "write") return ["write:project:*"];
+    return ["read:project:*", "write:project:*"];
+  }
+  const slug = d.projectSlug.trim();
+  if (!slug) throw new Error("Pick a project.");
+  if (d.terraformAccess === "read") return [`read:project:slug:${slug}`];
+  if (d.terraformAccess === "write") return [`write:project:slug:${slug}`];
+  return [`read:project:slug:${slug}`, `write:project:slug:${slug}`];
+}
+
+function tryScopesToAddFromDraft(d: ScopeDraft): string[] | null {
+  try {
+    return scopesToAddFromDraft(d);
+  } catch {
+    return null;
+  }
+}
+
+function dedupeScopes(scopes: string[]): string[] {
+  return [...new Set(scopes)];
 }
 
 type Props = {
@@ -60,108 +109,70 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
   const [name, setName] = useState("");
 
   const [access, setAccess] = useState<AccessMode>("scoped");
-  const [resource, setResource] = useState<ScopedResource>("bundle");
-  const [perm, setPerm] = useState<Perm>("read");
-
-  const [projectScopeMode, setProjectScopeMode] = useState<"all" | "one">("all");
-  const [projectSlug, setProjectSlug] = useState("");
-
-  const [bundleScopeMode, setBundleScopeMode] = useState<"all" | "one">("all");
-  /** When narrowing bundles by project; empty = list all visible bundles. */
-  const [bundleProjectFilter, setBundleProjectFilter] = useState("");
-  const [bundleSlug, setBundleSlug] = useState("");
-
-  const [stackScopeMode, setStackScopeMode] = useState<"all" | "one">("all");
-  const [stackProjectFilter, setStackProjectFilter] = useState("");
-  const [stackSlug, setStackSlug] = useState("");
+  const [draft, setDraft] = useState<ScopeDraft>(() => defaultScopeDraft());
+  const [pendingScopes, setPendingScopes] = useState<string[]>([]);
+  const [tfProjectSlug, setTfProjectSlug] = useState("");
 
   const scopeStepActive = step === "scope";
+  const tfProjectStepActive = step === "tf_project";
 
   const projectsQ = useQuery({
     queryKey: ["projects"],
     queryFn: listProjects,
-    enabled: scopeStepActive && access === "scoped",
+    enabled: (scopeStepActive && access === "scoped") || (tfProjectStepActive && access === "terraform_project"),
   });
 
   const bundlesForPickerQ = useQuery({
-    queryKey: ["bundles", bundleProjectFilter || "__global__"],
-    queryFn: () => listBundles(bundleProjectFilter.trim() || undefined),
+    queryKey: ["bundles", draft.bundleProjectFilter || "__global__"],
+    queryFn: () => listBundles(draft.bundleProjectFilter.trim() || undefined),
     enabled:
       scopeStepActive &&
       access === "scoped" &&
-      resource === "bundle" &&
-      bundleScopeMode === "one",
+      draft.resource === "bundle" &&
+      draft.bundleScopeMode === "one",
   });
 
   const stacksForPickerQ = useQuery({
-    queryKey: ["stacks", stackProjectFilter || "__global__"],
-    queryFn: () => listStacks(stackProjectFilter.trim() || undefined),
+    queryKey: ["stacks", draft.stackProjectFilter || "__global__"],
+    queryFn: () => listStacks(draft.stackProjectFilter.trim() || undefined),
     enabled:
       scopeStepActive &&
       access === "scoped" &&
-      resource === "stack" &&
-      stackScopeMode === "one",
+      draft.resource === "stack" &&
+      draft.stackScopeMode === "one",
   });
 
   useEffect(() => {
-    if (resource !== "bundle") return;
-    setBundleSlug("");
-  }, [bundleProjectFilter, resource]);
+    if (draft.resource !== "bundle") return;
+    setDraft((d) => ({ ...d, bundleSlug: "" }));
+  }, [draft.bundleProjectFilter, draft.resource]);
 
   useEffect(() => {
-    if (resource !== "stack") return;
-    setStackSlug("");
-  }, [stackProjectFilter, resource]);
+    if (draft.resource !== "stack") return;
+    setDraft((d) => ({ ...d, stackSlug: "" }));
+  }, [draft.stackProjectFilter, draft.resource]);
 
-  const computedScopes = useMemo(() => {
-    try {
-      return buildScopes({
-        access,
-        resource,
-        perm,
-        projectScopeMode,
-        projectSlug,
-        bundleScopeMode,
-        bundleProjectFilter,
-        bundleSlug,
-        stackScopeMode,
-        stackProjectFilter,
-        stackSlug,
-      });
-    } catch {
-      return null;
-    }
-  }, [
-    access,
-    resource,
-    perm,
-    projectScopeMode,
-    projectSlug,
-    bundleScopeMode,
-    bundleProjectFilter,
-    bundleSlug,
-    stackScopeMode,
-    stackProjectFilter,
-    stackSlug,
-  ]);
+  const draftScopesPreview = useMemo(() => tryScopesToAddFromDraft(draft), [draft]);
 
   const createM = useMutation({
     mutationFn: async () => {
-      const scopes = buildScopes({
-        access,
-        resource,
-        perm,
-        projectScopeMode,
-        projectSlug,
-        bundleScopeMode,
-        bundleProjectFilter,
-        bundleSlug,
-        stackScopeMode,
-        stackProjectFilter,
-        stackSlug,
-      });
       const n = name.trim();
       if (!n) throw new Error("Enter a name for this key.");
+      let scopes: string[];
+      if (access === "admin") scopes = ["admin"];
+      else if (access === "terraform_legacy") scopes = ["terraform:http_state"];
+      else if (access === "terraform_project") {
+        const slug = tfProjectSlug.trim();
+        if (!slug) throw new Error("Pick a project.");
+        scopes = dedupeScopes([
+          `read:project:slug:${slug}`,
+          `write:project:slug:${slug}`,
+        ]);
+      } else {
+        const list = dedupeScopes(pendingScopes);
+        if (list.length === 0) throw new Error("Add at least one scope.");
+        scopes = list;
+      }
       return createApiKey({ name: n, scopes });
     },
     onSuccess: (data) => {
@@ -169,20 +180,34 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
       setStep("name");
       setName("");
       setAccess("scoped");
-      setResource("bundle");
-      setPerm("read");
-      setProjectScopeMode("all");
-      setProjectSlug("");
-      setBundleScopeMode("all");
-      setBundleProjectFilter("");
-      setBundleSlug("");
-      setStackScopeMode("all");
-      setStackProjectFilter("");
-      setStackSlug("");
+      setDraft(defaultScopeDraft());
+      setPendingScopes([]);
+      setTfProjectSlug("");
       onCreated(data.plain_key);
     },
     onError: (e: unknown) => onError(formatApiError(e)),
   });
+
+  function addCurrentScope() {
+    const list = tryScopesToAddFromDraft(draft);
+    if (!list || list.length === 0) {
+      onError("Complete the scope selections before adding.");
+      return;
+    }
+    const existing = new Set(pendingScopes);
+    const newOnes = list.filter((s) => !existing.has(s));
+    if (newOnes.length === 0) {
+      onError("Those scopes are already in the list.");
+      return;
+    }
+    onError("");
+    setPendingScopes((prev) => dedupeScopes([...prev, ...newOnes]));
+    setDraft(defaultScopeDraft());
+  }
+
+  function removeScopeAt(index: number) {
+    setPendingScopes((prev) => prev.filter((_, i) => i !== index));
+  }
 
   function goNext() {
     if (step === "name") {
@@ -196,16 +221,27 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
     }
     if (step === "access") {
       onError("");
-      if (access === "admin" || access === "terraform") {
+      if (access === "admin" || access === "terraform_legacy") {
         setStep("review");
+      } else if (access === "terraform_project") {
+        setStep("tf_project");
       } else {
         setStep("scope");
       }
       return;
     }
+    if (step === "tf_project") {
+      if (!tfProjectSlug.trim()) {
+        onError("Select a project to continue.");
+        return;
+      }
+      onError("");
+      setStep("review");
+      return;
+    }
     if (step === "scope") {
-      if (!computedScopes) {
-        onError("Complete the scope selections.");
+      if (pendingScopes.length === 0) {
+        onError("Add at least one scope using “Add scope”, then continue.");
         return;
       }
       onError("");
@@ -217,11 +253,17 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
   function goBack() {
     onError("");
     if (step === "review") {
-      if (access === "admin" || access === "terraform") {
+      if (access === "admin" || access === "terraform_legacy") {
         setStep("access");
+      } else if (access === "terraform_project") {
+        setStep("tf_project");
       } else {
         setStep("scope");
       }
+      return;
+    }
+    if (step === "tf_project") {
+      setStep("access");
       return;
     }
     if (step === "scope") {
@@ -241,9 +283,27 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
   const scopeLabel =
     access === "admin"
       ? "Full administrator (all API operations)"
-      : access === "terraform"
-        ? "Terraform HTTP remote state only"
-        : null;
+      : access === "terraform_legacy"
+        ? "Legacy Terraform HTTP state — flat /tfstate/blobs/… only (scope terraform:http_state). Prefer per-project URLs for new setups."
+        : access === "terraform_project"
+          ? "Terraform remote state for one Envelope project (read + write on /tfstate/projects/…)."
+          : null;
+
+  const reviewScopes =
+    access === "admin"
+      ? ["admin"]
+      : access === "terraform_legacy"
+        ? ["terraform:http_state"]
+        : access === "terraform_project"
+          ? tfProjectSlug.trim()
+            ? dedupeScopes([
+                `read:project:slug:${tfProjectSlug.trim()}`,
+                `write:project:slug:${tfProjectSlug.trim()}`,
+              ])
+            : []
+          : dedupeScopes(pendingScopes);
+
+  const updateDraft = (patch: Partial<ScopeDraft>) => setDraft((d) => ({ ...d, ...patch }));
 
   return (
     <section className="rounded-xl border border-border/80 bg-white/[0.02] p-6">
@@ -254,15 +314,21 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
           : step === "access"
             ? "Step 2 — Access level"
             : step === "scope"
-              ? "Step 3 — Scope"
-              : access === "admin" || access === "terraform"
-                ? "Step 3 — Review"
-                : "Step 4 — Review"}
+              ? "Step 3 — Scopes"
+              : step === "tf_project"
+                ? "Step 3 — Terraform project"
+                : step === "review"
+                  ? access === "scoped"
+                    ? "Step 4 — Review"
+                    : "Step 3 — Review"
+                  : "Review"}
       </p>
       <p className="mb-8 text-xs text-slate-500">
-        {access === "admin" || access === "terraform"
-          ? "Admin and Terraform keys skip the scope builder."
-          : "Choose resource type, then narrow with the dropdowns — no raw scope strings."}
+        {step === "tf_project"
+          ? "Pick which Envelope project this key may read/write Terraform state for (/tfstate/projects/…)."
+          : access === "admin" || access === "terraform_legacy"
+            ? "Admin and legacy Terraform keys skip the scope builder."
+            : "Add one or more scopes from the dropdowns. You can combine bundle, stack, project, and Terraform state access."}
       </p>
 
       {step === "name" ? (
@@ -296,13 +362,48 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
               value={access}
               onChange={(e) => setAccess(e.target.value as AccessMode)}
             >
-              <option value="scoped">Scoped access (choose resource and permissions)</option>
+              <option value="scoped">Scoped access (build a list of scopes)</option>
               <option value="admin">Full administrator — entire API</option>
-              <option value="terraform">Terraform HTTP remote state only</option>
+              <option value="terraform_project">Terraform state for one project (/tfstate/projects/…)</option>
+              <option value="terraform_legacy">Legacy — flat /tfstate/blobs/… only (terraform:http_state)</option>
             </select>
             <p className="mt-2 text-xs text-slate-500">
               <strong className="text-slate-400">Admin</strong> cannot be combined with other scopes.{" "}
-              <strong className="text-slate-400">Terraform</strong> is limited to the remote state backend.
+              <strong className="text-slate-400">Terraform for one project</strong> grants read + write on that
+              project&apos;s remote state. Use <strong className="text-slate-400">Scoped</strong> to mix Terraform with
+              bundle/stack scopes. Legacy flat keys are for existing setups only.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {step === "tf_project" && access === "terraform_project" ? (
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm text-slate-400" htmlFor="tf-proj-pick">
+              Envelope project
+            </label>
+            <select
+              id="tf-proj-pick"
+              className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm text-slate-200"
+              value={tfProjectSlug}
+              onChange={(e) => setTfProjectSlug(e.target.value)}
+              disabled={projectsQ.isLoading}
+            >
+              <option value="">Select a project…</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.slug}>
+                  {p.name} ({p.slug})
+                </option>
+              ))}
+            </select>
+            {projectsQ.isError ? (
+              <p className="mt-1 text-xs text-red-400">Could not load projects.</p>
+            ) : null}
+            <p className="mt-2 text-xs text-slate-500">
+              The key will include <span className="font-mono text-slate-400">read:project:slug:…</span> and{" "}
+              <span className="font-mono text-slate-400">write:project:slug:…</span> for Terraform apply
+              (GET + lock/write remote state).
             </p>
           </div>
         </div>
@@ -310,6 +411,33 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
 
       {step === "scope" && access === "scoped" ? (
         <div className="space-y-6">
+          <div className="rounded-lg border border-border/60 bg-[#0b0f14]/40 p-4">
+            <p className="mb-2 text-sm font-medium text-slate-300">Scopes added ({pendingScopes.length})</p>
+            {pendingScopes.length === 0 ? (
+              <p className="text-sm text-slate-500">None yet — build a scope below and click “Add scope”.</p>
+            ) : (
+              <ul className="space-y-2">
+                {pendingScopes.map((s, i) => (
+                  <li
+                    key={`${s}-${i}`}
+                    className="flex items-start justify-between gap-2 rounded border border-border/50 bg-[#0b0f14]/80 px-3 py-2 font-mono text-xs text-accent"
+                  >
+                    <span className="min-w-0 break-all">{s}</span>
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs text-red-400 underline hover:text-red-300"
+                      onClick={() => removeScopeAt(i)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <p className="text-sm text-slate-400">Add another scope</p>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm text-slate-400" htmlFor="scope-resource">
@@ -318,33 +446,58 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
               <select
                 id="scope-resource"
                 className="w-full rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm text-slate-200"
-                value={resource}
-                onChange={(e) => setResource(e.target.value as ScopedResource)}
+                value={draft.resource}
+                onChange={(e) => updateDraft({ resource: e.target.value as ScopedResource })}
               >
                 <option value="bundle">Bundles (variables &amp; secrets)</option>
                 <option value="stack">Stacks (layered bundles)</option>
                 <option value="project">Projects (containers)</option>
+                <option value="terraform_state">Terraform remote state (/tfstate/projects/…)</option>
               </select>
             </div>
-            <div>
-              <label className="mb-1 block text-sm text-slate-400" htmlFor="scope-perm">
-                Permission
-              </label>
-              <select
-                id="scope-perm"
-                className="w-full rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm text-slate-200"
-                value={perm}
-                onChange={(e) => setPerm(e.target.value as Perm)}
-              >
-                <option value="read">Read</option>
-                <option value="write">Write (includes create/update)</option>
-              </select>
-            </div>
+            {draft.resource === "terraform_state" ? (
+              <div>
+                <label className="mb-1 block text-sm text-slate-400" htmlFor="tf-access">
+                  Terraform access
+                </label>
+                <select
+                  id="tf-access"
+                  className="w-full rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm text-slate-200"
+                  value={draft.terraformAccess}
+                  onChange={(e) =>
+                    updateDraft({ terraformAccess: e.target.value as TerraformStateAccess })
+                  }
+                >
+                  <option value="apply">Read + write (terraform apply)</option>
+                  <option value="read">Read only</option>
+                  <option value="write">Write only</option>
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="mb-1 block text-sm text-slate-400" htmlFor="scope-perm">
+                  Permission
+                </label>
+                <select
+                  id="scope-perm"
+                  className="w-full rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm text-slate-200"
+                  value={draft.perm}
+                  onChange={(e) => updateDraft({ perm: e.target.value as Perm })}
+                >
+                  <option value="read">Read</option>
+                  <option value="write">Write (includes create/update)</option>
+                </select>
+              </div>
+            )}
           </div>
 
-          {resource === "project" ? (
+          {draft.resource === "project" || draft.resource === "terraform_state" ? (
             <div className="rounded-lg border border-border/60 bg-[#0b0f14]/50 p-4">
-              <p className="mb-3 text-sm text-slate-400">Which projects?</p>
+              <p className="mb-3 text-sm text-slate-400">
+                {draft.resource === "terraform_state"
+                  ? "Which project for remote state?"
+                  : "Which projects?"}
+              </p>
               <div className="space-y-3">
                 <div>
                   <label className="mb-1 block text-xs text-slate-500" htmlFor="proj-mode">
@@ -353,14 +506,14 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
                   <select
                     id="proj-mode"
                     className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm"
-                    value={projectScopeMode}
-                    onChange={(e) => setProjectScopeMode(e.target.value as "all" | "one")}
+                    value={draft.projectScopeMode}
+                    onChange={(e) => updateDraft({ projectScopeMode: e.target.value as "all" | "one" })}
                   >
                     <option value="all">All projects (*)</option>
                     <option value="one">One project…</option>
                   </select>
                 </div>
-                {projectScopeMode === "one" ? (
+                {draft.projectScopeMode === "one" ? (
                   <div>
                     <label className="mb-1 block text-xs text-slate-500" htmlFor="proj-pick">
                       Project
@@ -368,8 +521,8 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
                     <select
                       id="proj-pick"
                       className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm"
-                      value={projectSlug}
-                      onChange={(e) => setProjectSlug(e.target.value)}
+                      value={draft.projectSlug}
+                      onChange={(e) => updateDraft({ projectSlug: e.target.value })}
                       disabled={projectsQ.isLoading}
                     >
                       <option value="">Select a project…</option>
@@ -385,10 +538,21 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
                   </div>
                 ) : null}
               </div>
+              {draft.resource === "terraform_state" ? (
+                <p className="mt-3 text-xs text-slate-500">
+                  Use backend URLs under <span className="font-mono text-slate-400">/tfstate/projects/&lt;slug&gt;/…</span>.
+                  {draft.terraformAccess === "apply" && draft.projectScopeMode === "one"
+                    ? " “Add scope” adds read + write for that project (required for terraform apply)."
+                    : null}
+                  {draft.terraformAccess === "apply" && draft.projectScopeMode === "all"
+                    ? " “Add scope” adds read + write for all projects."
+                    : null}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
-          {resource === "bundle" ? (
+          {draft.resource === "bundle" ? (
             <div className="rounded-lg border border-border/60 bg-[#0b0f14]/50 p-4">
               <p className="mb-3 text-sm text-slate-400">Which bundles?</p>
               <div className="space-y-3">
@@ -399,14 +563,14 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
                   <select
                     id="bundle-mode"
                     className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm"
-                    value={bundleScopeMode}
-                    onChange={(e) => setBundleScopeMode(e.target.value as "all" | "one")}
+                    value={draft.bundleScopeMode}
+                    onChange={(e) => updateDraft({ bundleScopeMode: e.target.value as "all" | "one" })}
                   >
                     <option value="all">All bundles (*)</option>
                     <option value="one">One bundle…</option>
                   </select>
                 </div>
-                {bundleScopeMode === "one" ? (
+                {draft.bundleScopeMode === "one" ? (
                   <>
                     <div>
                       <label className="mb-1 block text-xs text-slate-500" htmlFor="bundle-proj-filter">
@@ -415,8 +579,8 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
                       <select
                         id="bundle-proj-filter"
                         className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm"
-                        value={bundleProjectFilter}
-                        onChange={(e) => setBundleProjectFilter(e.target.value)}
+                        value={draft.bundleProjectFilter}
+                        onChange={(e) => updateDraft({ bundleProjectFilter: e.target.value })}
                         disabled={projectsQ.isLoading}
                       >
                         <option value="">All visible bundles</option>
@@ -434,8 +598,8 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
                       <select
                         id="bundle-pick"
                         className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm"
-                        value={bundleSlug}
-                        onChange={(e) => setBundleSlug(e.target.value)}
+                        value={draft.bundleSlug}
+                        onChange={(e) => updateDraft({ bundleSlug: e.target.value })}
                         disabled={bundlesForPickerQ.isLoading}
                       >
                         <option value="">Select a bundle…</option>
@@ -458,7 +622,7 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
             </div>
           ) : null}
 
-          {resource === "stack" ? (
+          {draft.resource === "stack" ? (
             <div className="rounded-lg border border-border/60 bg-[#0b0f14]/50 p-4">
               <p className="mb-3 text-sm text-slate-400">Which stacks?</p>
               <div className="space-y-3">
@@ -469,14 +633,14 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
                   <select
                     id="stack-mode"
                     className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm"
-                    value={stackScopeMode}
-                    onChange={(e) => setStackScopeMode(e.target.value as "all" | "one")}
+                    value={draft.stackScopeMode}
+                    onChange={(e) => updateDraft({ stackScopeMode: e.target.value as "all" | "one" })}
                   >
                     <option value="all">All stacks (*)</option>
                     <option value="one">One stack…</option>
                   </select>
                 </div>
-                {stackScopeMode === "one" ? (
+                {draft.stackScopeMode === "one" ? (
                   <>
                     <div>
                       <label className="mb-1 block text-xs text-slate-500" htmlFor="stack-proj-filter">
@@ -485,8 +649,8 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
                       <select
                         id="stack-proj-filter"
                         className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm"
-                        value={stackProjectFilter}
-                        onChange={(e) => setStackProjectFilter(e.target.value)}
+                        value={draft.stackProjectFilter}
+                        onChange={(e) => updateDraft({ stackProjectFilter: e.target.value })}
                         disabled={projectsQ.isLoading}
                       >
                         <option value="">All visible stacks</option>
@@ -504,8 +668,8 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
                       <select
                         id="stack-pick"
                         className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm"
-                        value={stackSlug}
-                        onChange={(e) => setStackSlug(e.target.value)}
+                        value={draft.stackSlug}
+                        onChange={(e) => updateDraft({ stackSlug: e.target.value })}
                         disabled={stacksForPickerQ.isLoading}
                       >
                         <option value="">Select a stack…</option>
@@ -527,6 +691,23 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
               </div>
             </div>
           ) : null}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!draftScopesPreview || draftScopesPreview.length === 0}
+              onClick={() => addCurrentScope()}
+            >
+              Add scope
+            </Button>
+            {draftScopesPreview && draftScopesPreview.length > 0 ? (
+              <span className="text-xs text-slate-500">
+                Adds:{" "}
+                <span className="font-mono text-slate-400">{draftScopesPreview.join(", ")}</span>
+              </span>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -538,17 +719,22 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
           </div>
           <div className="rounded-lg border border-border/60 bg-[#0b0f14]/60 p-4 text-sm">
             <p className="mb-2 text-slate-400">Scopes (stored on the key)</p>
-            {access === "admin" || access === "terraform" ? (
-              <p className="text-slate-200">{scopeLabel}</p>
-            ) : computedScopes ? (
+            {access === "admin" ? (
+              <p className="font-mono text-xs text-accent">admin</p>
+            ) : null}
+            {(access === "terraform_legacy" || access === "terraform_project") && scopeLabel ? (
+              <p className="mb-3 text-slate-300">{scopeLabel}</p>
+            ) : null}
+            {access !== "admin" && reviewScopes.length > 0 ? (
               <ul className="list-inside list-disc font-mono text-xs text-accent">
-                {computedScopes.map((s) => (
+                {reviewScopes.map((s) => (
                   <li key={s}>{s}</li>
                 ))}
               </ul>
-            ) : (
-              <p className="text-amber-400">Incomplete — go back and finish scope selections.</p>
-            )}
+            ) : null}
+            {access !== "admin" && reviewScopes.length === 0 ? (
+              <p className="text-amber-400">No scopes — go back and add at least one.</p>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -560,7 +746,14 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
           </Button>
         ) : null}
         {step !== "review" ? (
-          <Button type="button" onClick={goNext}>
+          <Button
+            type="button"
+            disabled={
+              (step === "scope" && access === "scoped" && pendingScopes.length === 0) ||
+              (step === "tf_project" && (!tfProjectSlug.trim() || projectsQ.isLoading))
+            }
+            onClick={goNext}
+          >
             Next
           </Button>
         ) : (
@@ -569,7 +762,7 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
             disabled={
               createM.isPending ||
               !name.trim() ||
-              (access === "scoped" && !computedScopes)
+              (access === "scoped" && reviewScopes.length === 0)
             }
             onClick={() => createM.mutate()}
           >

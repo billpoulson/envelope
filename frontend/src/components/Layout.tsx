@@ -49,12 +49,8 @@ export function Layout() {
     pathname.startsWith("/bundles/") ||
     pathname === "/stacks" ||
     pathname.startsWith("/stacks/");
-  const [adminOpen, setAdminOpen] = useState(onAdminPage);
+  const [adminOpen, setAdminOpen] = useState(false);
   const adminMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setAdminOpen(onAdminPage);
-  }, [onAdminPage]);
 
   useEffect(() => {
     if (!adminOpen) return;
