@@ -127,7 +127,7 @@ digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 Find the list row whose **`token_sha256`** equals that digest, then call **`DELETE /api/v1/bundles/{name}/env-links/{id}`** or **`DELETE /api/v1/stacks/{name}/env-links/{id}`** with that **`id`**. On stacks, **`through_layer_position`** / **`slice_label`** still tell you full merge vs prefix slice for each row.
 
-**Open the admin page from the digest** — With a session or API key that can manage env links for that resource, **`GET /api/v1/env-links/resolve?token_sha256=<64 hex>`** returns **`resource`** (`bundle` or `stack`), **`name`**, **`project_slug`**, and **`environment_slug`** so the UI can jump to the right **Secret env URL** page. The in-app tool **Admin → Env link hash** also offers **Open Secret env URL page** after you paste the digest or compute it from a URL.
+**Open the admin page from the digest** — With a session or API key that can manage env links for that resource, **`GET /api/v1/env-links/resolve?token_sha256=<64 hex>`** returns **`resource`** (`bundle` or `stack`), **`name`**, **`project_slug`**, and **`environment_slug`** so the UI can jump to the right **Secret env URL** page. The in-app tool **Admin → Identify Secret Url** also offers **Open Secret env URL page** after you paste the digest or compute it from a URL.
 
 ---
 

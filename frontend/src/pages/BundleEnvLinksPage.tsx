@@ -96,9 +96,9 @@ export default function BundleEnvLinksPage() {
       <h2 className="mt-8 mb-2 text-lg text-white">Existing links</h2>
       <p className="mb-3 max-w-2xl text-xs text-slate-500">
         Each row shows <span className="font-mono text-slate-400">token_sha256</span> (SHA-256 hex of the secret path
-        segment). Hash the token from your saved URL and match this value to know which link to revoke, or use the{" "}
+        segment). Hash the token from your saved URL and match this value to know which link to revoke, or use{" "}
         <Link to="/tools/env-link-hash" className="text-accent hover:underline">
-          in-browser hash tool
+          Identify Secret Url
         </Link>
         .
       </p>
@@ -116,7 +116,7 @@ export default function BundleEnvLinksPage() {
                   ? "border-accent/60 bg-accent/10 ring-2 ring-accent/50"
                   : "border-border/60"
               }`}
-              aria-label={isHighlighted(r.token_sha256) ? "Matched env link (from hash tool)" : undefined}
+              aria-label={isHighlighted(r.token_sha256) ? "Matched env link (from Identify Secret Url)" : undefined}
             >
               <span className="text-slate-400">#{r.id}</span>
               <code

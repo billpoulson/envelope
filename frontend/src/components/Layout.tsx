@@ -199,7 +199,7 @@ export function Layout() {
                       }
                       onClick={() => setAdminOpen(false)}
                     >
-                      Env link hash
+                      Identify Secret Url
                     </NavLink>
                   </div>
                 ) : null}

@@ -84,7 +84,7 @@ export default function EnvLinkHashPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Env link hash"
+        title="Identify Secret Url"
         below={
           <p className="text-slate-400">
             Compute <code className="text-slate-300">token_sha256</code> locally from a URL or path token (nothing sent

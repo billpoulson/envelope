@@ -122,9 +122,9 @@ export default function StackEnvLinksPage() {
         <h3 className="mb-2 text-base font-medium text-slate-200">Issued links</h3>
         <p className="mb-3 max-w-2xl text-xs text-slate-500">
           <span className="font-mono text-slate-400">token_sha256</span> identifies the secret path (same for full stack
-          and per-layer links). Hash your saved URL’s path segment and match it here, or use the{" "}
+          and per-layer links). Hash your saved URL’s path segment and match it here, or use{" "}
           <Link to="/tools/env-link-hash" className="text-accent hover:underline">
-            in-browser hash tool
+            Identify Secret Url
           </Link>
           .
         </p>
@@ -142,7 +142,7 @@ export default function StackEnvLinksPage() {
                     ? "border-accent/60 ring-2 ring-accent/50 bg-accent/5"
                     : "border-border/60"
                 }`}
-                aria-label={isHighlighted(r.token_sha256) ? "Matched env link (from hash tool)" : undefined}
+                aria-label={isHighlighted(r.token_sha256) ? "Matched env link (from Identify Secret Url)" : undefined}
               >
                 <div className="min-w-0 flex-1 text-sm text-slate-300">
                   <span className="font-mono text-slate-400">#{r.id}</span>
