@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { Navigate, NavLink, useParams } from "react-router-dom";
+import { HelpMarkdown } from "@/components/HelpMarkdown";
+import type { HelpSectionId } from "@/help/usageSections";
+import { USAGE_SECTIONS } from "@/help/usageSections";
 
-const SECTIONS: { id: string; label: string; path: string }[] = [
+const SECTIONS: { id: HelpSectionId; label: string; path: string }[] = [
   { id: "index", label: "Overview", path: "/help" },
+  { id: "installation", label: "Installation & hosting", path: "/help/installation" },
   { id: "web-ui", label: "Web UI", path: "/help/web-ui" },
   { id: "api", label: "API export", path: "/help/api" },
   {
@@ -14,8 +18,26 @@ const SECTIONS: { id: string; label: string; path: string }[] = [
   { id: "backup", label: "Backup & security", path: "/help/backup" },
 ];
 
+const VALID_IDS = new Set<HelpSectionId>(SECTIONS.map((s) => s.id));
+
+function splatToSectionId(splat: string | undefined): HelpSectionId | null {
+  const s = (splat ?? "").replace(/\/$/, "").trim();
+  if (!s) return "index";
+  if (VALID_IDS.has(s as HelpSectionId) && s !== "index") {
+    return s as HelpSectionId;
+  }
+  return null;
+}
+
 export default function HelpPage() {
-  const [active, setActive] = useState(SECTIONS[0]!);
+  const { "*": splat } = useParams();
+  const sectionId = splatToSectionId(splat);
+
+  if (sectionId === null) {
+    return <Navigate to="/help" replace />;
+  }
+
+  const body = USAGE_SECTIONS[sectionId];
 
   return (
     <div className="flex min-h-[70vh] flex-col gap-6 lg:flex-row">
@@ -23,32 +45,30 @@ export default function HelpPage() {
         <h1 className="mb-4 text-2xl font-semibold text-white">Help</h1>
         <nav className="flex flex-col gap-1 text-sm" aria-label="Help sections">
           {SECTIONS.map((s) => (
-            <button
+            <NavLink
               key={s.id}
-              type="button"
-              className={`rounded-md px-3 py-2 text-left ${
-                active.path === s.path
-                  ? "bg-white/10 text-white"
-                  : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-              }`}
-              onClick={() => setActive(s)}
+              to={s.path}
+              end={s.id === "index"}
+              className={({ isActive }) =>
+                `rounded-md px-3 py-2 text-left ${
+                  isActive ? "bg-white/10 text-white" : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+                }`
+              }
             >
               {s.label}
-            </button>
+            </NavLink>
           ))}
         </nav>
         <p className="mt-6 text-xs text-slate-500">
-          Same documentation as the classic HTML help routes on this host (useful when the admin UI is
-          only served under <code className="font-mono text-slate-400">/app</code>).
+          Source: <code className="font-mono text-slate-400">frontend/src/help/usage.md</code>
         </p>
       </aside>
-      <div className="min-h-[480px] flex-1 overflow-hidden rounded-xl border border-border/80 bg-[#0b0f14]">
-        <iframe
-          title={active.label}
-          className="h-full min-h-[480px] w-full border-0"
-          src={active.path}
-        />
-      </div>
+      <article
+        className="min-h-[480px] flex-1 overflow-auto rounded-xl border border-border/80 bg-[#0b0f14] p-4 sm:p-6"
+        aria-label={SECTIONS.find((x) => x.id === sectionId)?.label ?? "Help"}
+      >
+        <HelpMarkdown markdown={body} />
+      </article>
     </div>
   );
 }

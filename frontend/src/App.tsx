@@ -96,7 +96,7 @@ export default function App() {
           <Route path="/keys" element={<ApiKeysPage />} />
           <Route path="/certificates" element={<CertificatesPage />} />
           <Route path="/backup" element={<BackupPage />} />
-          <Route path="/help" element={<HelpPage />} />
+          <Route path="/help/*" element={<HelpPage />} />
           <Route path="/tutorial" element={<TutorialPage />} />
         </Route>
       </Route>
