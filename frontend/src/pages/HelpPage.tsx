@@ -59,9 +59,6 @@ export default function HelpPage() {
             </NavLink>
           ))}
         </nav>
-        <p className="mt-6 text-xs text-slate-500">
-          Source: <code className="font-mono text-slate-400">frontend/src/help/usage.md</code>
-        </p>
       </aside>
       <article
         className="min-h-[480px] flex-1 overflow-auto rounded-xl border border-border/80 bg-[#0b0f14] p-4 sm:p-6"
