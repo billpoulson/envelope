@@ -5,6 +5,8 @@ import { listBundles } from "@/api/bundles";
 import { listProjectEnvironments } from "@/api/projectEnvironments";
 import { createStack, type StackLayer } from "@/api/stacks";
 import { envSearchParam, environmentListApiOpts, UNASSIGNED_ENV_SLUG } from "@/projectEnv";
+import { NeedBundlesForStack } from "@/components/NeedBundlesForStack";
+import { NeedProjectEnvironments } from "@/components/NeedProjectEnvironments";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 
@@ -90,6 +92,27 @@ export default function StackNewPage() {
 
   if (!projectSlug) return <p className="text-red-400">Missing project</p>;
 
+  const envsReady = !envsQ.isLoading && !envsQ.isError;
+  const noEnvironments = envsReady && (envsQ.data ?? []).length === 0;
+
+  if (noEnvironments) {
+    return (
+      <div>
+        <PageHeader
+          title="New stack"
+          below={
+            <p className="text-slate-400">
+              Stacks merge bundle layers and are tagged to a project <strong className="text-slate-200">environment</strong>.
+            </p>
+          }
+        />
+        <div className="mx-auto max-w-lg">
+          <NeedProjectEnvironments projectSlug={projectSlug} resource="stack" />
+        </div>
+      </div>
+    );
+  }
+
   const bundlesLoading = bundlesQ.isLoading;
   const bundlesError =
     bundlesQ.isError && bundlesQ.error instanceof Error ? bundlesQ.error.message : null;
@@ -98,10 +121,42 @@ export default function StackNewPage() {
     !bundlesLoading &&
     !bundlesError &&
     bundleNames.length > 0;
-  const newBundleSearch = selectedEnvSlug
-    ? `?${new URLSearchParams({ env: selectedEnvSlug }).toString()}`
-    : location.search;
-  const newBundleHref = `/projects/${encodeURIComponent(projectSlug)}/bundles/new${newBundleSearch}`;
+
+  const envSelectBlock = (
+    <div>
+      <label htmlFor="stack-create-env" className="mb-1 block text-sm text-slate-400">
+        Environment
+      </label>
+      {envsQ.isLoading ? (
+        <p className="text-sm text-slate-500">Loading environments…</p>
+      ) : envsQ.isError ? (
+        <p className="text-sm text-red-400">
+          {envsQ.error instanceof Error ? envsQ.error.message : "Failed to load environments"}
+        </p>
+      ) : (
+        <select
+          id="stack-create-env"
+          className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm text-slate-200"
+          value={selectedEnvSlug}
+          onChange={(e) => {
+            setSelectedEnvSlug(e.target.value);
+            setBundle("");
+            setErr(null);
+          }}
+        >
+          <option value="">Select environment…</option>
+          {(envsQ.data ?? []).map((row) => (
+            <option key={row.id} value={row.slug}>
+              {row.name}
+            </option>
+          ))}
+        </select>
+      )}
+      <p className="mt-1 text-xs text-slate-500">
+        The stack is tagged to this environment for its lifetime (it cannot be reassigned later).
+      </p>
+    </div>
+  );
 
   return (
     <div>
@@ -109,123 +164,82 @@ export default function StackNewPage() {
         title="New stack"
         below={
           <p className="text-sm text-slate-400">
-            Start with one layer (bottom) from a bundle in this project. You can add layers and key picks on
-            the edit page.
+            Start with one layer (bottom) from a bundle in this project. You can add layers and key picks on the edit
+            page.
           </p>
         }
       />
-      <div className="mx-auto max-w-lg">
-      <form
-        className="space-y-4"
-        onSubmit={(ev) => {
-          ev.preventDefault();
-          m.mutate();
-        }}
-      >
-        <div>
-          <label htmlFor="stack-create-env" className="mb-1 block text-sm text-slate-400">
-            Environment
-          </label>
-          {envsQ.isLoading ? (
-            <p className="text-sm text-slate-500">Loading environments…</p>
-          ) : envsQ.isError ? (
-            <p className="text-sm text-red-400">
-              {envsQ.error instanceof Error ? envsQ.error.message : "Failed to load environments"}
-            </p>
-          ) : (envsQ.data ?? []).length === 0 ? (
-            <p className="text-sm text-slate-400">
-              No environments in this project yet. Add one under{" "}
-              <Link
-                className="text-accent underline hover:text-accent/90"
-                to={`/projects/${encodeURIComponent(projectSlug)}/environments`}
+      <div className="mx-auto max-w-lg space-y-6">
+        {envSelectBlock}
+
+        {!selectedEnvSlug ? (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-500">Select an environment to continue.</p>
+            <Link to={`/projects/${encodeURIComponent(projectSlug)}/stacks${location.search}`}>
+              <Button type="button" variant="secondary">
+                Cancel
+              </Button>
+            </Link>
+          </div>
+        ) : bundlesLoading ? (
+          <p className="text-sm text-slate-500">Loading bundles…</p>
+        ) : bundlesError ? (
+          <p className="text-sm text-red-400">{bundlesError}</p>
+        ) : bundleNames.length === 0 ? (
+          <NeedBundlesForStack projectSlug={projectSlug} environmentSlug={selectedEnvSlug} />
+        ) : (
+          <form
+            className="space-y-4"
+            onSubmit={(ev) => {
+              ev.preventDefault();
+              m.mutate();
+            }}
+          >
+            <div>
+              <label className="mb-1 block text-sm text-slate-400">Stack name</label>
+              <input
+                className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Spaces and punctuation are fine. Not allowed:{" "}
+                <span className="font-mono">/ \ : * ? &quot; &lt; &gt; |</span>
+              </p>
+            </div>
+            <div>
+              <label htmlFor="stack-bottom-bundle" className="mb-1 block text-sm text-slate-400">
+                Bottom bundle
+              </label>
+              <select
+                id="stack-bottom-bundle"
+                className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm text-slate-200"
+                value={bundle}
+                onChange={(e) => setBundle(e.target.value)}
+                required
               >
-                Project → Environments
+                <option value="">Select a bundle…</option>
+                {bundleNames.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {err ? <p className="text-sm text-red-400">{err}</p> : null}
+            <div className="flex gap-2">
+              <Button type="submit" disabled={m.isPending || !canSubmit || !canPickBundle}>
+                Create
+              </Button>
+              <Link to={`/projects/${encodeURIComponent(projectSlug)}/stacks${location.search}`}>
+                <Button type="button" variant="secondary">
+                  Cancel
+                </Button>
               </Link>
-              .
-            </p>
-          ) : (
-            <select
-              id="stack-create-env"
-              required
-              className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm text-slate-200"
-              value={selectedEnvSlug}
-              onChange={(e) => {
-                setSelectedEnvSlug(e.target.value);
-                setBundle("");
-              }}
-            >
-              <option value="">Select environment…</option>
-              {(envsQ.data ?? []).map((row) => (
-                <option key={row.id} value={row.slug}>
-                  {row.name}
-                </option>
-              ))}
-            </select>
-          )}
-          <p className="mt-1 text-xs text-slate-500">
-            The stack is tagged to this environment for its lifetime (it cannot be reassigned later).
-          </p>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm text-slate-400">Stack name</label>
-          <input
-            className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <p className="mt-1 text-xs text-slate-500">
-            Spaces and punctuation are fine. Not allowed:{" "}
-            <span className="font-mono">/ \ : * ? &quot; &lt; &gt; |</span>
-          </p>
-        </div>
-        <div>
-          <label htmlFor="stack-bottom-bundle" className="mb-1 block text-sm text-slate-400">
-            Bottom bundle
-          </label>
-          {!selectedEnvSlug ? (
-            <p className="text-sm text-slate-500">Select an environment to list bundles for that tag.</p>
-          ) : bundlesLoading ? (
-            <p className="text-sm text-slate-500">Loading bundles…</p>
-          ) : bundlesError ? (
-            <p className="text-sm text-red-400">{bundlesError}</p>
-          ) : bundleNames.length === 0 ? (
-            <p className="text-sm text-slate-400">
-              No bundles in this environment yet.{" "}
-              <Link to={newBundleHref} className="text-accent underline hover:text-accent/90">
-                Create a bundle
-              </Link>{" "}
-              for this environment first.
-            </p>
-          ) : (
-            <select
-              id="stack-bottom-bundle"
-              className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm text-slate-200"
-              value={bundle}
-              onChange={(e) => setBundle(e.target.value)}
-              required
-            >
-              <option value="">Select a bundle…</option>
-              {bundleNames.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-        {err ? <p className="text-sm text-red-400">{err}</p> : null}
-        <div className="flex gap-2">
-          <Button type="submit" disabled={m.isPending || !canSubmit || !canPickBundle}>
-            Create
-          </Button>
-          <Link to={`/projects/${encodeURIComponent(projectSlug)}/stacks${location.search}`}>
-            <Button type="button" variant="secondary">
-              Cancel
-            </Button>
-          </Link>
-        </div>
-      </form>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

@@ -102,6 +102,13 @@ export default function TutorialPage() {
             used in URLs (and in optional Terraform state paths). Use{" "}
             <strong className="text-slate-200">Settings</strong> inside a project to rename it or inspect the slug.
           </p>
+          <p>
+            <strong className="text-slate-200">Order:</strong> create at least one{" "}
+            <strong className="text-slate-200">environment</strong> under the project via{" "}
+            <strong className="text-slate-200">Environments</strong> in the sub-nav before you add bundles or stacks.
+            Bundles and stacks are always tagged to an environment. Then add <strong className="text-slate-200">bundles</strong>, then{" "}
+            <strong className="text-slate-200">stacks</strong> whose layers reference those bundles.
+          </p>
         </Section>
 
         <Section id="bundles" n={3} title="Bundles and variables">

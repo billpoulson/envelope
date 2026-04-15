@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { listProjectBundles } from "@/api/bundles";
+import { listProjectEnvironments } from "@/api/projectEnvironments";
 import { envSearchParam, environmentChipLabel, environmentListApiOpts } from "@/projectEnv";
 import { PageHeader } from "@/components/PageHeader";
 import { ResourceList } from "@/components/ResourceList";
@@ -16,6 +17,11 @@ export default function ProjectBundlesPage() {
     queryFn: () => listProjectBundles(projectSlug, listOpts),
     enabled: !!projectSlug,
   });
+  const envsQ = useQuery({
+    queryKey: ["project-environments", projectSlug],
+    queryFn: () => listProjectEnvironments(projectSlug),
+    enabled: !!projectSlug,
+  });
 
   if (!projectSlug) return <p className="text-red-400">Missing project</p>;
   if (q.isLoading) return <p className="text-slate-400">Loading bundles…</p>;
@@ -27,7 +33,12 @@ export default function ProjectBundlesPage() {
 
   const rows = q.data ?? [];
   const base = `/projects/${encodeURIComponent(projectSlug)}/bundles`;
+  const envPath = `/projects/${encodeURIComponent(projectSlug)}/environments`;
   const qs = searchParams.toString() ? `?${searchParams.toString()}` : "";
+  const envCount = envsQ.data?.length ?? 0;
+  const envsLoaded = !envsQ.isLoading && !envsQ.isError;
+  const needsEnvironment = envsLoaded && envCount === 0;
+
   const items = rows.map((row) => {
     const href = `${base}/${encodeURIComponent(row.name)}/edit${qs}`;
     return {
@@ -49,6 +60,20 @@ export default function ProjectBundlesPage() {
           </Link>
         }
       />
+      {needsEnvironment ? (
+        <div
+          className="mb-6 rounded-lg border border-amber-500/35 bg-amber-950/35 px-4 py-3 text-sm text-slate-200"
+          role="status"
+        >
+          <strong className="text-amber-100">Environments are required first.</strong>{" "}
+          <span className="text-slate-400">
+            Create at least one project environment, then you can add bundles (and stacks) tied to it.
+          </span>{" "}
+          <Link className="font-medium text-accent underline hover:text-accent/90" to={envPath}>
+            Open Environments
+          </Link>
+        </div>
+      ) : null}
       <ResourceList
         items={items}
         emptyMessage="No bundles in this project yet."

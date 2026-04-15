@@ -72,7 +72,7 @@ export default function EnvLinkHashPage() {
     setResolveBusy(true);
     try {
       const res = await resolveEnvLinkByDigest(hashHex);
-      const loc = envLinksPageLocation(res);
+      const loc = envLinksPageLocation(res, { highlightSha256: hashHex });
       navigate({ pathname: loc.pathname, search: loc.search });
     } catch (e: unknown) {
       setResolveErr(formatApiError(e));

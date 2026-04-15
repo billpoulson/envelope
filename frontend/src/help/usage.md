@@ -59,6 +59,17 @@ With the server running, **OpenAPI/Swagger** is available at **`/docs`** on the 
 8. **Certificates** — Register recipient public certificates used by sealed secrets.
 9. **API keys** — Create keys with scoped access (`read:bundle:…`, `write:bundle:…`, `read:stack:…`, `write:stack:…`, per-project scopes, or **admin**). Export requires both **read** on the stack and **read** on every bundle in its layers.
 
+### Create order (prerequisites)
+
+In the web UI, use projects in this order:
+
+1. **Project** — Create a project (it groups bundles and stacks and has a stable slug).
+2. **Environments** — Add at least one **project environment** (for example Production or Staging) on the project’s **Environments** page. New bundles and stacks must be assigned to a **named** environment; the API requires `project_environment_slug` on create.
+3. **Bundles** — Create bundles inside the project, each tagged to an environment for its lifetime.
+4. **Stacks** — Create stacks (ordered **layers**, each referencing a bundle). A stack is also tagged to an environment; layers resolve bundles in the same project (matching that environment or a shared unassigned bundle, per server rules).
+
+There is no automatic default environment when you create a project—add environments before **New bundle** or **New stack** will succeed.
+
 ---
 
 ## Exporting bundles (API)

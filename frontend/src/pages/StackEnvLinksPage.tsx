@@ -7,6 +7,7 @@ import {
   getStack,
   listStackEnvLinks,
 } from "@/api/stacks";
+import { envLinkRowId, useEnvLinkRowHighlight } from "@/hooks/useEnvLinkRowHighlight";
 import { StackPageShell } from "@/components/StackPageShell";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
@@ -32,6 +33,11 @@ export default function StackEnvLinksPage() {
     queryFn: () => listStackEnvLinks(stackName, resourceScope),
     enabled: !!stackName,
   });
+  const linkRowsForHighlight = q.data ?? [];
+  const { isHighlighted } = useEnvLinkRowHighlight(
+    linkRowsForHighlight,
+    `${stackName}|${projectSlugParam ?? ""}`,
+  );
   const [err, setErr] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [lastCreatedThrough, setLastCreatedThrough] = useState<number | null>(null);
@@ -80,7 +86,7 @@ export default function StackEnvLinksPage() {
     );
   }
 
-  const rows = q.data ?? [];
+  const rows = linkRowsForHighlight;
   const stackLayers = stackQ.data?.layers ?? [];
 
   const sliceDescription = (through: number | null) => {
@@ -129,7 +135,14 @@ export default function StackEnvLinksPage() {
             {rows.map((r) => (
               <li
                 key={r.id}
-                className="flex flex-col gap-2 rounded-lg border border-border/60 bg-[#0b0f14]/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                id={envLinkRowId(r.id)}
+                tabIndex={-1}
+                className={`flex flex-col gap-2 rounded-lg border bg-[#0b0f14]/80 px-4 py-3 outline-none transition-[box-shadow,background-color] focus-visible:ring-2 focus-visible:ring-accent sm:flex-row sm:items-center sm:justify-between ${
+                  isHighlighted(r.token_sha256)
+                    ? "border-accent/60 ring-2 ring-accent/50 bg-accent/5"
+                    : "border-border/60"
+                }`}
+                aria-label={isHighlighted(r.token_sha256) ? "Matched env link (from hash tool)" : undefined}
               >
                 <div className="min-w-0 flex-1 text-sm text-slate-300">
                   <span className="font-mono text-slate-400">#{r.id}</span>

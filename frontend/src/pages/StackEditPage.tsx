@@ -9,6 +9,7 @@ import {
   patchStack,
   type StackDetail,
 } from "@/api/stacks";
+import { NeedBundlesBeforeStacks } from "@/components/NeedBundlesBeforeStacks";
 import {
   editorToStackLayer,
   type LayerEditorState,
@@ -53,6 +54,11 @@ export default function StackEditPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const projectSlugForBundles = projectSlugParam ?? q.data?.project_slug ?? "";
+  const allBundlesGate = useQuery({
+    queryKey: ["bundles", projectSlugParam ?? "", "all-for-stack-gate"],
+    queryFn: () => listBundles(projectSlugParam!),
+    enabled: !!projectSlugParam && !!stackName,
+  });
   const stackEnvSlug = q.data?.project_environment_slug ?? undefined;
   const bundlesQ = useQuery({
     queryKey: ["bundles", projectSlugForBundles || "global", stackEnvSlug ?? ""],
@@ -141,6 +147,33 @@ export default function StackEditPage() {
   });
 
   if (!stackName) return <p className="text-red-400">Missing stack</p>;
+
+  if (projectSlugParam) {
+    if (allBundlesGate.isLoading) return <p className="text-slate-400">Loading…</p>;
+    if (allBundlesGate.isError) {
+      return (
+        <p className="text-red-400">
+          {allBundlesGate.error instanceof Error ? allBundlesGate.error.message : "Failed to load bundles"}
+        </p>
+      );
+    }
+    if ((allBundlesGate.data?.length ?? 0) === 0) {
+      const stacksTo = `/projects/${encodeURIComponent(projectSlugParam)}/stacks${location.search}`;
+      return (
+        <StackPageShell
+          stackName={stackName}
+          subnavSlug={projectSlugParam}
+          linkSearch={location.search}
+          subtitle="Edit stack layers"
+          tertiaryLink={{ to: stacksTo, label: "← Stacks" }}
+          fullBleed
+        >
+          <NeedBundlesBeforeStacks projectSlug={projectSlugParam} envSearch={envTag} />
+        </StackPageShell>
+      );
+    }
+  }
+
   if (q.isLoading) return <p className="text-slate-400">Loading…</p>;
   if (q.isError || !q.data) {
     return (

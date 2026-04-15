@@ -9,6 +9,7 @@ import {
 } from "@/api/bundles";
 import { BundlePageShell } from "@/components/BundlePageShell";
 import { Button } from "@/components/ui";
+import { envLinkRowId, useEnvLinkRowHighlight } from "@/hooks/useEnvLinkRowHighlight";
 import { envSearchParam, resourceScopeFromNav } from "@/projectEnv";
 
 export default function BundleEnvLinksPage() {
@@ -31,6 +32,11 @@ export default function BundleEnvLinksPage() {
     queryFn: () => listBundleEnvLinks(bundleName, resourceScope),
     enabled: !!bundleName,
   });
+  const rows = q.data ?? [];
+  const { isHighlighted } = useEnvLinkRowHighlight(
+    rows,
+    `${bundleName}|${projectSlugParam ?? ""}`,
+  );
   const [lastUrl, setLastUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -69,8 +75,6 @@ export default function BundleEnvLinksPage() {
     );
   }
 
-  const rows = q.data ?? [];
-
   return (
     <BundlePageShell
       bundleName={bundleName}
@@ -105,7 +109,14 @@ export default function BundleEnvLinksPage() {
           {rows.map((r) => (
             <li
               key={r.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2"
+              id={envLinkRowId(r.id)}
+              tabIndex={-1}
+              className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 outline-none transition-[box-shadow,background-color] focus-visible:ring-2 focus-visible:ring-accent ${
+                isHighlighted(r.token_sha256)
+                  ? "border-accent/60 bg-accent/10 ring-2 ring-accent/50"
+                  : "border-border/60"
+              }`}
+              aria-label={isHighlighted(r.token_sha256) ? "Matched env link (from hash tool)" : undefined}
             >
               <span className="text-slate-400">#{r.id}</span>
               <code

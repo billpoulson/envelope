@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from "reac
 import { createBundle, type ImportKind } from "@/api/bundles";
 import { listProjectEnvironments } from "@/api/projectEnvironments";
 import { envSearchParam, UNASSIGNED_ENV_SLUG } from "@/projectEnv";
+import { NeedProjectEnvironments } from "@/components/NeedProjectEnvironments";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
@@ -83,6 +84,28 @@ export default function NewBundlePage() {
 
   if (!projectSlug) return <p className="text-red-400">Missing project</p>;
 
+  const envsReady = !envsQ.isLoading && !envsQ.isError;
+  const noEnvironments = envsReady && (envsQ.data ?? []).length === 0;
+
+  if (noEnvironments) {
+    return (
+      <div>
+        <PageHeader
+          title="New bundle"
+          below={
+            <p className="text-slate-400">
+              Bundles store variables under a project <strong className="text-slate-200">environment</strong> (not the
+              same as the nav filter).
+            </p>
+          }
+        />
+        <div className="mx-auto max-w-lg">
+          <NeedProjectEnvironments projectSlug={projectSlug} resource="bundle" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <PageHeader title="New bundle" />
@@ -103,17 +126,6 @@ export default function NewBundlePage() {
           ) : envsQ.isError ? (
             <p className="text-sm text-red-400">
               {envsQ.error instanceof Error ? envsQ.error.message : "Failed to load environments"}
-            </p>
-          ) : (envsQ.data ?? []).length === 0 ? (
-            <p className="text-sm text-slate-400">
-              No environments in this project yet. Add one under{" "}
-              <Link
-                className="text-accent underline hover:text-accent/90"
-                to={`/projects/${encodeURIComponent(projectSlug)}/environments`}
-              >
-                Project → Environments
-              </Link>
-              .
             </p>
           ) : (
             <select
