@@ -150,6 +150,8 @@ export type StackEnvLinkRow = {
   created_at: string;
   through_layer_position: number | null;
   slice_label: string | null;
+  /** SHA-256 hex of the path token; compare to a hash of your saved URL’s ``/env/…`` segment. */
+  token_sha256: string;
 };
 
 export async function listStackEnvLinks(

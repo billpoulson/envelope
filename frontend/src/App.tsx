@@ -10,6 +10,7 @@ import BundleSealedSecretsPage from "@/pages/BundleSealedSecretsPage";
 import BundleVariablesPage from "@/pages/BundleVariablesPage";
 import BundlesPage from "@/pages/BundlesPage";
 import CertificatesPage from "@/pages/CertificatesPage";
+import EnvLinkHashPage from "@/pages/EnvLinkHashPage";
 import HelpPage from "@/pages/HelpPage";
 import TutorialPage from "@/pages/TutorialPage";
 import LoginPage from "@/pages/LoginPage";
@@ -98,6 +99,7 @@ export default function App() {
           <Route path="/keys" element={<ApiKeysPage />} />
           <Route path="/certificates" element={<CertificatesPage />} />
           <Route path="/backup" element={<BackupPage />} />
+          <Route path="/tools/env-link-hash" element={<EnvLinkHashPage />} />
           <Route path="/help/*" element={<HelpPage />} />
           <Route path="/tutorial" element={<TutorialPage />} />
         </Route>

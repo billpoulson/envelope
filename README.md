@@ -258,7 +258,7 @@ API docs: `http://localhost:8080/docs`
 | GET | `/api/v1/bundles/{name}/export?format=dotenv` or `format=json` | read or admin |
 | POST | `/api/v1/bundles/{name}/secrets` | admin — body: `key_name`, `value` |
 | DELETE | `/api/v1/bundles/{name}/secrets?key_name=…` | admin |
-| GET | `/api/v1/bundles/{name}/env-links` | write scope for bundle — list link ids (not full URLs) |
+| GET | `/api/v1/bundles/{name}/env-links` | write scope for bundle — list link ids and `token_sha256` (not full URLs) |
 | POST | `/api/v1/bundles/{name}/env-links` | write — returns `{ "url": "…/env/<token>" }` once |
 | DELETE | `/api/v1/bundles/{name}/env-links/{id}` | write — revoke |
 | GET | `/api/v1/stacks` | list stack names (scoped) |
@@ -267,7 +267,7 @@ API docs: `http://localhost:8080/docs`
 | PATCH | `/api/v1/stacks/{name}` | write — optional `layers`, `project_slug` / `group_id` |
 | DELETE | `/api/v1/stacks/{name}` | write — deletes stack only (bundles unchanged) |
 | GET | `/api/v1/stacks/{name}/export?format=dotenv` or `format=json` | read stack **and** read every layer bundle |
-| GET/POST/DELETE | `/api/v1/stacks/{name}/env-links` | write — list links (with optional `through_layer_position` / `slice_label`); POST optional JSON `{"through_layer_position": n}` for a prefix slice; merged export at `/env/{token}` |
+| GET/POST/DELETE | `/api/v1/stacks/{name}/env-links` | write — list links (`through_layer_position`, `slice_label`, `token_sha256`); POST optional JSON `{"through_layer_position": n}` for a prefix slice; merged export at `/env/{token}` |
 | GET | `/api/v1/certificates` | admin — list recipient certificates |
 | POST | `/api/v1/certificates` | admin — body `{"name":"…","certificate_pem":"-----BEGIN CERTIFICATE-----..."}` |
 | DELETE | `/api/v1/certificates/{id}` | admin — delete certificate (fails if in use) |

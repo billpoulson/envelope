@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   createBundleEnvLink,
   deleteBundleEnvLink,
@@ -90,6 +90,14 @@ export default function BundleEnvLinksPage() {
         {createM.isPending ? "Generating…" : "Generate new secret URL"}
       </Button>
       <h2 className="mt-8 mb-2 text-lg text-white">Existing links</h2>
+      <p className="mb-3 max-w-2xl text-xs text-slate-500">
+        Each row shows <span className="font-mono text-slate-400">token_sha256</span> (SHA-256 hex of the secret path
+        segment). Hash the token from your saved URL and match this value to know which link to revoke, or use the{" "}
+        <Link to="/tools/env-link-hash" className="text-accent hover:underline">
+          in-browser hash tool
+        </Link>
+        .
+      </p>
       {rows.length === 0 ? (
         <p className="text-slate-400">None yet.</p>
       ) : (
@@ -100,6 +108,12 @@ export default function BundleEnvLinksPage() {
               className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2"
             >
               <span className="text-slate-400">#{r.id}</span>
+              <code
+                className="max-w-[min(100%,28rem)] truncate text-xs text-slate-300"
+                title={r.token_sha256}
+              >
+                {r.token_sha256}
+              </code>
               <span className="text-xs text-slate-500">{r.created_at}</span>
               <button
                 type="button"

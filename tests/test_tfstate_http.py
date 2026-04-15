@@ -1,5 +1,6 @@
 """Integration tests for /tfstate, system backup/restore, and sealed secrets/certificates."""
 
+import hashlib
 import json
 import os
 import tempfile
@@ -767,6 +768,16 @@ class StacksHttpTests(unittest.TestCase):
             slice_rows = [x for x in rows if x.get("through_layer_position") == 0]
             self.assertEqual(len(slice_rows), 1)
             self.assertEqual(slice_rows[0]["slice_label"], f"s1-{nonce}")
+            full_rows = [x for x in rows if x.get("through_layer_position") is None]
+            self.assertEqual(len(full_rows), 1)
+            self.assertEqual(
+                full_rows[0]["token_sha256"],
+                hashlib.sha256(path_full.encode("utf-8")).hexdigest(),
+            )
+            self.assertEqual(
+                slice_rows[0]["token_sha256"],
+                hashlib.sha256(path_slice.encode("utf-8")).hexdigest(),
+            )
 
 
 class AuthJsonApiTests(unittest.TestCase):

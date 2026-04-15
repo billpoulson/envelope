@@ -854,7 +854,10 @@ async def list_bundle_env_links(
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> list[dict[str, int | str]]:
-    """List opaque env links (id and created time only; raw URL path is never stored)."""
+    """List opaque env links: id, created time, and ``token_sha256`` (SHA-256 hex of the path token).
+
+    The raw URL segment is never stored; compare hashes to pick ``id`` for ``DELETE``.
+    """
     validate_bundle_name(name)
     bundle, _ = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
     scopes = parse_scopes_json(auth.scopes)
@@ -871,12 +874,16 @@ async def list_bundle_env_links(
             status_code=403, detail="Insufficient scope to manage env links for this bundle"
         )
     r = await session.execute(
-        select(BundleEnvLink.id, BundleEnvLink.created_at)
+        select(BundleEnvLink.id, BundleEnvLink.created_at, BundleEnvLink.token_sha256)
         .where(BundleEnvLink.bundle_id == bundle.id)
         .order_by(BundleEnvLink.created_at.desc())
     )
     return [
-        {"id": row.id, "created_at": row.created_at.isoformat()}
+        {
+            "id": row.id,
+            "created_at": row.created_at.isoformat(),
+            "token_sha256": row.token_sha256,
+        }
         for row in r.all()
     ]
 

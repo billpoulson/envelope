@@ -91,7 +91,30 @@ Authorization: Bearer <api-key>
 
 Use `format=json` for JSON. The caller must be allowed to read the stack **and** every bundle listed as a layer (`403` if any layer bundle is not readable).
 
-**Opaque URL** — Same as bundles: `POST /api/v1/stacks/{name}/env-links` with write access; `GET /env/<token>` returns the merged variables (optional `?format=json`). For a **prefix slice** (merge from the bottom through one layer only), send JSON `{"through_layer_position": <n>}` where `n` is a layer `position` in that stack; omit the field or send `null` for the full merged stack. `GET /api/v1/stacks/{name}/env-links` lists links with `through_layer_position` and `slice_label` (bundle name at that position).
+**Opaque URL** — Same as bundles: `POST /api/v1/stacks/{name}/env-links` with write access; `GET /env/<token>` returns the merged variables (optional `?format=json`). For a **prefix slice** (merge from the bottom through one layer only), send JSON `{"through_layer_position": <n>}` where `n` is a layer `position` in that stack; omit the field or send `null` for the full merged stack. `GET /api/v1/stacks/{name}/env-links` lists links with `through_layer_position`, `slice_label` (bundle name at that position), and **`token_sha256`**.
+
+### Which link am I revoking? (`token_sha256`)
+
+The full secret path is shown only once when you create a link. List endpoints return **`token_sha256`**: the **SHA-256** digest of the path **token** only (UTF-8 string, lowercase **hex**, 64 characters). That matches what the server stores and uses for `GET /env/{token}`.
+
+1. Take your saved URL, e.g. `https://envelope.example.com/env/AbC-d_Ef.123~x` (or with a path prefix before `/env/`).
+2. Extract the **last path segment** after `/env/` — **not** the query string: strip `?format=json` etc. Do **not** include a leading slash in the string you hash.
+3. Compute **SHA-256** of that segment encoded as **UTF-8**, and express the digest as **hex** (same as `token_sha256` in the API).
+
+Examples:
+
+```bash
+# GNU coreutils / typical Linux
+printf '%s' 'PASTE_TOKEN_HERE' | sha256sum
+```
+
+```python
+import hashlib
+token = "PASTE_TOKEN_HERE"  # segment only, e.g. from urlparse or split("/env/")[-1].split("?")[0]
+digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+```
+
+Find the list row whose **`token_sha256`** equals that digest, then call **`DELETE /api/v1/bundles/{name}/env-links/{id}`** or **`DELETE /api/v1/stacks/{name}/env-links/{id}`** with that **`id`**. On stacks, **`through_layer_position`** / **`slice_label`** still tell you full merge vs prefix slice for each row.
 
 ---
 

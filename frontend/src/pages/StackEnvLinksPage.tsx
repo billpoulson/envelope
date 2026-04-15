@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   createStackEnvLink,
   deleteStackEnvLink,
@@ -114,6 +114,14 @@ export default function StackEnvLinksPage() {
 
       <section className="mb-10" aria-label="Issued links">
         <h3 className="mb-2 text-base font-medium text-slate-200">Issued links</h3>
+        <p className="mb-3 max-w-2xl text-xs text-slate-500">
+          <span className="font-mono text-slate-400">token_sha256</span> identifies the secret path (same for full stack
+          and per-layer links). Hash your saved URL’s path segment and match it here, or use the{" "}
+          <Link to="/tools/env-link-hash" className="text-accent hover:underline">
+            in-browser hash tool
+          </Link>
+          .
+        </p>
         {rows.length === 0 ? (
           <p className="text-sm text-slate-500">None yet. Generate one below.</p>
         ) : (
@@ -123,7 +131,7 @@ export default function StackEnvLinksPage() {
                 key={r.id}
                 className="flex flex-col gap-2 rounded-lg border border-border/60 bg-[#0b0f14]/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
               >
-                <div className="text-sm text-slate-300">
+                <div className="min-w-0 flex-1 text-sm text-slate-300">
                   <span className="font-mono text-slate-400">#{r.id}</span>
                   <span className="mx-2 text-slate-600">·</span>
                   {r.through_layer_position === null ? (
@@ -137,6 +145,9 @@ export default function StackEnvLinksPage() {
                   )}
                   <span className="mx-2 text-slate-600">·</span>
                   <span className="text-slate-500">created {r.created_at}</span>
+                  <div className="mt-1 font-mono text-xs text-slate-400 break-all" title={r.token_sha256}>
+                    {r.token_sha256}
+                  </div>
                 </div>
                 <button
                   type="button"

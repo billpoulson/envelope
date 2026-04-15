@@ -189,7 +189,8 @@ export async function listBundleKeyNames(
   return r.keys ?? [];
 }
 
-export type EnvLinkRow = { id: number; created_at: string };
+/** SHA-256 hex (64 chars) of the UTF-8 env path token; matches server ``token_sha256_hex(raw)``. */
+export type EnvLinkRow = { id: number; created_at: string; token_sha256: string };
 
 export async function listBundleEnvLinks(
   bundleName: string,

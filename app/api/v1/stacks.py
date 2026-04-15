@@ -679,6 +679,7 @@ async def list_stack_env_links(
             StackEnvLink.id,
             StackEnvLink.created_at,
             StackEnvLink.through_layer_position,
+            StackEnvLink.token_sha256,
         )
         .where(StackEnvLink.stack_id == st.id)
         .order_by(StackEnvLink.created_at.desc())
@@ -695,6 +696,7 @@ async def list_stack_env_links(
                 "created_at": row.created_at.isoformat(),
                 "through_layer_position": tpl,
                 "slice_label": slice_label,
+                "token_sha256": row.token_sha256,
             }
         )
     return out

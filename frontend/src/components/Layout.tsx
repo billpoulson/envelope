@@ -37,7 +37,10 @@ export function Layout() {
   const projectSlug = rawSlug && rawSlug !== "new" ? rawSlug : undefined;
 
   const onAdminPage =
-    pathname === "/backup" || pathname === "/keys" || pathname === "/certificates";
+    pathname === "/backup" ||
+    pathname === "/keys" ||
+    pathname === "/certificates" ||
+    pathname.startsWith("/tools/");
   /** Match classic UI: Projects stays highlighted for any project subtree and global bundle/stack lists. */
   const onProjectsNav =
     pathname === "/projects" ||
@@ -187,6 +190,16 @@ export function Layout() {
                       onClick={() => setAdminOpen(false)}
                     >
                       Certificates
+                    </NavLink>
+                    <NavLink
+                      to="/tools/env-link-hash"
+                      role="menuitem"
+                      className={({ isActive }) =>
+                        `block px-3 py-2 text-sm ${isActive ? "bg-white/10 text-white" : "text-slate-300 hover:bg-white/5"}`
+                      }
+                      onClick={() => setAdminOpen(false)}
+                    >
+                      Env link hash
                     </NavLink>
                   </div>
                 ) : null}

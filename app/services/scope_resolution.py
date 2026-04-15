@@ -57,12 +57,10 @@ async def fetch_bundle_for_path(
     else:
         scoped = rows
 
+    # Single row in this project: name is unambiguous; ignore environment_slug mismatches so
+    # clients (e.g. nav ?env=__unassigned__) still resolve when the row is tagged differently.
     if len(scoped) == 1:
-        b = scoped[0]
-        es = (environment_slug or "").strip()
-        if es and not _bundle_matches_env_slug(b, es):
-            raise HTTPException(status_code=404, detail="Bundle not found")
-        return b
+        return scoped[0]
 
     es = (environment_slug or "").strip()
     if not es:
@@ -118,11 +116,7 @@ async def fetch_stack_for_path(
         scoped = rows
 
     if len(scoped) == 1:
-        st = scoped[0]
-        es = (environment_slug or "").strip()
-        if es and not _stack_matches_env_slug(st, es):
-            raise HTTPException(status_code=404, detail="Stack not found")
-        return st
+        return scoped[0]
 
     es = (environment_slug or "").strip()
     if not es:
