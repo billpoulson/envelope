@@ -2,6 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from starlette.requests import Request
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +10,7 @@ from app.auth_keys import generate_raw_api_key, hash_api_key, key_lookup_hmac
 from app.config import get_settings
 from app.db import get_db
 from app.deps import require_admin
+from app.limiter import API_KEYS_CREATE, API_KEYS_DELETE, API_KEYS_LIST, limiter
 from app.models import ApiKey, OidcIdentity
 from app.services.scopes import parse_scopes_json, scopes_to_json, validate_scopes_list
 
@@ -40,7 +42,9 @@ class CreateApiKeyResponse(BaseModel):
 
 
 @router.get("/api-keys", response_model=list[ApiKeyOut])
+@limiter.limit(API_KEYS_LIST)
 async def list_api_keys(
+    request: Request,
     _: ApiKey = Depends(require_admin),
     session: AsyncSession = Depends(get_db),
 ) -> list[ApiKeyOut]:
@@ -62,7 +66,9 @@ async def list_api_keys(
 
 
 @router.post("/api-keys", status_code=201)
+@limiter.limit(API_KEYS_CREATE)
 async def create_api_key(
+    request: Request,
     body: CreateApiKeyBody,
     _: ApiKey = Depends(require_admin),
     session: AsyncSession = Depends(get_db),
@@ -88,7 +94,9 @@ async def create_api_key(
 
 
 @router.delete("/api-keys/{key_id}", status_code=204)
+@limiter.limit(API_KEYS_DELETE)
 async def revoke_api_key(
+    request: Request,
     key_id: int,
     _: ApiKey = Depends(require_admin),
     session: AsyncSession = Depends(get_db),

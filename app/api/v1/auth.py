@@ -15,6 +15,7 @@ from starlette.requests import Request
 
 from app.db import get_db
 from app.deps import get_api_key, resolve_api_key
+from app.limiter import OIDC_CALLBACK, OIDC_REDIRECT, limiter, LOGIN
 from app.models import ApiKey, OidcIdentity
 from app.services.oidc import (
     build_authorization_redirect_url,
@@ -131,6 +132,7 @@ async def auth_session(request: Request) -> SessionResponse:
 
 
 @router.post("/auth/login", response_model=LoginResponse)
+@limiter.limit(LOGIN)
 async def auth_login(
     request: Request,
     body: LoginBody,
@@ -168,6 +170,7 @@ async def auth_logout(
 
 
 @router.get("/auth/oidc/login")
+@limiter.limit(OIDC_REDIRECT)
 async def oidc_login_start(request: Request, session: AsyncSession = Depends(get_db)) -> RedirectResponse:
     cfg = await load_effective_oidc_config(session)
     if not cfg.is_oidc_configured():
@@ -198,6 +201,7 @@ async def oidc_login_start(request: Request, session: AsyncSession = Depends(get
 
 
 @router.get("/auth/oidc/link")
+@limiter.limit(OIDC_REDIRECT)
 async def oidc_link_start(
     request: Request,
     key: ApiKey = Depends(get_api_key),
@@ -234,6 +238,7 @@ async def oidc_link_start(
 
 
 @router.get("/auth/oidc/callback", name="oidc_callback")
+@limiter.limit(OIDC_CALLBACK)
 async def oidc_callback(
     request: Request,
     session: AsyncSession = Depends(get_db),

@@ -29,6 +29,7 @@ os.environ["ENVELOPE_RESTORE_ENABLED"] = "true"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app.limiter import limiter  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -889,6 +890,9 @@ class AuthJsonApiTests(unittest.TestCase):
 
     _token = "tfstate-http-test-admin-key"
 
+    def setUp(self) -> None:
+        limiter.reset()
+
     def test_auth_csrf_login_projects_logout(self) -> None:
         with TestClient(app) as client:
             r = client.get("/api/v1/auth/csrf")
@@ -957,6 +961,25 @@ class AuthJsonApiTests(unittest.TestCase):
             )
             self.assertEqual(r3.status_code, 201, r3.text)
             self.assertEqual(r3.json()["slug"], slug)
+
+    def test_login_rate_limit_returns_429(self) -> None:
+        """POST /api/v1/auth/login is capped per client IP (slowapi)."""
+        with TestClient(app) as client:
+            r = client.get("/api/v1/auth/csrf")
+            self.assertEqual(r.status_code, 200, r.text)
+            csrf = r.json()["csrf_token"]
+            headers = {"X-CSRF-Token": csrf}
+            last_status = None
+            for _ in range(21):
+                rr = client.post(
+                    "/api/v1/auth/login",
+                    json={"api_key": "invalid-key-not-valid"},
+                    headers=headers,
+                )
+                last_status = rr.status_code
+                if rr.status_code == 429:
+                    break
+            self.assertEqual(last_status, 429, "expected 429 after exceeding login rate limit")
 
 
 class StackKeyGraphApiTests(unittest.TestCase):

@@ -67,11 +67,11 @@ This document lists **known limitations** relative to typical **enterprise** or 
 
 ## Gap: Rate limiting is partial
 
-**Issue:** `slowapi` limits apply to **some** routes (backup, certain exports, login, tfstate, etc.), not necessarily every expensive or sensitive endpoint.
+**Issue:** `slowapi` cannot cover every route with equally tight caps without breaking automation (exports, Terraform state, CI). Some handlers remain intentionally less restricted.
 
-**Why it matters:** Abuse and accidental hot loops can still stress unbounded routes.
+**Why it matters:** Abuse and accidental hot loops can still stress less-limited routes.
 
-**Mitigation direction:** Review high-cost handlers; add limits or lower caps at the gateway.
+**Mitigation direction:** App limits now cover JSON login, OIDC flows, API key and certificate CRUD, and sealed-secret endpoints, in addition to exports/backups/tfstate/system (see `app/limiter.py`). Add **gateway-level** rate zones for coarse caps; tune per deployment (see main `README.md`, “Behind a gateway” → “Edge rate limits”).
 
 ---
 

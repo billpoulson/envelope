@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from starlette.requests import Request
 
 from app.api.resource_scope import ResourcePathScope
 from pydantic import BaseModel, Field
@@ -10,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_db
 from app.deps import get_api_key
+from app.limiter import limiter, SEALED_SECRETS_LIST, SEALED_SECRETS_WRITE
 from app.models import ApiKey, Bundle, Certificate, SealedSecret, SealedSecretRecipient
 from app.services.bundles import normalize_env_key, validate_bundle_path_segment
 from app.services.scope_resolution import fetch_bundle_for_path
@@ -66,7 +68,9 @@ async def _get_bundle_or_404(session: AsyncSession, name: str, scope: ResourcePa
 
 
 @router.get("/bundles/{name}/sealed-secrets", response_model=list[SealedSecretOut])
+@limiter.limit(SEALED_SECRETS_LIST)
 async def list_sealed_secrets(
+    request: Request,
     name: str,
     scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
@@ -113,7 +117,9 @@ async def list_sealed_secrets(
 
 
 @router.post("/bundles/{name}/sealed-secrets", status_code=204)
+@limiter.limit(SEALED_SECRETS_WRITE)
 async def upsert_sealed_secret(
+    request: Request,
     name: str,
     body: UpsertSealedSecretBody,
     scope: ResourcePathScope = Depends(),
@@ -189,7 +195,9 @@ async def upsert_sealed_secret(
 
 
 @router.delete("/bundles/{name}/sealed-secrets")
+@limiter.limit(SEALED_SECRETS_WRITE)
 async def delete_sealed_secret(
+    request: Request,
     name: str,
     key_name: str,
     scope: ResourcePathScope = Depends(),

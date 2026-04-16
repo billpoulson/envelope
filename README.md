@@ -10,7 +10,7 @@ Self-hosted **secure environment bundle** manager: named groups of secrets (like
 - **Bundle stacks** — ordered layers of existing bundles merged into one composite `.env` / JSON (`GET /api/v1/stacks/{name}/export`). Later layers **overwrite** duplicate keys from earlier layers. Scopes: `read:stack:…`, `write:stack:…` (and project scopes for stacks in a project). Web: **Stacks**; same opaque `/env/{token}` links as bundles (`POST /api/v1/stacks/{name}/env-links`). Stack links can optionally be a **prefix slice**: merge from the bottom through a chosen layer only (`POST` body `{"through_layer_position": <n>}` matching a layer position). `**GET /api/v1/bundles/{name}`** and **stack key graph** (`GET /api/v1/stacks/{name}/key-graph`) omit encrypted secret plaintext by default; pass `?include_secret_values=true` when you need cleartext (automation and scripts must opt in).
 - **Opaque env URLs**: download a bundle **or merged stack** (full or prefix slice) as `.env` or JSON via `GET /env/{secret-token}` — the path is a random token only (no project, bundle, or stack name). Create links from a bundle’s or stack’s **Secret env URL** page (`…/bundles/{name}/env-links`, `…/stacks/{name}/env-links`) or the matching `POST /api/v1/…/env-links` API (API key with write access).
 - **Backups**: full SQLite snapshots and passphrase-encrypted files (admin; SQLite deployments only); per-bundle JSON/encrypted export and merge import (scoped API keys). PostgreSQL: use operator-managed backups.
-- **Rate limits** on sensitive routes (export, web login)
+- **Rate limits** on sensitive routes (exports, opaque env URLs, JSON login, OIDC, API keys, certificates, sealed secrets, tfstate, backups, etc.; see `app/limiter.py`)
 - **Certificate-backed sealed secrets** (zero-knowledge path): store client-encrypted ciphertext + wrapped data keys per recipient certificate; server does not need private keys to decrypt
 - **Terraform HTTP remote state** (optional): per-project URLs `/tfstate/projects/<slug>/…` with **read/write project** scopes (or **admin**). See [docs/terraform-http-remote-state.md](docs/terraform-http-remote-state.md) and [docs/usage.md](docs/usage.md) (storage model and scopes).
 - **Help** in the web UI at `**/help`** (no login required) — usage overview including Terraform state storage.
@@ -118,6 +118,60 @@ services:
 ```
 
 Use `**websecure**` (HTTPS) for production; redirect HTTP → HTTPS with a global middleware if you expose port 80. After deploy, open `https://envelope.example.com` and confirm API/env links show **https** in generated URLs.
+
+### Edge rate limits (optional)
+
+Envelope applies **per-route** limits in the app (`slowapi`). For defense in depth, you can add **coarse limits at the reverse proxy** (per client IP as seen by the proxy). Tune values for your traffic; Terraform and CI may need higher ceilings than interactive use.
+
+- **Why two layers:** Gateway caps catch floods before they reach Python; app limits enforce semantics per route. With multiple uvicorn workers, in-app counters are **per process** unless you configure a shared store—edge limits stay useful.
+- **Forwarded headers:** Set `FORWARDED_ALLOW_IPS` so app-level limits see real clients, not a single proxy IP (see above).
+
+**Traefik v3** — attach a [rate limit middleware](https://doc.traefik.io/traefik/master/middlewares/http/ratelimit/) to the Envelope router, and add a **stricter** middleware + router for `PathPrefix(`/api/v1/auth`)` (and optionally `/tfstate` if you expose it):
+
+```yaml
+# Example static file or labels (adjust periods; Traefik uses a fixed window per middleware)
+http:
+  middlewares:
+    envelope-ratelimit:
+      rateLimit:
+        average: 120
+        period: 1m
+        burst: 60
+    envelope-auth-ratelimit:
+      rateLimit:
+        average: 30
+        period: 1m
+        burst: 15
+  routers:
+    envelope-auth:
+      rule: Host(`envelope.example.com`) && PathPrefix(`/api/v1/auth`)
+      service: envelope
+      middlewares: [envelope-auth-ratelimit]
+      priority: 20
+    envelope:
+      rule: Host(`envelope.example.com`)
+      service: envelope
+      middlewares: [envelope-ratelimit]
+      priority: 10
+```
+
+**nginx** — use separate `limit_req_zone` values for the general site and for `/api/v1/auth/`:
+
+```nginx
+limit_req_zone $binary_remote_addr zone=envelope_general:10m rate=200r/m;
+limit_req_zone $binary_remote_addr zone=envelope_auth:10m rate=30r/m;
+
+server {
+    location /api/v1/auth/ {
+        limit_req zone=envelope_auth burst=10 nodelay;
+        proxy_pass http://envelope_upstream;
+    }
+    location / {
+        limit_req zone=envelope_general burst=80 nodelay;
+        proxy_pass http://envelope_upstream;
+    }
+}
+```
 
 ## CI example (GitHub Actions)
 

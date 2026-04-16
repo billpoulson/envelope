@@ -3,12 +3,14 @@ from datetime import datetime
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from fastapi import APIRouter, Depends, HTTPException
+from starlette.requests import Request
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import require_admin
+from app.limiter import CERTIFICATES_LIST, CERTIFICATES_WRITE, limiter
 from app.models import ApiKey, Certificate
 
 router = APIRouter()
@@ -35,7 +37,9 @@ def _certificate_fingerprint_sha256_hex(certificate_pem: str) -> str:
 
 
 @router.get("/certificates", response_model=list[CertificateOut])
+@limiter.limit(CERTIFICATES_LIST)
 async def list_certificates(
+    request: Request,
     _: ApiKey = Depends(require_admin),
     session: AsyncSession = Depends(get_db),
 ) -> list[CertificateOut]:
@@ -53,7 +57,9 @@ async def list_certificates(
 
 
 @router.post("/certificates", status_code=201, response_model=CertificateOut)
+@limiter.limit(CERTIFICATES_WRITE)
 async def create_certificate(
+    request: Request,
     body: CreateCertificateBody,
     _: ApiKey = Depends(require_admin),
     session: AsyncSession = Depends(get_db),
@@ -89,7 +95,9 @@ async def create_certificate(
 
 
 @router.delete("/certificates/{certificate_id}", status_code=204)
+@limiter.limit(CERTIFICATES_WRITE)
 async def delete_certificate(
+    request: Request,
     certificate_id: int,
     _: ApiKey = Depends(require_admin),
     session: AsyncSession = Depends(get_db),
