@@ -17,6 +17,7 @@ export async function listApiKeys(): Promise<ApiKeyRow[]> {
 export async function createApiKey(body: {
   name: string;
   scopes: string[];
+  expires_at?: string;
 }): Promise<{ id: number; name: string; scopes: string[]; plain_key: string }> {
   const csrf = await fetchCsrf();
   return apiFetch("/api-keys", {

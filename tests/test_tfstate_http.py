@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1321,6 +1322,172 @@ class AuditTrailHttpTests(unittest.TestCase):
             e0 = evs[0]
             self.assertIsNone(e0.get("actor_api_key_id"))
             self.assertIsNotNone(e0.get("token_sha256_prefix"))
+
+
+class ApiKeysExpiryHttpTests(unittest.TestCase):
+    """POST /api/v1/api-keys optional expires_at validation and list shape."""
+
+    _token = "tfstate-http-test-admin-key"
+
+    def test_create_without_expiry(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                json={"name": "expiry-test-none", "scopes": ["admin"]},
+                headers=h,
+            )
+            self.assertEqual(r.status_code, 201, r.text)
+            kid = r.json()["id"]
+            lr = client.get("/api/v1/api-keys", headers={"Authorization": f"Bearer {self._token}"})
+            self.assertEqual(lr.status_code, 200, lr.text)
+            rows = lr.json()
+            row = next(x for x in rows if x["id"] == kid)
+            self.assertIsNone(row.get("expires_at"))
+            dr = client.delete(f"/api/v1/api-keys/{kid}", headers=h)
+            self.assertEqual(dr.status_code, 204, dr.text)
+
+    def test_create_with_future_expiry(self) -> None:
+        fut = (datetime.now(timezone.utc) + timedelta(days=40)).isoformat()
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                json={"name": "expiry-test-future", "scopes": ["admin"], "expires_at": fut},
+                headers=h,
+            )
+            self.assertEqual(r.status_code, 201, r.text)
+            kid = r.json()["id"]
+            lr = client.get("/api/v1/api-keys", headers={"Authorization": f"Bearer {self._token}"})
+            self.assertEqual(lr.status_code, 200, lr.text)
+            rows = lr.json()
+            row = next(x for x in rows if x["id"] == kid)
+            self.assertIsNotNone(row.get("expires_at"))
+            dr = client.delete(f"/api/v1/api-keys/{kid}", headers=h)
+            self.assertEqual(dr.status_code, 204, dr.text)
+
+    def test_create_rejects_past_expiry(self) -> None:
+        past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                json={"name": "expiry-test-past", "scopes": ["admin"], "expires_at": past},
+                headers=h,
+            )
+        self.assertEqual(r.status_code, 422, r.text)
+
+    def test_create_rejects_naive_expiry(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                json={
+                    "name": "expiry-test-naive",
+                    "scopes": ["admin"],
+                    "expires_at": "2099-01-01T00:00:00",
+                },
+                headers=h,
+            )
+        self.assertEqual(r.status_code, 422, r.text)
+
+    def test_create_with_explicit_null_expires_at(self) -> None:
+        """JSON null must behave like omitted expiry."""
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                json={"name": "expiry-test-json-null", "scopes": ["admin"], "expires_at": None},
+                headers=h,
+            )
+            self.assertEqual(r.status_code, 201, r.text)
+            kid = r.json()["id"]
+            lr = client.get("/api/v1/api-keys", headers={"Authorization": f"Bearer {self._token}"})
+            row = next(x for x in lr.json() if x["id"] == kid)
+            self.assertIsNone(row.get("expires_at"))
+            client.delete(f"/api/v1/api-keys/{kid}", headers=h)
+
+    def test_create_accepts_zulu_iso8601(self) -> None:
+        fut = (datetime.now(timezone.utc) + timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                json={"name": "expiry-test-zulu", "scopes": ["admin"], "expires_at": fut},
+                headers=h,
+            )
+            self.assertEqual(r.status_code, 201, r.text)
+            kid = r.json()["id"]
+            lr = client.get("/api/v1/api-keys", headers={"Authorization": f"Bearer {self._token}"})
+            row = next(x for x in lr.json() if x["id"] == kid)
+            self.assertIsNotNone(row.get("expires_at"))
+            client.delete(f"/api/v1/api-keys/{kid}", headers=h)
+
+    def test_future_expiry_key_authenticates_until_expired(self) -> None:
+        """Bearer auth succeeds before expires_at; fails with 401 after (resolve_api_key)."""
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        exp = (datetime.now(timezone.utc) + timedelta(seconds=2)).isoformat()
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                json={"name": "expiry-window", "scopes": ["admin"], "expires_at": exp},
+                headers=h,
+            )
+            self.assertEqual(r.status_code, 201, r.text)
+            plain = r.json()["plain_key"]
+            kid = r.json()["id"]
+            h_key = {"Authorization": f"Bearer {plain}"}
+            ok = client.get("/api/v1/bundles", headers=h_key)
+            self.assertEqual(ok.status_code, 200, ok.text)
+            time.sleep(3.25)
+            bad = client.get("/api/v1/bundles", headers=h_key)
+            self.assertEqual(bad.status_code, 401, bad.text)
+            detail = bad.json().get("detail", "")
+            self.assertIn("expired", str(detail).lower())
+            client.delete(f"/api/v1/api-keys/{kid}", headers=h)
+
+    def test_past_expiry_422_detail_mentions_future(self) -> None:
+        past = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                json={"name": "expiry-detail", "scopes": ["admin"], "expires_at": past},
+                headers=h,
+            )
+        self.assertEqual(r.status_code, 422, r.text)
+        body = r.json()
+        detail_str = json.dumps(body.get("detail", ""))
+        self.assertTrue(
+            "future" in detail_str.lower() or "expires_at" in detail_str.lower(),
+            body,
+        )
+
+    def test_list_expires_at_round_trips_expected_shape(self) -> None:
+        """Listed expires_at should be JSON-serializable and parse as aware UTC."""
+        fut = (datetime.now(timezone.utc) + timedelta(days=11)).isoformat()
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                json={"name": "expiry-shape", "scopes": ["read:bundle:*"], "expires_at": fut},
+                headers=h,
+            )
+            self.assertEqual(r.status_code, 201, r.text)
+            kid = r.json()["id"]
+            lr = client.get("/api/v1/api-keys", headers={"Authorization": f"Bearer {self._token}"})
+            row = next(x for x in lr.json() if x["id"] == kid)
+            raw = row["expires_at"]
+            self.assertIsInstance(raw, str)
+            # Fromisoformat accepts ...Z and offset forms from FastAPI/pydantic JSON.
+            normalized = raw.replace("Z", "+00:00")
+            parsed = datetime.fromisoformat(normalized)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            else:
+                parsed = parsed.astimezone(timezone.utc)
+            self.assertGreater(parsed, datetime.now(timezone.utc))
+            client.delete(f"/api/v1/api-keys/{kid}", headers=h)
 
 
 class SecurityHeadersHttpTests(unittest.TestCase):

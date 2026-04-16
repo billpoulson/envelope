@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from starlette.requests import Request
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,20 @@ class CreateApiKeyBody(BaseModel):
         default_factory=lambda: ["read:bundle:*"],
         description='e.g. ["admin"] or ["read:bundle:*","read:project:prod-*"]',
     )
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def expires_at_must_be_timezone_aware_and_future(cls, v: datetime | None) -> datetime | None:
+        if v is None:
+            return None
+        if v.tzinfo is None:
+            raise ValueError("expires_at must be timezone-aware (include Z or a UTC offset)")
+        now = datetime.now(timezone.utc)
+        v_utc = v.astimezone(timezone.utc)
+        if v_utc <= now:
+            raise ValueError("expires_at must be in the future")
+        return v_utc
 
 
 class CreateApiKeyResponse(BaseModel):
@@ -81,6 +95,7 @@ async def create_api_key(
         key_hash=hash_api_key(plain),
         key_lookup_hmac=key_lookup_hmac(plain, settings.master_key),
         scopes=scopes_to_json(body.scopes),
+        expires_at=body.expires_at,
     )
     session.add(row)
     await session.commit()

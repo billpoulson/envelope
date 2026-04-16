@@ -20,6 +20,17 @@ from app.session_csrf import check_csrf
 _SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
+def _api_key_expired(expires_at: datetime | None) -> bool:
+    """True if expires_at is in the past (UTC). SQLite may return naive UTC datetimes."""
+    if expires_at is None:
+        return False
+    if expires_at.tzinfo is None:
+        exp = expires_at.replace(tzinfo=timezone.utc)
+    else:
+        exp = expires_at.astimezone(timezone.utc)
+    return exp < datetime.now(timezone.utc)
+
+
 @lru_cache
 def get_fernet() -> Fernet:
     settings = get_settings()
@@ -44,7 +55,7 @@ async def resolve_api_key(
     r = await session.execute(select(ApiKey).where(ApiKey.key_lookup_hmac == lookup))
     row = r.scalar_one_or_none()
     if row is not None:
-        if row.expires_at and row.expires_at < datetime.now(timezone.utc):
+        if _api_key_expired(row.expires_at):
             raise HTTPException(status_code=401, detail="API key expired")
         if not verify_api_key(token, row.key_hash):
             raise HTTPException(status_code=401, detail="Invalid API key")
@@ -53,7 +64,7 @@ async def resolve_api_key(
     r_legacy = await session.execute(select(ApiKey).where(ApiKey.key_lookup_hmac.is_(None)))
     for legacy_row in r_legacy.scalars().all():
         if verify_api_key(token, legacy_row.key_hash):
-            if legacy_row.expires_at and legacy_row.expires_at < datetime.now(timezone.utc):
+            if _api_key_expired(legacy_row.expires_at):
                 raise HTTPException(status_code=401, detail="API key expired")
             return legacy_row
     raise HTTPException(status_code=401, detail="Invalid API key")
@@ -88,7 +99,7 @@ async def get_api_key(
             r = await session.execute(select(ApiKey).where(ApiKey.id == kid))
             row = r.scalar_one_or_none()
             if row is not None:
-                if row.expires_at and row.expires_at < datetime.now(timezone.utc):
+                if _api_key_expired(row.expires_at):
                     raise HTTPException(status_code=401, detail="API key expired")
                 if scopes_allow_admin(parse_scopes_json(row.scopes)):
                     return row

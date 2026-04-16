@@ -6,6 +6,19 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
+function formatExpiresAt(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function expiresIsPast(iso: string | null): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  return !Number.isNaN(d.getTime()) && d.getTime() <= Date.now();
+}
+
 export default function ApiKeysPage() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["api-keys"], queryFn: listApiKeys });
@@ -75,6 +88,7 @@ export default function ApiKeysPage() {
                   <tr>
                     <th className="px-4 py-3 font-medium">Name</th>
                     <th className="px-4 py-3 font-medium">Scopes</th>
+                    <th className="px-4 py-3 font-medium">Expires</th>
                     <th className="px-4 py-3 font-medium">SSO</th>
                     <th className="px-4 py-3 font-medium" />
                   </tr>
@@ -85,6 +99,15 @@ export default function ApiKeysPage() {
                       <td className="px-4 py-3 text-slate-200">{k.name}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-400">
                         {k.scopes.join(", ")}
+                      </td>
+                      <td className="px-4 py-3 text-slate-400">
+                        {expiresIsPast(k.expires_at) ? (
+                          <span className="text-amber-400/95" title={k.expires_at ?? undefined}>
+                            Expired
+                          </span>
+                        ) : (
+                          <span title={k.expires_at ?? undefined}>{formatExpiresAt(k.expires_at)}</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-slate-400">{k.oidc_linked ? "Linked" : "—"}</td>
                       <td className="px-4 py-3 text-right">

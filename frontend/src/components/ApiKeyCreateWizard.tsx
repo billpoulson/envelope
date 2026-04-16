@@ -98,6 +98,30 @@ function dedupeScopes(scopes: string[]): string[] {
   return [...new Set(scopes)];
 }
 
+type ExpiryPreset = "none" | "7d" | "30d" | "90d" | "180d" | "365d" | "custom";
+
+function buildExpiresAtIso(preset: ExpiryPreset, customLocal: string): string | undefined {
+  if (preset === "none") return undefined;
+  if (preset === "custom") {
+    const t = customLocal.trim();
+    if (!t) throw new Error("Choose a date and time for expiry, or pick “No expiry”.");
+    const d = new Date(t);
+    if (Number.isNaN(d.getTime())) throw new Error("Invalid expiry date.");
+    return d.toISOString();
+  }
+  const days =
+    preset === "7d"
+      ? 7
+      : preset === "30d"
+        ? 30
+        : preset === "90d"
+          ? 90
+          : preset === "180d"
+            ? 180
+            : 365;
+  return new Date(Date.now() + days * 864e5).toISOString();
+}
+
 type Props = {
   onCreated: (plainKey: string) => void;
   onError: (msg: string) => void;
@@ -107,6 +131,9 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
   const qc = useQueryClient();
   const [step, setStep] = useState<WizardStep>("name");
   const [name, setName] = useState("");
+
+  const [expiryPreset, setExpiryPreset] = useState<ExpiryPreset>("none");
+  const [expiryCustomLocal, setExpiryCustomLocal] = useState("");
 
   const [access, setAccess] = useState<AccessMode>("scoped");
   const [draft, setDraft] = useState<ScopeDraft>(() => defaultScopeDraft());
@@ -172,12 +199,17 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
         if (list.length === 0) throw new Error("Add at least one scope.");
         scopes = list;
       }
-      return createApiKey({ name: n, scopes });
+      const expiresAt = buildExpiresAtIso(expiryPreset, expiryCustomLocal);
+      return createApiKey(
+        expiresAt !== undefined ? { name: n, scopes, expires_at: expiresAt } : { name: n, scopes },
+      );
     },
     onSuccess: (data) => {
       void qc.invalidateQueries({ queryKey: ["api-keys"] });
       setStep("name");
       setName("");
+      setExpiryPreset("none");
+      setExpiryCustomLocal("");
       setAccess("scoped");
       setDraft(defaultScopeDraft());
       setPendingScopes([]);
@@ -708,6 +740,50 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
       {step === "review" ? (
         <div className="space-y-4">
           <div className="rounded-lg border border-border/60 bg-[#0b0f14]/60 p-4 text-sm">
+            <p className="mb-1 text-slate-400">Expiry (optional)</p>
+            <p className="mb-3 text-xs text-slate-500">
+              After this time the key stops working until you create a new one and revoke it.
+            </p>
+            <label className="mb-1.5 block text-xs font-medium text-slate-400" htmlFor="api-key-expiry-preset">
+              Expires
+            </label>
+            <select
+              id="api-key-expiry-preset"
+              className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm text-slate-200"
+              value={expiryPreset}
+              onChange={(e) => {
+                const v = e.target.value as ExpiryPreset;
+                setExpiryPreset(v);
+                if (v !== "custom") setExpiryCustomLocal("");
+              }}
+            >
+              <option value="none">No expiry</option>
+              <option value="7d">7 days from now</option>
+              <option value="30d">30 days from now</option>
+              <option value="90d">90 days from now</option>
+              <option value="180d">180 days from now</option>
+              <option value="365d">365 days from now</option>
+              <option value="custom">Custom date and time…</option>
+            </select>
+            {expiryPreset === "custom" ? (
+              <div className="mt-4 space-y-2 border-l-2 border-accent/50 pl-4">
+                <label className="block text-xs font-medium text-slate-400" htmlFor="api-key-expiry-custom">
+                  Date and time (local)
+                </label>
+                <p className="text-xs text-slate-500">
+                  Shown below only when you pick “Custom”. Sent to the server as UTC (ISO 8601).
+                </p>
+                <input
+                  id="api-key-expiry-custom"
+                  type="datetime-local"
+                  className="w-full max-w-md rounded border border-border bg-[#0b0f14] px-3 py-2 text-sm text-slate-200"
+                  value={expiryCustomLocal}
+                  onChange={(e) => setExpiryCustomLocal(e.target.value)}
+                />
+              </div>
+            ) : null}
+          </div>
+          <div className="rounded-lg border border-border/60 bg-[#0b0f14]/60 p-4 text-sm">
             <p className="mb-2 text-slate-400">Name</p>
             <p className="font-medium text-slate-100">{name.trim() || "—"}</p>
           </div>
@@ -756,7 +832,8 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
             disabled={
               createM.isPending ||
               !name.trim() ||
-              (access === "scoped" && reviewScopes.length === 0)
+              (access === "scoped" && reviewScopes.length === 0) ||
+              (expiryPreset === "custom" && !expiryCustomLocal.trim())
             }
             onClick={() => createM.mutate()}
           >

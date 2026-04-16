@@ -57,7 +57,7 @@ This document lists **known limitations** relative to typical **enterprise** or 
 
 **Why it matters:** Enterprise IAM teams may expect SSO-first automation, short-lived tokens, or directory-synced roles.
 
-**Mitigation direction:** Use OIDC for humans; restrict and rotate API keys; network policies for CI runners; document key lifecycle.
+**Mitigation direction:** Use OIDC for humans; restrict and rotate API keys; network policies for CI runners; document key lifecycle. **Operator guide:** [api-key-lifecycle.md](api-key-lifecycle.md).
 
 ## Supply-chain / CI security checks
 

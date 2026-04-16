@@ -52,7 +52,7 @@ Use HTTP only on trusted networks. In production, terminate **HTTPS** in front o
 
 ## Security posture and enterprise use
 
-For **known limitations** (API key lookup model, SQLite, CSRF/header/audit expectations, CI scanning), see [docs/security-gaps.md](docs/security-gaps.md).
+For **known limitations** (API key lookup model, SQLite, CSRF/header/audit expectations, CI scanning), see [docs/security-gaps.md](docs/security-gaps.md). For **IAM-oriented** guidance (OIDC for humans, API key scopes, rotation, optional key expiration, network posture), see [docs/api-key-lifecycle.md](docs/api-key-lifecycle.md).
 
 ## Audit trail
 
@@ -408,7 +408,7 @@ API docs: `http://localhost:8080/docs`
 | POST                        | `/api/v1/bundles/{name}/sealed-secrets`                        | write access to bundle — upsert ciphertext envelope + recipients                                                                                                                     |
 | DELETE                      | `/api/v1/bundles/{name}/sealed-secrets?key_name=…`             | write access to bundle — delete one sealed secret row                                                                                                                                |
 | GET                         | `/api/v1/api-keys`                                             | admin                                                                                                                                                                                |
-| POST                        | `/api/v1/api-keys`                                             | admin — body `{"name":"…","scopes":["…"]}`; use `read:project:…` / `write:project:…` for Terraform state under `/tfstate/projects/<slug>/…`                                          |
+| POST                        | `/api/v1/api-keys`                                             | admin — body `{"name":"…","scopes":["…"]}`; optional `expires_at` (timezone-aware ISO 8601, must be in the future). Use `read:project:…` / `write:project:…` for Terraform state under `/tfstate/projects/<slug>/…` |
 | DELETE                      | `/api/v1/api-keys/{id}`                                        | admin                                                                                                                                                                                |
 | GET                         | `/api/v1/system/backup/database`                               | admin — raw SQLite snapshot (`application/octet-stream`)                                                                                                                             |
 | POST                        | `/api/v1/system/backup/database`                               | admin — body `{"passphrase":"..."}`; encrypted `.envelope-db` download                                                                                                               |
