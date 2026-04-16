@@ -35,6 +35,7 @@ export function StackPageShell({
   stackName,
   displayName,
   subnavSlug,
+  subnavEnvironmentSlug,
   linkSearch = "",
   subtitle,
   tertiaryLink,
