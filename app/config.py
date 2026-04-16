@@ -1,6 +1,8 @@
 from functools import lru_cache
+import os
+from typing import Any
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,8 +25,8 @@ class Settings(BaseSettings):
     root_path: str = ""
     # Set true when users use HTTPS so session cookies get the Secure flag (TLS terminated at the gateway).
     https_cookies: bool = False
-    # Terraform HTTP remote state API (/tfstate/...). See docs/terraform-http-remote-state.md
-    pulumi_state_enabled: bool = True
+    # Terraform HTTP remote state API (/tfstate/projects/...). See docs/terraform-http-remote-state.md
+    terraform_http_state_enabled: bool = True
 
     # OIDC (browser admin only). Used when no `oidc_app_settings` row exists; otherwise DB wins.
     oidc_enabled: bool = False
@@ -45,6 +47,19 @@ class Settings(BaseSettings):
         if not s.startswith("/"):
             s = "/" + s
         return s.rstrip("/")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_pulumi_state_env(cls, data: Any) -> Any:
+        """Accept ENVELOPE_PULUMI_STATE_ENABLED when ENVELOPE_TERRAFORM_HTTP_STATE_ENABLED is unset."""
+        if not isinstance(data, dict):
+            return data
+        merged = dict(data)
+        if os.environ.get("ENVELOPE_TERRAFORM_HTTP_STATE_ENABLED") is None:
+            leg = os.environ.get("ENVELOPE_PULUMI_STATE_ENABLED")
+            if leg is not None:
+                merged["terraform_http_state_enabled"] = leg.lower() in ("1", "true", "yes")
+        return merged
 
 
 @lru_cache

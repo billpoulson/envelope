@@ -12,7 +12,6 @@ from app.services.scopes import (
     can_read_stack,
     can_write_bundle,
     parse_scopes_json,
-    scopes_allow_terraform_http_state,
     scopes_to_json,
     validate_scopes_list,
 )
@@ -66,23 +65,6 @@ class ValidateScopesListTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as ctx:
             validate_scopes_list(["read:bundle:"])
         self.assertEqual(ctx.exception.status_code, 400)
-
-    def test_terraform_http_state_ok(self) -> None:
-        validate_scopes_list(["terraform:http_state"])
-
-    def test_legacy_pulumi_scope_ok(self) -> None:
-        validate_scopes_list(["pulumi:state"])
-
-
-class ScopesAllowTerraformTests(unittest.TestCase):
-    def test_admin_implies(self) -> None:
-        self.assertTrue(scopes_allow_terraform_http_state(["admin"]))
-
-    def test_explicit_terraform(self) -> None:
-        self.assertTrue(scopes_allow_terraform_http_state(["terraform:http_state"]))
-
-    def test_read_bundle_only_false(self) -> None:
-        self.assertFalse(scopes_allow_terraform_http_state(["read:bundle:*"]))
 
 
 class CanReadBundleTests(unittest.TestCase):

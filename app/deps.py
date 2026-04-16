@@ -14,7 +14,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.models import ApiKey
 from app.auth_keys import key_lookup_hmac, verify_api_key
-from app.services.scopes import parse_scopes_json, scopes_allow_admin, scopes_allow_terraform_http_state
+from app.services.scopes import parse_scopes_json, scopes_allow_admin
 
 
 @lru_cache
@@ -128,17 +128,3 @@ async def get_api_key_bearer_or_basic(
     session: AsyncSession = Depends(get_db),
 ) -> ApiKey:
     return await resolve_api_key_bearer_or_basic(authorization, session)
-
-
-async def get_api_key_for_tfstate_http(
-    authorization: Annotated[str | None, Header()] = None,
-    session: AsyncSession = Depends(get_db),
-) -> ApiKey:
-    """Legacy /tfstate/blobs/… only: requires terraform:http_state, pulumi:state, or admin."""
-    key = await resolve_api_key_bearer_or_basic(authorization, session)
-    if not scopes_allow_terraform_http_state(parse_scopes_json(key.scopes)):
-        raise HTTPException(
-            status_code=403,
-            detail="terraform:http_state or admin scope required (legacy: pulumi:state)",
-        )
-    return key

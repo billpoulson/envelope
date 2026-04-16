@@ -1,8 +1,8 @@
 # Terraform HTTP remote state (HTTP backend)
 
-Envelope exposes an optional **Terraform HTTP backend–compatible** API for storing **remote state blobs** (GET / POST / DELETE, optional LOCK / UNLOCK). This follows HashiCorp’s HTTP backend contract, not Pulumi’s state protocol.
+Envelope exposes an optional **Terraform HTTP backend–compatible** API for storing **remote state blobs** (GET / POST / DELETE, optional LOCK / UNLOCK). This follows HashiCorp’s HTTP backend contract.
 
-## Per-project state (recommended)
+## Per-project state
 
 State is **scoped to an Envelope project** (same “project” as bundles). Use:
 
@@ -15,21 +15,11 @@ State is **scoped to an Envelope project** (same “project” as bundles). Use:
 
 **Administrator** can use all methods on all projects.
 
-## Legacy flat keys (no project)
-
-`GET/POST/DELETE/LOCK/UNLOCK` on `/tfstate/blobs/<key>` still works for keys with scope `**terraform:http_state`** or `**pulumi:state**` (or **admin**). Prefer per-project URLs for new setups.
-
-## Pulumi
-
-Envelope’s `/tfstate/…` API implements the **Terraform HTTP backend** wire protocol. The **Pulumi CLI** does not use that protocol — there is no supported `pulumi login https://…/tfstate/…` that stores state in Envelope’s HTTP API.
-
-**Use a [Pulumi-supported backend](https://www.pulumi.com/docs/concepts/state/)** (e.g. `**pulumi login postgres://…`**, `**s3://…**`) and keep the URL and credentials in an Envelope **bundle** or CI secrets exported from Envelope.
-
-The legacy scope `**pulumi:state`** only authorizes Envelope’s flat `**/tfstate/blobs/…**` paths; it does not connect the stock Pulumi CLI to this HTTP API.
+State bytes and locks are stored in the `pulumi_state_blobs` and `pulumi_state_locks` database tables (historical table names).
 
 ## Envelope configuration
 
-- Enable with `ENVELOPE_PULUMI_STATE_ENABLED=true` (default: enabled). *(Name is historical; gates Terraform HTTP routes.)*
+- Enable with `ENVELOPE_TERRAFORM_HTTP_STATE_ENABLED=true` (default: enabled). The legacy env name `ENVELOPE_PULUMI_STATE_ENABLED` is still read when `ENVELOPE_TERRAFORM_HTTP_STATE_ENABLED` is unset.
 - OpenAPI: `/docs` when the app is running.
 
 ## Terraform example (per project)

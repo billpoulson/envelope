@@ -358,7 +358,7 @@ class SealedSecretRecipient(Base):
     certificate: Mapped["Certificate"] = relationship(back_populates="sealed_recipients")
 
 
-class PulumiStateBlob(Base):
+class TerraformStateBlob(Base):
     """Raw checkpoint bytes for Terraform HTTP / tooling (not Fernet-wrapped bundle secrets)."""
 
     __tablename__ = "pulumi_state_blobs"
@@ -370,7 +370,7 @@ class PulumiStateBlob(Base):
     )
 
 
-class PulumiStateLock(Base):
+class TerraformStateLock(Base):
     """Advisory lock row for Terraform LOCK/UNLOCK (one lock per state key)."""
 
     __tablename__ = "pulumi_state_locks"
