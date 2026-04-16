@@ -11,6 +11,7 @@ import {
 import { fetchCsrf, logout } from "@/api/auth";
 import { listProjectEnvironments } from "@/api/projectEnvironments";
 import { listProjects } from "@/api/projects";
+import { APP_BUILD_VERSION } from "@/appBuildVersion";
 import { projectBundlesBase, projectGatewayPath, projectStacksBase } from "@/projectPaths";
 
 const linkBase =
@@ -111,44 +112,55 @@ export function Layout() {
 
   return (
     <div className="flex min-h-[100dvh] min-h-screen flex-col bg-[#0b0f14]">
-      <header className="z-20 shrink-0 border-b border-border/80 bg-[#121820]/95 backdrop-blur">
-        <div className="mx-auto w-full max-w-none px-4 pt-3">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <Link to="/" className="text-lg font-semibold tracking-tight text-white">
-              Envelope
-            </Link>
-            <div className="flex items-center gap-4">
-              <NavLink
-                to="/tutorial"
-                className={({ isActive }) =>
-                  `text-sm ${isActive ? "text-white" : "text-slate-400 hover:text-slate-200"}`
-                }
+      <header className="z-20 shrink-0 border-b border-border/80">
+        <div className="border-b border-border/50 bg-[#090c10]/98 backdrop-blur">
+          <div className="mx-auto w-full max-w-none px-4 pb-3 pt-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 py-2">
+              <Link
+                to="/"
+                className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-lg font-semibold leading-snug tracking-tight text-slate-300 hover:text-slate-200"
               >
-                Tutorial
-              </NavLink>
-              <NavLink
-                to="/help"
-                className={({ isActive }) =>
-                  `text-sm ${isActive ? "text-white" : "text-slate-400 hover:text-slate-200"}`
-                }
-              >
-                Help
-              </NavLink>
+                <span>Envelope</span>
+                <span
+                  className="font-jetbrains-mono text-[11px] font-medium tabular-nums leading-none tracking-tight text-slate-500"
+                  title="Build version"
+                >
+                  {APP_BUILD_VERSION}
+                </span>
+              </Link>
+              <div className="flex items-center gap-4">
+                <NavLink
+                  to="/tutorial"
+                  className={({ isActive }) =>
+                    `text-sm ${isActive ? "text-white" : "text-slate-400 hover:text-slate-200"}`
+                  }
+                >
+                  Tutorial
+                </NavLink>
+                <NavLink
+                  to="/help"
+                  className={({ isActive }) =>
+                    `text-sm ${isActive ? "text-white" : "text-slate-400 hover:text-slate-200"}`
+                  }
+                >
+                  Help
+                </NavLink>
+              </div>
             </div>
           </div>
+        </div>
 
+        <div className="bg-[#121820]/95 backdrop-blur">
+          <div className="mx-auto w-full max-w-none px-4">
           <nav
-            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-2 text-sm"
+            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-2 pt-2 text-sm"
             aria-label="Main"
           >
             <Link to="/projects" className={navLinkClass(onProjectsNav)}>
               Projects
             </Link>
-            <Link to="/account" className={navLinkClass(onAccountPage)}>
-              Account
-            </Link>
 
-            <div className="flex flex-wrap items-center justify-end gap-1">
+            <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2">
               <div className="relative" ref={adminMenuRef}>
                 <button
                   type="button"
@@ -222,6 +234,10 @@ export function Layout() {
                 ) : null}
               </div>
 
+              <Link to="/account" className={navLinkClass(onAccountPage)}>
+                Account
+              </Link>
+
               <button
                 type="button"
                 className={`${linkBase} ${linkInactive} border-0 bg-transparent hover:text-slate-200`}
@@ -271,6 +287,7 @@ export function Layout() {
               </div>
             </nav>
           ) : null}
+          </div>
         </div>
       </header>
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">

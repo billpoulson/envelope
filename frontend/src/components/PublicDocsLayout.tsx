@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { fetchCsrf, logout, sessionInfo } from "@/api/auth";
+import { APP_BUILD_VERSION } from "@/appBuildVersion";
 
 /**
  * Shell for Help and Tutorial: no admin login required, but shows Dashboard / Log out when signed in.
@@ -22,10 +23,20 @@ export function PublicDocsLayout() {
 
   return (
     <div className="flex min-h-[100dvh] min-h-screen flex-col bg-[#0b0f14]">
-      <header className="z-20 shrink-0 border-b border-border/80 bg-[#121820]/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-none flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <Link to={homeHref} className="text-lg font-semibold tracking-tight text-white">
-            Envelope
+      <header className="z-20 shrink-0 border-b border-border/80">
+        <div className="bg-[#090c10]/98 backdrop-blur">
+          <div className="mx-auto flex w-full max-w-none flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+          <Link
+            to={homeHref}
+            className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-lg font-semibold leading-snug tracking-tight text-slate-300 hover:text-slate-200"
+          >
+            <span>Envelope</span>
+            <span
+              className="font-jetbrains-mono text-[11px] font-medium tabular-nums leading-none tracking-tight text-slate-500"
+              title="Build version"
+            >
+              {APP_BUILD_VERSION}
+            </span>
           </Link>
           <div className="flex flex-wrap items-center gap-4">
             <NavLink
@@ -70,6 +81,7 @@ export function PublicDocsLayout() {
                 Sign in
               </Link>
             )}
+          </div>
           </div>
         </div>
       </header>

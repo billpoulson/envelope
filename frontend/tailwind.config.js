@@ -5,6 +5,9 @@ export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
+      fontFamily: {
+        jetbrainsMono: ['"JetBrains Mono"', "ui-monospace", "monospace"],
+      },
       colors: {
         surface: "rgb(22 28 36 / <alpha-value>)",
         border: "rgb(55 65 81 / <alpha-value>)",
