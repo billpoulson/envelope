@@ -1,10 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { useLocation, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { getStack, getStackKeyGraph } from "@/api/stacks";
 import { StackKeyGraphView } from "@/components/StackKeyGraphView";
 import { StackPageShell } from "@/components/StackPageShell";
-import { envSearchParam, resourceScopeFromNav } from "@/projectEnv";
+import { PickEnvironmentForAmbiguousResource } from "@/components/PickEnvironmentForAmbiguousResource";
+import { projectStacksBase, resourceScopeFromPath, searchWithoutEnv } from "@/projectPaths";
+import { isAmbiguousStackScopeError, resourceScopeQueryRetry } from "@/util/ambiguousScopeError";
 
 function Centered({ children }: { children: ReactNode }) {
   return (
@@ -15,25 +17,26 @@ function Centered({ children }: { children: ReactNode }) {
 }
 
 export default function StackKeyGraphPage() {
-  const { projectSlug: projectSlugParam, stackName = "" } = useParams<{
+  const { projectSlug: projectSlugParam, environmentSlug = "", stackName = "" } = useParams<{
     projectSlug?: string;
+    environmentSlug?: string;
     stackName: string;
   }>();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const envTag = envSearchParam(searchParams.get("env")) ?? "";
-  const resourceScope = resourceScopeFromNav(projectSlugParam, searchParams.get("env"));
+  const resourceScope = resourceScopeFromPath(projectSlugParam, environmentSlug);
   const qc = useQueryClient();
   const [showSecrets, setShowSecrets] = useState(false);
   const stackQ = useQuery({
-    queryKey: ["stack", stackName, projectSlugParam ?? "", envTag],
+    queryKey: ["stack", stackName, projectSlugParam ?? "", environmentSlug],
     queryFn: () => getStack(stackName, resourceScope),
     enabled: !!stackName,
+    retry: resourceScopeQueryRetry,
   });
   const q = useQuery({
-    queryKey: ["stack-key-graph", stackName, showSecrets, projectSlugParam ?? "", envTag],
+    queryKey: ["stack-key-graph", stackName, showSecrets, projectSlugParam ?? "", environmentSlug],
     queryFn: () => getStackKeyGraph(stackName, showSecrets, resourceScope),
-    enabled: !!stackName,
+    enabled: !!stackName && stackQ.isSuccess,
+    retry: resourceScopeQueryRetry,
   });
 
   if (!stackName) {
@@ -51,6 +54,15 @@ export default function StackKeyGraphPage() {
     );
   }
   if (stackQ.isError) {
+    if (projectSlugParam && isAmbiguousStackScopeError(stackQ.error)) {
+      return (
+        <PickEnvironmentForAmbiguousResource
+          projectSlug={projectSlugParam}
+          kind="stack"
+          resourceSegment={stackName}
+        />
+      );
+    }
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <Centered>
@@ -88,18 +100,20 @@ export default function StackKeyGraphPage() {
   const data = q.data;
   const projectSlug = projectSlugParam ?? stackQ.data.project_slug ?? "";
   const subnavSlug = projectSlugParam ?? (projectSlug || undefined);
-  const editTo = projectSlug
-    ? `/projects/${encodeURIComponent(projectSlug)}/stacks/${encodeURIComponent(stackName)}/edit`
-    : `/stacks/${encodeURIComponent(stackName)}/edit`;
+  const editTo =
+    projectSlug && environmentSlug
+      ? `${projectStacksBase(projectSlug, environmentSlug)}/${encodeURIComponent(stackName)}/edit`
+      : `/stacks/${encodeURIComponent(stackName)}/edit`;
 
   return (
     <StackPageShell
       stackName={stackName}
       displayName={stackQ.data?.name}
       subnavSlug={subnavSlug}
-      linkSearch={location.search}
+      subnavEnvironmentSlug={environmentSlug}
+      linkSearch={searchWithoutEnv(location.search)}
       subtitle="Key graph — merged variables by layer"
-      tertiaryLink={{ to: `${editTo}${location.search}`, label: "← Edit stack layers" }}
+      tertiaryLink={{ to: `${editTo}${searchWithoutEnv(location.search)}`, label: "← Edit stack layers" }}
       fullBleed
     >
       <StackKeyGraphView
@@ -112,10 +126,10 @@ export default function StackKeyGraphPage() {
         onShowSecretsChange={setShowSecrets}
         onRefetch={() => {
           void qc.invalidateQueries({
-            queryKey: ["stack-key-graph", stackName, showSecrets, projectSlugParam ?? "", envTag],
+            queryKey: ["stack-key-graph", stackName, showSecrets, projectSlugParam ?? "", environmentSlug],
           });
           void qc.invalidateQueries({
-            queryKey: ["stack", stackName, projectSlugParam ?? "", envTag],
+            queryKey: ["stack", stackName, projectSlugParam ?? "", environmentSlug],
           });
         }}
       />

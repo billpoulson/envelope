@@ -1,18 +1,28 @@
 import { NavLink } from "react-router-dom";
+import { projectBundlesBase } from "@/projectPaths";
 
 type Props = {
   /** When omitted (legacy `/bundles/...` routes), links use `/bundles/:name/...`. */
   projectSlug?: string;
+  /** Required with `projectSlug` for project-scoped routes (env-in-path). */
+  environmentSlug?: string;
   bundleName: string;
   variant?: "default" | "embedded";
-  /** Preserve query string (e.g. `?env=prod`) across bundle tabs. */
+  /** Optional non-env query (e.g. `?key=foo`). */
   linkSearch?: string;
 };
 
-export function BundleSubnav({ projectSlug, bundleName, variant = "default", linkSearch = "" }: Props) {
-  const base = projectSlug
-    ? `/projects/${encodeURIComponent(projectSlug)}/bundles/${encodeURIComponent(bundleName)}`
-    : `/bundles/${encodeURIComponent(bundleName)}`;
+export function BundleSubnav({
+  projectSlug,
+  environmentSlug,
+  bundleName,
+  variant = "default",
+  linkSearch = "",
+}: Props) {
+  const base =
+    projectSlug && environmentSlug
+      ? `${projectBundlesBase(projectSlug, environmentSlug)}/${encodeURIComponent(bundleName)}`
+      : `/bundles/${encodeURIComponent(bundleName)}`;
   const qs = linkSearch || "";
   const linkCls = ({ isActive }: { isActive: boolean }) =>
     `rounded-md px-2 py-1 text-sm ${isActive ? "bg-white/10 text-white" : "text-slate-400 hover:text-slate-200"}`;

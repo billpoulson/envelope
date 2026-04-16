@@ -1,23 +1,26 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { listBundles } from "@/api/bundles";
 import { listProjectEnvironments } from "@/api/projectEnvironments";
 import { listProjectStacks } from "@/api/stacks";
 import { NeedBundlesBeforeStacks } from "@/components/NeedBundlesBeforeStacks";
-import { envSearchParam, environmentChipLabel, environmentListApiOpts } from "@/projectEnv";
+import { environmentListApiOpts } from "@/projectEnv";
+import { projectEnvironmentsPath, projectStacksBase, searchWithoutEnv } from "@/projectPaths";
 import { PageHeader } from "@/components/PageHeader";
 import { ResourceList } from "@/components/ResourceList";
 import { Button } from "@/components/ui";
 
 export default function ProjectStacksPage() {
-  const { projectSlug = "" } = useParams<{ projectSlug: string }>();
-  const [searchParams] = useSearchParams();
-  const envTag = envSearchParam(searchParams.get("env")) ?? "";
-  const listOpts = environmentListApiOpts(envTag);
+  const { projectSlug = "", environmentSlug = "" } = useParams<{
+    projectSlug: string;
+    environmentSlug: string;
+  }>();
+  const location = useLocation();
+  const listOpts = environmentListApiOpts(environmentSlug);
   const q = useQuery({
-    queryKey: ["stacks", projectSlug, envTag, "with-env"],
+    queryKey: ["stacks", projectSlug, environmentSlug, "with-env"],
     queryFn: () => listProjectStacks(projectSlug, listOpts),
-    enabled: !!projectSlug,
+    enabled: !!projectSlug && !!environmentSlug,
   });
   const envsQ = useQuery({
     queryKey: ["project-environments", projectSlug],
@@ -29,12 +32,12 @@ export default function ProjectStacksPage() {
   const needsEnvironment = envsLoaded && envCount === 0;
 
   const bundlesQ = useQuery({
-    queryKey: ["bundles", projectSlug, "project-all"],
-    queryFn: () => listBundles(projectSlug),
-    enabled: !!projectSlug && !needsEnvironment,
+    queryKey: ["bundles", projectSlug, environmentSlug, "for-stacks-gate"],
+    queryFn: () => listBundles(projectSlug, listOpts),
+    enabled: !!projectSlug && !!environmentSlug && !needsEnvironment,
   });
 
-  if (!projectSlug) return <p className="text-red-400">Missing project</p>;
+  if (!projectSlug || !environmentSlug) return <p className="text-red-400">Missing project or environment</p>;
   if (envsQ.isLoading) return <p className="text-slate-400">Loading…</p>;
   if (envsQ.isError) {
     return (
@@ -66,15 +69,14 @@ export default function ProjectStacksPage() {
   }
 
   const rows = q.data ?? [];
-  const base = `/projects/${encodeURIComponent(projectSlug)}/stacks`;
-  const envPath = `/projects/${encodeURIComponent(projectSlug)}/environments`;
-  const qs = searchParams.toString() ? `?${searchParams.toString()}` : "";
+  const base = projectStacksBase(projectSlug, environmentSlug);
+  const envPath = projectEnvironmentsPath(projectSlug);
+  const qs = searchWithoutEnv(location.search);
   const items = rows.map((row) => {
     const href = `${base}/${encodeURIComponent(row.slug)}/edit${qs}`;
     return {
       name: row.name,
       href,
-      environmentLabel: environmentChipLabel(row),
       extras: [{ label: "Open", to: href }],
     };
   });
@@ -125,7 +127,7 @@ export default function ProjectStacksPage() {
             </Link>
           }
         />
-        <NeedBundlesBeforeStacks projectSlug={projectSlug} envSearch={envTag} />
+        <NeedBundlesBeforeStacks projectSlug={projectSlug} environmentSlug={environmentSlug} />
       </div>
     );
   }

@@ -19,6 +19,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CSSProperties } from "react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { projectGatewayPath } from "@/projectPaths";
 import {
   createProjectEnvironment,
   deleteProjectEnvironment,
@@ -27,6 +28,7 @@ import {
   updateProjectEnvironment,
   type ProjectEnvironmentRow,
 } from "@/api/projectEnvironments";
+import { DangerTypeConfirmModal } from "@/components/DangerTypeConfirmModal";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
@@ -132,6 +134,7 @@ export default function ProjectEnvironmentsPage() {
   const [editing, setEditing] = useState<ProjectEnvironmentRow | null>(null);
   const [editName, setEditName] = useState("");
   const [editSlug, setEditSlug] = useState("");
+  const [deleteEnvRow, setDeleteEnvRow] = useState<ProjectEnvironmentRow | null>(null);
 
   const createM = useMutation({
     mutationFn: () =>
@@ -152,9 +155,9 @@ export default function ProjectEnvironmentsPage() {
     mutationFn: (envSlug: string) => deleteProjectEnvironment(projectSlug, envSlug),
     onSuccess: async () => {
       setErr(null);
+      setDeleteEnvRow(null);
       await qc.invalidateQueries({ queryKey: ["project-environments", projectSlug] });
     },
-    onError: (e: unknown) => setErr(formatApiError(e)),
   });
 
   const saveEditM = useMutation({
@@ -222,9 +225,9 @@ export default function ProjectEnvironmentsPage() {
             <p className="mb-8">
               <Link
                 className="text-accent underline hover:text-accent/90"
-                to={`/projects/${encodeURIComponent(projectSlug)}/bundles`}
+                to={projectGatewayPath(projectSlug)}
               >
-                ← Bundles
+                ← Choose environment
               </Link>
             </p>
           </>
@@ -288,16 +291,15 @@ export default function ProjectEnvironmentsPage() {
                       key={row.id}
                       row={row}
                       reordering={reorderM.isPending}
-                      removePending={delM.isPending}
+                      removePending={delM.isPending || deleteEnvRow !== null}
                       onEdit={() => {
                         setEditing(row);
                         setEditName(row.name);
                         setEditSlug(row.slug);
                       }}
                       onRemove={() => {
-                        if (confirm(`Remove environment “${row.name}” (${row.slug})?`)) {
-                          delM.mutate(row.slug);
-                        }
+                        delM.reset();
+                        setDeleteEnvRow(row);
                       }}
                     />
                   ))}
@@ -341,6 +343,41 @@ export default function ProjectEnvironmentsPage() {
           </div>
         </div>
       ) : null}
+
+      <DangerTypeConfirmModal
+        open={deleteEnvRow !== null}
+        onClose={() => {
+          if (delM.isPending) return;
+          setDeleteEnvRow(null);
+          delM.reset();
+        }}
+        title="Remove this environment?"
+        description={
+          <>
+            Bundles and stacks assigned to this environment may become invalid or need to be reassigned. This cannot be
+            undone.
+            {deleteEnvRow ? (
+              <span className="mt-2 block font-mono text-xs text-slate-500">
+                Slug: {deleteEnvRow.slug}
+              </span>
+            ) : null}
+          </>
+        }
+        confirmationPhrase={deleteEnvRow?.name ?? ""}
+        typeFieldLabel="Type the environment display name to confirm:"
+        typeFieldHint="Display name"
+        confirmButtonLabel="Remove environment"
+        pending={delM.isPending}
+        error={delM.isError ? formatApiError(delM.error) : null}
+        onConfirm={async () => {
+          if (!deleteEnvRow) return;
+          try {
+            await delM.mutateAsync(deleteEnvRow.slug);
+          } catch {
+            /* Error shown via delM */
+          }
+        }}
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { deleteProject, listProjects, patchProject } from "@/api/projects";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
+import { projectGatewayPath } from "@/projectPaths";
 
 export default function ProjectSettingsPage() {
   const { projectSlug = "" } = useParams<{ projectSlug: string }>();
@@ -61,7 +62,7 @@ export default function ProjectSettingsPage() {
     return <p className="text-red-400">Project not found.</p>;
   }
 
-  const bundlesPath = `/projects/${encodeURIComponent(projectSlug)}/bundles`;
+  const bundlesPath = projectGatewayPath(projectSlug);
   const environmentsPath = `/projects/${encodeURIComponent(projectSlug)}/environments`;
   const dirty =
     name.trim() !== project.name || slug.trim() !== project.slug;
@@ -74,7 +75,7 @@ export default function ProjectSettingsPage() {
         below={
           <p className="mb-8 flex flex-wrap gap-x-4 gap-y-1 text-sm">
             <Link className="text-accent underline hover:text-accent/90" to={bundlesPath}>
-              ← Bundles
+              ← Project workspace
             </Link>
             <Link className="text-accent underline hover:text-accent/90" to={environmentsPath}>
               Environments

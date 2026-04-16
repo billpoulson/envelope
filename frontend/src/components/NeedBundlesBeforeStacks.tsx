@@ -1,24 +1,17 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui";
-import { UNASSIGNED_ENV_SLUG } from "@/projectEnv";
+import { projectBundlesBase } from "@/projectPaths";
 
 type Props = {
   projectSlug: string;
-  /** Pass `location` `env` search value when present (omit or unassigned → new bundle without preset env). */
-  envSearch?: string;
+  environmentSlug: string;
 };
 
 /**
  * Callout when the project has no bundles yet — stacks need bundle layers.
  */
-export function NeedBundlesBeforeStacks({ projectSlug, envSearch = "" }: Props) {
-  const e = envSearch.trim();
-  const sp = new URLSearchParams();
-  if (e && e !== UNASSIGNED_ENV_SLUG) sp.set("env", e);
-  const qs = sp.toString();
-  const enc = encodeURIComponent(projectSlug);
-  const newBundleHref = `/projects/${enc}/bundles/new${qs ? `?${qs}` : ""}`;
-  const bundlesHref = `/projects/${enc}/bundles${qs ? `?${qs}` : ""}`;
+export function NeedBundlesBeforeStacks({ projectSlug, environmentSlug }: Props) {
+  const base = projectBundlesBase(projectSlug, environmentSlug);
 
   return (
     <div
@@ -32,10 +25,10 @@ export function NeedBundlesBeforeStacks({ projectSlug, envSearch = "" }: Props) 
       </p>
       <p className="mt-2 text-xs text-slate-500">Order: environments → bundles → stacks.</p>
       <div className="mt-4 flex flex-wrap gap-2">
-        <Link to={newBundleHref}>
+        <Link to={`${base}/new`}>
           <Button type="button">New bundle</Button>
         </Link>
-        <Link to={bundlesHref}>
+        <Link to={base}>
           <Button type="button" variant="secondary">
             View bundles
           </Button>

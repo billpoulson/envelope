@@ -1,7 +1,24 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { listBundleKeyNames, type ResourceScopeOpts } from "@/api/bundles";
 import type { StackLayer } from "@/api/stacks";
 import { Button } from "@/components/ui";
+function bundleEditHref(
+  bundleName: string,
+  projectSlug: string | null | undefined,
+  stackEnvironmentSlug: string | null | undefined,
+): string | null {
+  const bn = bundleName.trim();
+  if (!bn) return null;
+  const enc = encodeURIComponent(bn);
+  const env = stackEnvironmentSlug?.trim();
+  if (projectSlug?.trim() && env) {
+    const ps = encodeURIComponent(projectSlug.trim());
+    const es = encodeURIComponent(env);
+    return `/projects/${ps}/env/${es}/bundles/${enc}/edit`;
+  }
+  return `/bundles/${enc}/edit`;
+}
 
 export type LayerEditorState = {
   bundle: string;
@@ -168,11 +185,22 @@ type Props = {
   bundleNames: string[];
   /** When bundle names repeat per environment, pass project + env for key-name lookups. */
   bundleKeyScope?: ResourceScopeOpts;
+  /** When set, “Bundle” links use `/projects/…/env/:env/bundles/…/edit`. */
+  projectSlug?: string | null;
+  /** Stack route’s environment segment (bundle links are scoped to this env). */
+  stackEnvironmentSlug?: string | null;
   layers: LayerEditorState[];
   onChange: (next: LayerEditorState[]) => void;
 };
 
-export function StackLayersEditor({ bundleNames, bundleKeyScope, layers, onChange }: Props) {
+export function StackLayersEditor({
+  bundleNames,
+  bundleKeyScope,
+  projectSlug,
+  stackEnvironmentSlug,
+  layers,
+  onChange,
+}: Props) {
   const [keyData, setKeyData] = useState<
     Record<number, { keys: string[]; native: Set<string> } | "loading" | "error">
   >({});
@@ -312,8 +340,8 @@ export function StackLayersEditor({ bundleNames, bundleKeyScope, layers, onChang
         Choose a bundle per layer, then <strong className="text-slate-300">all keys</strong> or{" "}
         <strong className="text-slate-300">selected keys</strong>. Bottom layer first; top layer wins on
         duplicates. Each list only shows bundles not already used on another layer in this stack. Use{" "}
-        <strong className="text-slate-300">▶/▼</strong> to collapse a layer, and drag the grip handle to
-        reorder (or use ↑↓).
+        <strong className="text-slate-300">▶/▼</strong> to collapse a layer, <strong className="text-slate-300">Bundle</strong>{" "}
+        to open that layer’s source bundle, and drag the grip handle to reorder (or use ↑↓).
       </p>
       {layers.map((layer, index) => {
         const rowBundleOpts = bundleNamesForLayerSelect(opts, layers, index);
@@ -328,6 +356,7 @@ export function StackLayersEditor({ bundleNames, bundleKeyScope, layers, onChang
         const isExpanded = layerExpanded[index] !== false;
         const isDragOver = dragOverIndex === index && draggingIndex !== null && draggingIndex !== index;
         const isDragging = draggingIndex === index;
+        const openBundleTo = bundleEditHref(layer.bundle, projectSlug, stackEnvironmentSlug);
 
         return (
           <div
@@ -394,6 +423,15 @@ export function StackLayersEditor({ bundleNames, bundleKeyScope, layers, onChang
                 </div>
               </div>
               <div className="flex flex-wrap gap-1">
+                {openBundleTo ? (
+                  <Link
+                    to={openBundleTo}
+                    className="rounded border border-border px-2 py-0.5 text-xs text-accent hover:bg-white/10"
+                    title="Open this layer’s bundle"
+                  >
+                    Bundle
+                  </Link>
+                ) : null}
                 {index > 0 ? (
                   <button
                     type="button"

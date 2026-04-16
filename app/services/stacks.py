@@ -19,7 +19,6 @@ from app.services.bundles import (
     normalize_env_key,
     validate_bundle_path_segment,
 )
-from app.services.project_environments import UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL
 
 _ALIAS_MAX_PER_LAYER = 64
 _ENV_KEY_MAX_LEN = 512
@@ -204,9 +203,14 @@ async def resolve_bundle_id_for_stack_layer(
     stack: BundleStack,
     bundle_name: str,
 ) -> int:
-    """Pick the bundle row for this stack's environment (exact env, else shared unassigned)."""
+    """Pick the bundle row tagged for this stack's project environment."""
     bn = bundle_name.strip()
     validate_bundle_path_segment(bn)
+    if stack.project_environment_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Stack has no project environment; assign an environment before editing layers.",
+        )
     r = await session.execute(
         select(Bundle)
         .where(
@@ -218,29 +222,14 @@ async def resolve_bundle_id_for_stack_layer(
     candidates = list(r.scalars().all())
     if not candidates:
         raise HTTPException(status_code=400, detail=f"Bundle not found: {bn}")
-    if stack.project_environment_id is None:
-        matching = [b for b in candidates if b.project_environment_id is None]
-        if len(matching) == 1:
-            return matching[0].id
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Ambiguous bundle {bn!r}: assign this stack to an environment, "
-                "or ensure only one unassigned bundle uses this name in the project."
-            ),
-        )
     exact = [b for b in candidates if b.project_environment_id == stack.project_environment_id]
-    if exact:
+    if len(exact) == 1:
         return exact[0].id
-    shared = [b for b in candidates if b.project_environment_id is None]
-    if shared:
-        return shared[0].id
+    if len(exact) > 1:
+        raise HTTPException(status_code=400, detail=f"Ambiguous bundle {bn!r} in this environment.")
     raise HTTPException(
         status_code=400,
-        detail=(
-            f"No bundle {bn!r} for this stack's environment "
-            "(and no shared unassigned bundle with that name)."
-        ),
+        detail=f"No bundle {bn!r} tagged for this stack's environment.",
     )
 
 
@@ -594,14 +583,12 @@ async def stack_key_graph_payload_for_stack(
         g = getattr(b, "group", None)
         if g is not None and getattr(g, "slug", None):
             pe = getattr(b, "project_environment", None)
-            env_q = (
-                f"?env={pe.slug}"
-                if pe is not None
-                else f"?env={UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL}"
-            )
-            edit_paths.append(
-                url_path(f"/projects/{g.slug}/bundles/{b.name}/edit{env_q}")
-            )
+            if pe is not None and getattr(pe, "slug", None):
+                edit_paths.append(
+                    url_path(f"/projects/{g.slug}/env/{pe.slug}/bundles/{b.name}/edit")
+                )
+            else:
+                edit_paths.append(url_path(f"/bundles/{b.name}/edit"))
         else:
             edit_paths.append(url_path(f"/bundles/{b.name}/edit"))
         raw = getattr(L, "layer_label", None)

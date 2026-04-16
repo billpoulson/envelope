@@ -18,10 +18,15 @@ import LoginPage from "@/pages/LoginPage";
 import NewBundlePage from "@/pages/NewBundlePage";
 import NewProjectPage from "@/pages/NewProjectPage";
 import ProjectBundlesPage from "@/pages/ProjectBundlesPage";
+import ProjectEnvironmentGatewayPage from "@/pages/ProjectEnvironmentGatewayPage";
 import ProjectEnvironmentsPage from "@/pages/ProjectEnvironmentsPage";
 import ProjectSettingsPage from "@/pages/ProjectSettingsPage";
 import ProjectStacksPage from "@/pages/ProjectStacksPage";
 import ProjectsPage from "@/pages/ProjectsPage";
+import {
+  LegacyOldEnvSegmentRedirect,
+  LegacyProjectWorkspaceRedirect,
+} from "@/routes/LegacyProjectWorkspaceRedirects";
 import StackEditPage from "@/pages/StackEditPage";
 import StackEnvLinksPage from "@/pages/StackEnvLinksPage";
 import StackKeyGraphPage from "@/pages/StackKeyGraphPage";
@@ -62,34 +67,50 @@ export default function App() {
           <Route path="/projects/new" element={<NewProjectPage />} />
           <Route path="/projects/:projectSlug/settings" element={<ProjectSettingsPage />} />
           <Route path="/projects/:projectSlug/environments" element={<ProjectEnvironmentsPage />} />
-          <Route path="/projects/:projectSlug/bundles" element={<ProjectBundlesPage />} />
-          <Route path="/projects/:projectSlug/bundles/new" element={<NewBundlePage />} />
+
+          <Route path="/projects/:projectSlug/env/:environmentSlug/bundles" element={<ProjectBundlesPage />} />
+          <Route path="/projects/:projectSlug/env/:environmentSlug/bundles/new" element={<NewBundlePage />} />
           <Route
-            path="/projects/:projectSlug/bundles/:bundleName/edit"
+            path="/projects/:projectSlug/env/:environmentSlug/bundles/:bundleName/edit"
             element={<BundleVariablesPage />}
           />
           <Route
-            path="/projects/:projectSlug/bundles/:bundleName/env-links"
+            path="/projects/:projectSlug/env/:environmentSlug/bundles/:bundleName/env-links"
             element={<BundleEnvLinksPage />}
           />
           <Route
-            path="/projects/:projectSlug/bundles/:bundleName/sealed-secrets"
+            path="/projects/:projectSlug/env/:environmentSlug/bundles/:bundleName/sealed-secrets"
             element={<BundleSealedSecretsPage />}
           />
-          <Route path="/projects/:projectSlug/stacks" element={<ProjectStacksPage />} />
-          <Route path="/projects/:projectSlug/stacks/new" element={<StackNewPage />} />
+
+          <Route path="/projects/:projectSlug/env/:environmentSlug/stacks" element={<ProjectStacksPage />} />
+          <Route path="/projects/:projectSlug/env/:environmentSlug/stacks/new" element={<StackNewPage />} />
           <Route
-            path="/projects/:projectSlug/stacks/:stackName/edit"
+            path="/projects/:projectSlug/env/:environmentSlug/stacks/:stackName/edit"
             element={<StackEditPage />}
           />
           <Route
-            path="/projects/:projectSlug/stacks/:stackName/key-graph"
+            path="/projects/:projectSlug/env/:environmentSlug/stacks/:stackName/key-graph"
             element={<StackKeyGraphPage />}
           />
           <Route
-            path="/projects/:projectSlug/stacks/:stackName/env-links"
+            path="/projects/:projectSlug/env/:environmentSlug/stacks/:stackName/env-links"
             element={<StackEnvLinksPage />}
           />
+
+          <Route path="/projects/:projectSlug/bundles/*" element={<LegacyProjectWorkspaceRedirect kind="bundles" />} />
+          <Route path="/projects/:projectSlug/stacks/*" element={<LegacyProjectWorkspaceRedirect kind="stacks" />} />
+          <Route
+            path="/projects/:projectSlug/:legacyEnv/bundles/*"
+            element={<LegacyOldEnvSegmentRedirect kind="bundles" />}
+          />
+          <Route
+            path="/projects/:projectSlug/:legacyEnv/stacks/*"
+            element={<LegacyOldEnvSegmentRedirect kind="stacks" />}
+          />
+
+          <Route path="/projects/:projectSlug" element={<ProjectEnvironmentGatewayPage />} />
+
           <Route path="/bundles" element={<BundlesPage />} />
           <Route path="/bundles/:bundleName/edit" element={<BundleVariablesPage />} />
           <Route path="/bundles/:bundleName/env-links" element={<BundleEnvLinksPage />} />

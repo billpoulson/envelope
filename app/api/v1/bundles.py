@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 
 from app.api.resource_scope import ResourcePathScope
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy.orm import selectinload
@@ -145,14 +145,11 @@ async def list_bundles(
     project_slug: str | None = Query(None, description="If set, only bundles in this project"),
     environment_slug: str | None = Query(
         None,
-        description=(
-            "With project_slug: filter by environment slug, or "
-            f"'{UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL}' for bundles not assigned to an environment."
-        ),
+        description="With project_slug: filter by project environment slug.",
     ),
     include_unassigned: bool = Query(
-        True,
-        description="With environment_slug (except the unassigned sentinel): also include bundles with no environment.",
+        False,
+        description="Deprecated; ignored. Bundles must belong to an environment.",
     ),
     with_environment: bool = Query(
         False,
@@ -178,20 +175,12 @@ async def list_bundles(
         if environment_slug is not None and str(environment_slug).strip():
             raw = str(environment_slug).strip()
             if raw == UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL:
-                q = q.where(Bundle.project_environment_id.is_(None))
-            else:
-                env = await get_project_environment_by_group_and_slug(
-                    session, group_id=g.id, slug=raw
+                raise HTTPException(
+                    status_code=400,
+                    detail="environment_slug must be a real environment, not the legacy unassigned sentinel.",
                 )
-                if include_unassigned:
-                    q = q.where(
-                        or_(
-                            Bundle.project_environment_id == env.id,
-                            Bundle.project_environment_id.is_(None),
-                        )
-                    )
-                else:
-                    q = q.where(Bundle.project_environment_id == env.id)
+            env = await get_project_environment_by_group_and_slug(session, group_id=g.id, slug=raw)
+            q = q.where(Bundle.project_environment_id == env.id)
     r = await session.execute(q)
     rows = r.scalars().all()
     if scopes_allow_admin(scopes):

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui";
+import { projectGatewayPath } from "@/projectPaths";
 
 type Props = {
   projectSlug: string;
@@ -31,11 +32,9 @@ export function NeedProjectEnvironments({ projectSlug, resource }: Props) {
         <Link to={envPath}>
           <Button type="button">Go to Environments</Button>
         </Link>
-        <Link
-          to={`/projects/${encodeURIComponent(projectSlug)}/${resource === "bundle" ? "bundles" : "stacks"}`}
-        >
+        <Link to={projectGatewayPath(projectSlug)}>
           <Button type="button" variant="secondary">
-            Back to {resource === "bundle" ? "bundles" : "stacks"}
+            Back to project
           </Button>
         </Link>
       </div>

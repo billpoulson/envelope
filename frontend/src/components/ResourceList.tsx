@@ -5,8 +5,6 @@ export type ResourceListItem = {
   name: string;
   /** Primary destination (typically edit / variables / layers). */
   href: string;
-  /** Shown as a small pill after the name (e.g. deployment environment). */
-  environmentLabel?: string | null;
   /** Secondary links shown on the right (e.g. env links, key graph). */
   extras?: { label: string; to: string }[];
 };
@@ -53,14 +51,6 @@ export function ResourceList({ items, emptyMessage, emptyHint, extrasAsButtons }
                   →
                 </span>
               </Link>
-              {item.environmentLabel ? (
-                <span
-                  className="inline-flex max-w-full shrink-0 items-center rounded-full border border-border/60 bg-white/[0.04] px-2 py-0.5 text-[11px] font-medium leading-none text-slate-400"
-                  title="Associated environment"
-                >
-                  {item.environmentLabel}
-                </span>
-              ) : null}
             </div>
             {item.extras && item.extras.length > 0 ? (
               <nav

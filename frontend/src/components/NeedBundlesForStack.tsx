@@ -1,9 +1,9 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui";
+import { projectBundlesBase, projectStacksBase } from "@/projectPaths";
 
 type Props = {
   projectSlug: string;
-  /** Environment slug for `?env=` on the new-bundle link */
   environmentSlug: string;
 };
 
@@ -11,9 +11,8 @@ type Props = {
  * Shown when creating a stack but the selected environment has no bundles yet.
  */
 export function NeedBundlesForStack({ projectSlug, environmentSlug }: Props) {
-  const qs = new URLSearchParams({ env: environmentSlug }).toString();
-  const newBundlePath = `/projects/${encodeURIComponent(projectSlug)}/bundles/new?${qs}`;
-  const stacksPath = `/projects/${encodeURIComponent(projectSlug)}/stacks`;
+  const newBundlePath = `${projectBundlesBase(projectSlug, environmentSlug)}/new`;
+  const stacksPath = projectStacksBase(projectSlug, environmentSlug);
 
   return (
     <div

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
 import { useLayoutEffect, useState } from "react";
-import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { listBundles } from "@/api/bundles";
 import { listProjectEnvironments } from "@/api/projectEnvironments";
 import {
@@ -17,61 +17,51 @@ import {
   stackLayersFromApi,
   StackLayersEditor,
 } from "@/components/StackLayersEditor";
+import { DangerTypeConfirmModal } from "@/components/DangerTypeConfirmModal";
 import { EditNameSlugModal } from "@/components/EditNameSlugModal";
+import { PickEnvironmentForAmbiguousResource } from "@/components/PickEnvironmentForAmbiguousResource";
 import { StackPageShell } from "@/components/StackPageShell";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
-import { envSearchParam, resourceScopeFromNav, UNASSIGNED_ENV_SLUG } from "@/projectEnv";
-
-function envSlugForLayerKeys(
-  detail: StackDetail | undefined,
-  urlEnv: string | null,
-): string | undefined {
-  const u = urlEnv?.trim();
-  if (u) return u;
-  if (!detail) return undefined;
-  if (detail.project_environment_slug) return detail.project_environment_slug;
-  if (detail.project_environment_slug === null) return UNASSIGNED_ENV_SLUG;
-  return undefined;
-}
+import { isAmbiguousStackScopeError, resourceScopeQueryRetry } from "@/util/ambiguousScopeError";
+import { environmentListApiOpts } from "@/projectEnv";
+import { projectStacksBase, resourceScopeFromPath, searchWithoutEnv } from "@/projectPaths";
 
 export default function StackEditPage() {
-  const { projectSlug: projectSlugParam, stackName = "" } = useParams<{
+  const { projectSlug: projectSlugParam, environmentSlug = "", stackName = "" } = useParams<{
     projectSlug?: string;
+    environmentSlug?: string;
     stackName: string;
   }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const envTag = envSearchParam(searchParams.get("env")) ?? "";
   const qc = useQueryClient();
+  const resourceScope = resourceScopeFromPath(projectSlugParam, environmentSlug);
   const q = useQuery({
-    queryKey: ["stack", stackName, projectSlugParam ?? "", envTag ?? ""],
-    queryFn: () => getStack(stackName, resourceScopeFromNav(projectSlugParam, envTag)),
+    queryKey: ["stack", stackName, projectSlugParam ?? "", environmentSlug],
+    queryFn: () => getStack(stackName, resourceScope),
     enabled: !!stackName,
+    retry: resourceScopeQueryRetry,
   });
-  const resourceScope = resourceScopeFromNav(projectSlugParam, envTag);
   const [layerUi, setLayerUi] = useState<LayerEditorState[]>([]);
   const [displayName, setDisplayName] = useState("");
   const [stackSlug, setStackSlug] = useState("");
   const [stackDetailsOpen, setStackDetailsOpen] = useState(false);
+  const [deleteStackOpen, setDeleteStackOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const projectSlugForBundles = projectSlugParam ?? q.data?.project_slug ?? "";
   const allBundlesGate = useQuery({
-    queryKey: ["bundles", projectSlugParam ?? "", "all-for-stack-gate"],
-    queryFn: () => listBundles(projectSlugParam!),
-    enabled: !!projectSlugParam && !!stackName,
+    queryKey: ["bundles", projectSlugParam ?? "", environmentSlug, "for-stack-gate"],
+    queryFn: () => listBundles(projectSlugParam!, environmentListApiOpts(environmentSlug)),
+    enabled: !!projectSlugParam && !!stackName && !!environmentSlug,
   });
-  const stackEnvSlug = q.data?.project_environment_slug ?? undefined;
+  const stackEnvSlug = q.data?.project_environment_slug ?? environmentSlug;
   const bundlesQ = useQuery({
     queryKey: ["bundles", projectSlugForBundles || "global", stackEnvSlug ?? ""],
     queryFn: () => {
       if (!projectSlugForBundles) return listBundles();
-      if (stackEnvSlug) {
-        return listBundles(projectSlugForBundles, { environmentSlug: stackEnvSlug });
-      }
-      return listBundles(projectSlugForBundles);
+      return listBundles(projectSlugForBundles, environmentListApiOpts(stackEnvSlug));
     },
     enabled: !!stackName && !!q.data,
   });
@@ -154,9 +144,9 @@ export default function StackEditPage() {
       setErr(null);
       const { ss, ps, slugChanged } = result;
       if (slugChanged) {
-        if (ps) {
+        if (ps && environmentSlug) {
           navigate(
-            `/projects/${encodeURIComponent(ps)}/stacks/${encodeURIComponent(ss)}/edit${location.search}`,
+            `${projectStacksBase(ps, environmentSlug)}/${encodeURIComponent(ss)}/edit${searchWithoutEnv(location.search)}`,
             { replace: true },
           );
         } else {
@@ -175,12 +165,10 @@ export default function StackEditPage() {
         "stack",
         stackName,
         projectSlugParam ?? "",
-        envTag ?? "",
+        environmentSlug,
       ]);
       const ps = projectSlugParam ?? detail?.project_slug ?? "";
-      window.location.href = ps
-        ? `/projects/${encodeURIComponent(ps)}/stacks${location.search}`
-        : "/stacks";
+      window.location.href = ps && environmentSlug ? projectStacksBase(ps, environmentSlug) : "/stacks";
     },
   });
 
@@ -196,44 +184,57 @@ export default function StackEditPage() {
       );
     }
     if ((allBundlesGate.data?.length ?? 0) === 0) {
-      const stacksTo = `/projects/${encodeURIComponent(projectSlugParam)}/stacks${location.search}`;
+      const stacksTo = projectStacksBase(projectSlugParam, environmentSlug);
       return (
         <StackPageShell
           stackName={stackName}
           subnavSlug={projectSlugParam}
-          linkSearch={location.search}
+          subnavEnvironmentSlug={environmentSlug}
+          linkSearch={searchWithoutEnv(location.search)}
           subtitle="Edit stack layers"
           tertiaryLink={{ to: stacksTo, label: "← Stacks" }}
           fullBleed
         >
-          <NeedBundlesBeforeStacks projectSlug={projectSlugParam} envSearch={envTag} />
+          <NeedBundlesBeforeStacks projectSlug={projectSlugParam} environmentSlug={environmentSlug} />
         </StackPageShell>
       );
     }
   }
 
   if (q.isLoading) return <p className="text-slate-400">Loading…</p>;
-  if (q.isError || !q.data) {
+  if (q.isError) {
+    if (projectSlugParam && isAmbiguousStackScopeError(q.error)) {
+      return (
+        <PickEnvironmentForAmbiguousResource
+          projectSlug={projectSlugParam}
+          kind="stack"
+          resourceSegment={stackName}
+        />
+      );
+    }
     return (
       <p className="text-red-400">{q.error instanceof Error ? q.error.message : "Failed"}</p>
     );
+  }
+  if (!q.data) {
+    return <p className="text-red-400">Failed</p>;
   }
 
   const projectSlug = projectSlugParam ?? q.data.project_slug ?? "";
   const envAssignmentLocked = q.data.project_environment_slug != null;
   const subnavSlug = projectSlugParam ?? (projectSlug || undefined);
-  const stacksListTo = projectSlug
-    ? `/projects/${encodeURIComponent(projectSlug)}/stacks`
-    : "/stacks";
+  const stacksListTo =
+    projectSlug && environmentSlug ? projectStacksBase(projectSlug, environmentSlug) : "/stacks";
 
   return (
     <StackPageShell
       stackName={stackName}
       displayName={q.data.name}
       subnavSlug={subnavSlug}
-      linkSearch={location.search}
+      subnavEnvironmentSlug={environmentSlug}
+      linkSearch={searchWithoutEnv(location.search)}
       subtitle="Edit stack layers"
-      tertiaryLink={{ to: `${stacksListTo}${location.search}`, label: "← Stacks" }}
+      tertiaryLink={{ to: `${stacksListTo}${searchWithoutEnv(location.search)}`, label: "← Stacks" }}
       titleAccessory={
         <button
           type="button"
@@ -258,10 +259,9 @@ export default function StackEditPage() {
             disabled={envsQ.isLoading || patchStackEnvM.isPending}
             onChange={(e) => {
               const v = e.target.value;
-              patchStackEnvM.mutate(v === "" ? null : v);
+              if (v) patchStackEnvM.mutate(v);
             }}
           >
-            <option value="">Unassigned</option>
             {(envsQ.data ?? []).map((row) => (
               <option key={row.id} value={row.slug}>
                 {row.name}
@@ -280,10 +280,9 @@ export default function StackEditPage() {
         ) : null}
         <StackLayersEditor
           bundleNames={bundlesQ.data ?? []}
-          bundleKeyScope={resourceScopeFromNav(
-            projectSlugForBundles,
-            envSlugForLayerKeys(q.data, envTag || null),
-          )}
+          bundleKeyScope={resourceScopeFromPath(projectSlugForBundles, environmentSlug)}
+          projectSlug={projectSlug || null}
+          stackEnvironmentSlug={environmentSlug}
           layers={layerUi}
           onChange={setLayerUi}
         />
@@ -292,17 +291,46 @@ export default function StackEditPage() {
         <Button type="button" disabled={saveLayersM.isPending} onClick={() => saveLayersM.mutate()}>
           {saveLayersM.isPending ? "Saving…" : "Save layers"}
         </Button>
+      </div>
+
+      <div className="mt-10 rounded-lg border border-red-900/50 bg-red-950/[0.12] p-5">
+        <h3 className="text-sm font-semibold text-red-300">Danger zone</h3>
+        <p className="mt-1 max-w-xl text-xs text-slate-500">
+          Deleting a stack removes its layers and env links. Bundles referenced by those layers are{" "}
+          <strong className="text-slate-400">not</strong> deleted. This cannot be undone.
+        </p>
         <Button
           type="button"
           variant="secondary"
-          className="text-red-300"
+          className="mt-4 border-red-900/40 text-red-300 hover:bg-red-950/30"
           onClick={() => {
-            if (confirm(`Delete stack “${q.data.name}”?`)) delM.mutate();
+            delM.reset();
+            setDeleteStackOpen(true);
           }}
         >
-          Delete stack
+          Delete stack…
         </Button>
       </div>
+
+      <DangerTypeConfirmModal
+        open={deleteStackOpen}
+        onClose={() => setDeleteStackOpen(false)}
+        title="Delete this stack?"
+        description="You will lose this stack’s configuration and stack env links. Bundles stay in the project unless you delete them separately."
+        confirmationPhrase={q.data.name}
+        typeFieldLabel="Type the stack name to confirm:"
+        typeFieldHint="Stack name"
+        confirmButtonLabel="Delete stack"
+        pending={delM.isPending}
+        error={delM.isError ? formatApiError(delM.error) : null}
+        onConfirm={async () => {
+          try {
+            await delM.mutateAsync();
+          } catch {
+            /* Error shown via delM.isError */
+          }
+        }}
+      />
 
       <EditNameSlugModal
         open={stackDetailsOpen}

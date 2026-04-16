@@ -16,6 +16,7 @@ import {
 } from "@/api/bundles";
 import { patchStack, type StackKeyGraphPayload, type StackLayer } from "@/api/stacks";
 import { bundleScopeForApi } from "@/projectEnv";
+import { DangerTypeConfirmModal } from "@/components/DangerTypeConfirmModal";
 import {
   editorToStackLayer,
   LayerAliasesBlock,
@@ -382,6 +383,26 @@ export function StackKeyGraphView({
     }
   }, [aliasEditLayers, aliasModalLayer, onRefetch, stackName, stackScope]);
 
+  const [deleteBundleTarget, setDeleteBundleTarget] = useState<string | null>(null);
+  const [deleteBundleErr, setDeleteBundleErr] = useState<string | null>(null);
+  const [deleteBundleBusy, setDeleteBundleBusy] = useState(false);
+
+  const confirmDeleteBundle = useCallback(async () => {
+    const bn = deleteBundleTarget?.trim();
+    if (!bn) return;
+    setDeleteBundleErr(null);
+    setDeleteBundleBusy(true);
+    try {
+      await deleteBundle(bn, stackScope);
+      setDeleteBundleTarget(null);
+      onRefetch();
+    } catch (e: unknown) {
+      setDeleteBundleErr(formatApiError(e));
+    } finally {
+      setDeleteBundleBusy(false);
+    }
+  }, [deleteBundleTarget, onRefetch, stackScope]);
+
   const executeRemoveLayerFromStack = useCallback(
     async (layerIndex: number) => {
       const sn = stackName?.trim();
@@ -408,30 +429,6 @@ export function StackKeyGraphView({
       }
     },
     [data.layers, onRefetch, stackLayers, stackName, stackScope],
-  );
-
-  const executeDeleteBundleForLayer = useCallback(
-    async (layerIndex: number) => {
-      const bundleName = String(data.layers[layerIndex]?.bundle || "").trim();
-      if (!bundleName) {
-        setLayerHeaderErr("This layer has no bundle to delete.");
-        return;
-      }
-      const msg = `Delete bundle “${bundleName}” entirely? All variables in this bundle are removed. Other stacks or envs that use this bundle will be affected.`;
-      if (!confirm(msg)) return;
-      setLayerHeaderErr(null);
-      setLayerHeaderBusy(true);
-      try {
-        await deleteBundle(bundleName, stackScope);
-        setCtx(null);
-        onRefetch();
-      } catch (e: unknown) {
-        setLayerHeaderErr(formatApiError(e));
-      } finally {
-        setLayerHeaderBusy(false);
-      }
-    },
-    [data.layers, onRefetch, stackScope],
   );
 
   if (n === 0) {
@@ -463,8 +460,9 @@ export function StackKeyGraphView({
             until then values appear as <code className="text-slate-300">(secret)</code>.
           </li>
           <li>
-            <strong className="text-slate-300">Right-click a layer header</strong> to remove that layer from this stack
-            or delete its bundle entirely, or (except the bottom layer) open{" "}
+            <strong className="text-slate-300">Right-click a layer header</strong> for{" "}
+            <strong className="text-slate-300">Open bundle</strong>, to remove that layer from this stack or delete its
+            bundle entirely, or (except the bottom layer) open{" "}
             <strong className="text-slate-300">Key aliases for this layer</strong>.
           </li>
           <li>
@@ -958,6 +956,19 @@ export function StackKeyGraphView({
         >
           {ctx.layerHeader ? (
             <>
+              {(() => {
+                const li = ctx.layerHeader!.layerIndex;
+                const to = (data.layers[li]?.bundle_edit_path || "").trim();
+                return to ? (
+                  <Link
+                    to={to}
+                    className="block px-3 py-2 text-sm text-accent hover:bg-white/10"
+                    onClick={() => setCtx(null)}
+                  >
+                    Open bundle
+                  </Link>
+                ) : null;
+              })()}
               <button
                 type="button"
                 disabled={layerHeaderBusy}
@@ -978,7 +989,14 @@ export function StackKeyGraphView({
                 className="block w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50"
                 onClick={() => {
                   const li = ctx.layerHeader!.layerIndex;
-                  void executeDeleteBundleForLayer(li);
+                  const bundleName = String(data.layers[li]?.bundle || "").trim();
+                  if (!bundleName) {
+                    setLayerHeaderErr("This layer has no bundle to delete.");
+                    return;
+                  }
+                  setDeleteBundleTarget(bundleName);
+                  setDeleteBundleErr(null);
+                  setCtx(null);
                 }}
               >
                 Delete bundle…
@@ -1240,6 +1258,29 @@ export function StackKeyGraphView({
           </div>
         </div>
       ) : null}
+
+      <DangerTypeConfirmModal
+        open={deleteBundleTarget !== null && deleteBundleTarget.trim() !== ""}
+        onClose={() => {
+          if (deleteBundleBusy) return;
+          setDeleteBundleTarget(null);
+          setDeleteBundleErr(null);
+        }}
+        title="Delete this bundle?"
+        description={
+          <>
+            This removes <span className="text-slate-200">all variables</span> in this bundle. Other stacks or
+            environments that use this bundle will be affected.
+          </>
+        }
+        confirmationPhrase={deleteBundleTarget ?? ""}
+        typeFieldLabel="Type the bundle name to confirm:"
+        typeFieldHint="Bundle name"
+        confirmButtonLabel="Delete bundle"
+        pending={deleteBundleBusy}
+        error={deleteBundleErr}
+        onConfirm={() => void confirmDeleteBundle()}
+      />
     </div>
   );
 }

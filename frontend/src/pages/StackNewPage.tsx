@@ -1,32 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { listBundles } from "@/api/bundles";
 import { listProjectEnvironments } from "@/api/projectEnvironments";
 import { createStack, type StackLayer } from "@/api/stacks";
-import { envSearchParam, environmentListApiOpts, UNASSIGNED_ENV_SLUG } from "@/projectEnv";
+import { environmentListApiOpts } from "@/projectEnv";
+import { projectStacksBase, searchWithoutEnv } from "@/projectPaths";
 import { NeedBundlesForStack } from "@/components/NeedBundlesForStack";
 import { NeedProjectEnvironments } from "@/components/NeedProjectEnvironments";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 
 export default function StackNewPage() {
-  const { projectSlug = "" } = useParams<{ projectSlug: string }>();
+  const { projectSlug = "", environmentSlug = "" } = useParams<{
+    projectSlug: string;
+    environmentSlug: string;
+  }>();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [bundle, setBundle] = useState("");
   const [err, setErr] = useState<string | null>(null);
-  const [selectedEnvSlug, setSelectedEnvSlug] = useState("");
-
-  const envFromUrl = useMemo(() => {
-    const e = envSearchParam(searchParams.get("env")) ?? "";
-    if (!e || e === UNASSIGNED_ENV_SLUG) return "";
-    return e;
-  }, [searchParams]);
 
   const envsQ = useQuery({
     queryKey: ["project-environments", projectSlug],
@@ -39,35 +35,29 @@ export default function StackNewPage() {
     setSlug("");
     setBundle("");
     setErr(null);
-  }, [projectSlug, location.key]);
+  }, [projectSlug, environmentSlug, location.key]);
 
-  useLayoutEffect(() => {
-    setSelectedEnvSlug(envFromUrl);
-    setBundle("");
-  }, [envFromUrl]);
-
-  const listOpts = environmentListApiOpts(selectedEnvSlug || undefined);
+  const listOpts = environmentListApiOpts(environmentSlug);
   const bundlesQ = useQuery({
-    queryKey: ["bundles", projectSlug, selectedEnvSlug],
+    queryKey: ["bundles", projectSlug, environmentSlug],
     queryFn: () => listBundles(projectSlug, listOpts),
-    enabled: !!projectSlug && !!selectedEnvSlug,
+    enabled: !!projectSlug && !!environmentSlug,
   });
   const bundleNames = useMemo(() => {
     const raw = bundlesQ.data ?? [];
     return [...raw].sort((a, b) => a.localeCompare(b));
   }, [bundlesQ.data]);
 
-  const canSubmit =
-    !!name.trim() && !!selectedEnvSlug.trim() && !!bundle.trim();
+  const canSubmit = !!name.trim() && !!bundle.trim() && !!environmentSlug.trim();
 
   const m = useMutation({
     mutationFn: async () => {
-      const envSlug = selectedEnvSlug.trim();
+      const envSlug = environmentSlug.trim();
       const displayName = name.trim();
       const slugTrim = slug.trim();
       const bottomBundle = bundle.trim();
       if (!envSlug) {
-        throw new Error("Select an environment for this stack.");
+        throw new Error("Missing environment in URL.");
       }
       if (!bottomBundle) {
         throw new Error("Select a bottom bundle.");
@@ -79,22 +69,20 @@ export default function StackNewPage() {
         project_environment_slug: envSlug,
         layers: [{ bundle: bottomBundle, keys: "*" } satisfies StackLayer],
       });
-      return { envSlug, stackSlug: created.slug };
+      return { stackSlug: created.slug };
     },
-    onSuccess: async ({ envSlug, stackSlug }) => {
+    onSuccess: async ({ stackSlug }) => {
       await qc.invalidateQueries({ queryKey: ["stacks"] });
-      const sp = new URLSearchParams(location.search);
-      sp.set("env", envSlug);
-      const qs = sp.toString();
+      const qs = searchWithoutEnv(location.search);
       navigate({
-        pathname: `/projects/${encodeURIComponent(projectSlug)}/stacks/${encodeURIComponent(stackSlug)}/edit`,
-        search: qs ? `?${qs}` : "",
+        pathname: `${projectStacksBase(projectSlug, environmentSlug)}/${encodeURIComponent(stackSlug)}/edit`,
+        search: qs,
       });
     },
     onError: (e: unknown) => setErr(e instanceof Error ? e.message : String(e)),
   });
 
-  if (!projectSlug) return <p className="text-red-400">Missing project</p>;
+  if (!projectSlug || !environmentSlug) return <p className="text-red-400">Missing project or environment</p>;
 
   const envsReady = !envsQ.isLoading && !envsQ.isError;
   const noEnvironments = envsReady && (envsQ.data ?? []).length === 0;
@@ -121,46 +109,9 @@ export default function StackNewPage() {
   const bundlesError =
     bundlesQ.isError && bundlesQ.error instanceof Error ? bundlesQ.error.message : null;
   const canPickBundle =
-    !!selectedEnvSlug &&
-    !bundlesLoading &&
-    !bundlesError &&
-    bundleNames.length > 0;
+    !!environmentSlug && !bundlesLoading && !bundlesError && bundleNames.length > 0;
 
-  const envSelectBlock = (
-    <div>
-      <label htmlFor="stack-create-env" className="mb-1 block text-sm text-slate-400">
-        Environment
-      </label>
-      {envsQ.isLoading ? (
-        <p className="text-sm text-slate-500">Loading environments…</p>
-      ) : envsQ.isError ? (
-        <p className="text-sm text-red-400">
-          {envsQ.error instanceof Error ? envsQ.error.message : "Failed to load environments"}
-        </p>
-      ) : (
-        <select
-          id="stack-create-env"
-          className="w-full rounded-lg border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm text-slate-200"
-          value={selectedEnvSlug}
-          onChange={(e) => {
-            setSelectedEnvSlug(e.target.value);
-            setBundle("");
-            setErr(null);
-          }}
-        >
-          <option value="">Select environment…</option>
-          {(envsQ.data ?? []).map((row) => (
-            <option key={row.id} value={row.slug}>
-              {row.name}
-            </option>
-          ))}
-        </select>
-      )}
-      <p className="mt-1 text-xs text-slate-500">
-        The stack is tagged to this environment for its lifetime (it cannot be reassigned later).
-      </p>
-    </div>
-  );
+  const envLabel = (envsQ.data ?? []).find((e) => e.slug === environmentSlug)?.name ?? environmentSlug;
 
   return (
     <div>
@@ -174,23 +125,17 @@ export default function StackNewPage() {
         }
       />
       <div className="mx-auto max-w-lg space-y-6">
-        {envSelectBlock}
+        <p className="text-sm text-slate-400">
+          Environment: <span className="font-medium text-slate-200">{envLabel}</span>{" "}
+          <span className="font-mono text-xs text-slate-500">({environmentSlug})</span>
+        </p>
 
-        {!selectedEnvSlug ? (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-500">Select an environment to continue.</p>
-            <Link to={`/projects/${encodeURIComponent(projectSlug)}/stacks${location.search}`}>
-              <Button type="button" variant="secondary">
-                Cancel
-              </Button>
-            </Link>
-          </div>
-        ) : bundlesLoading ? (
+        {bundlesLoading ? (
           <p className="text-sm text-slate-500">Loading bundles…</p>
         ) : bundlesError ? (
           <p className="text-sm text-red-400">{bundlesError}</p>
         ) : bundleNames.length === 0 ? (
-          <NeedBundlesForStack projectSlug={projectSlug} environmentSlug={selectedEnvSlug} />
+          <NeedBundlesForStack projectSlug={projectSlug} environmentSlug={environmentSlug} />
         ) : (
           <form
             className="space-y-4"
@@ -258,7 +203,7 @@ export default function StackNewPage() {
               <Button type="submit" disabled={m.isPending || !canSubmit || !canPickBundle}>
                 Create
               </Button>
-              <Link to={`/projects/${encodeURIComponent(projectSlug)}/stacks${location.search}`}>
+              <Link to={`${projectStacksBase(projectSlug, environmentSlug)}${searchWithoutEnv(location.search)}`}>
                 <Button type="button" variant="secondary">
                   Cancel
                 </Button>

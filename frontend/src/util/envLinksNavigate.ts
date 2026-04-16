@@ -1,5 +1,6 @@
 import type { EnvLinkResolveResponse } from "@/api/envLinks";
 import { ENV_LINK_HIGHLIGHT_SHA256_PARAM } from "@/envLinkHighlight";
+import { projectBundlesBase, projectGatewayPath, projectStacksBase } from "@/projectPaths";
 
 function appendHighlight(search: URLSearchParams, highlightSha256?: string): string {
   const h = highlightSha256?.trim().replace(/\s+/g, "").toLowerCase();
@@ -22,15 +23,15 @@ export function envLinksPageLocation(
   const bundleSeg = resource === "bundle" ? (slug ?? name) : name;
 
   if (project_slug) {
-    const pathname =
-      resource === "bundle"
-        ? `/projects/${enc(project_slug)}/bundles/${enc(bundleSeg)}/env-links`
-        : `/projects/${enc(project_slug)}/stacks/${enc(stackSeg)}/env-links`;
-    const p = new URLSearchParams();
-    if (environment_slug != null && environment_slug !== "") {
-      p.set("env", environment_slug);
+    if (environment_slug != null && String(environment_slug).trim() !== "") {
+      const es = String(environment_slug).trim();
+      const pathname =
+        resource === "bundle"
+          ? `${projectBundlesBase(project_slug, es)}/${enc(bundleSeg)}/env-links`
+          : `${projectStacksBase(project_slug, es)}/${enc(stackSeg)}/env-links`;
+      return { pathname, search: appendHighlight(new URLSearchParams(), hl) };
     }
-    return { pathname, search: appendHighlight(p, hl) };
+    return { pathname: projectGatewayPath(project_slug), search: appendHighlight(new URLSearchParams(), hl) };
   }
 
   const pathname =

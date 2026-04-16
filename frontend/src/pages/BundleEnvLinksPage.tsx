@@ -1,36 +1,39 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import {
   createBundleEnvLink,
   deleteBundleEnvLink,
   getBundle,
   listBundleEnvLinks,
 } from "@/api/bundles";
+import { PickEnvironmentForAmbiguousResource } from "@/components/PickEnvironmentForAmbiguousResource";
 import { BundlePageShell } from "@/components/BundlePageShell";
 import { Button } from "@/components/ui";
 import { envLinkRowId, useEnvLinkRowHighlight } from "@/hooks/useEnvLinkRowHighlight";
-import { envSearchParam, resourceScopeFromNav } from "@/projectEnv";
+import { projectBundlesBase, resourceScopeFromPath, searchWithoutEnv } from "@/projectPaths";
+import { isAmbiguousBundleScopeError, resourceScopeQueryRetry } from "@/util/ambiguousScopeError";
 
 export default function BundleEnvLinksPage() {
-  const { projectSlug: projectSlugParam, bundleName = "" } = useParams<{
+  const { projectSlug: projectSlugParam, environmentSlug = "", bundleName = "" } = useParams<{
     projectSlug?: string;
+    environmentSlug?: string;
     bundleName: string;
   }>();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const envTag = envSearchParam(searchParams.get("env")) ?? "";
-  const resourceScope = resourceScopeFromNav(projectSlugParam, envTag);
+  const resourceScope = resourceScopeFromPath(projectSlugParam, environmentSlug);
   const qc = useQueryClient();
   const bq = useQuery({
-    queryKey: ["bundle", bundleName, projectSlugParam ?? "", envTag ?? ""],
+    queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug ?? ""],
     queryFn: () => getBundle(bundleName, resourceScope),
     enabled: !!bundleName && !projectSlugParam,
+    retry: resourceScopeQueryRetry,
   });
   const q = useQuery({
-    queryKey: ["bundle-env-links", bundleName, projectSlugParam ?? "", envTag ?? ""],
+    queryKey: ["bundle-env-links", bundleName, projectSlugParam ?? "", environmentSlug ?? ""],
     queryFn: () => listBundleEnvLinks(bundleName, resourceScope),
     enabled: !!bundleName,
+    retry: resourceScopeQueryRetry,
   });
   const rows = q.data ?? [];
   const { isHighlighted } = useEnvLinkRowHighlight(
@@ -64,12 +67,22 @@ export default function BundleEnvLinksPage() {
   }
   const projectSlug = projectSlugParam ?? bq.data?.project_slug ?? "";
   const subnavSlug = projectSlugParam ?? (projectSlug || undefined);
-  const editTo = projectSlug
-    ? `/projects/${encodeURIComponent(projectSlug)}/bundles/${encodeURIComponent(bundleName)}/edit`
-    : `/bundles/${encodeURIComponent(bundleName)}/edit`;
+  const editTo =
+    projectSlug && environmentSlug
+      ? `${projectBundlesBase(projectSlug, environmentSlug)}/${encodeURIComponent(bundleName)}/edit`
+      : `/bundles/${encodeURIComponent(bundleName)}/edit`;
 
   if (q.isLoading) return <p className="text-slate-400">Loading…</p>;
   if (q.isError) {
+    if (projectSlugParam && isAmbiguousBundleScopeError(q.error)) {
+      return (
+        <PickEnvironmentForAmbiguousResource
+          projectSlug={projectSlugParam}
+          kind="bundle"
+          resourceSegment={bundleName}
+        />
+      );
+    }
     return (
       <p className="text-red-400">{q.error instanceof Error ? q.error.message : "Failed"}</p>
     );
@@ -79,9 +92,10 @@ export default function BundleEnvLinksPage() {
     <BundlePageShell
       bundleName={bundleName}
       subnavSlug={subnavSlug}
-      linkSearch={location.search}
+      subnavEnvironmentSlug={environmentSlug || undefined}
+      linkSearch={searchWithoutEnv(location.search)}
       subtitle="Secret env URLs"
-      tertiaryLink={{ to: `${editTo}${location.search}`, label: "← Variables" }}
+      tertiaryLink={{ to: `${editTo}${searchWithoutEnv(location.search)}`, label: "← Variables" }}
     >
       {err ? <p className="mb-4 text-red-400">{err}</p> : null}
       {lastUrl ? (

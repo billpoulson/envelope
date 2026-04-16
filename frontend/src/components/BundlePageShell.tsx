@@ -14,7 +14,8 @@ type Props = {
   /** Optional display title in the header. */
   displayName?: string;
   subnavSlug?: string;
-  /** Appends to bundle subnav links (e.g. `location.search` for `?env=`). */
+  subnavEnvironmentSlug?: string;
+  /** Appends to bundle subnav links (e.g. `?key=`). */
   linkSearch?: string;
   subtitle: string;
   tertiaryLink?: { to: string; label: string };
@@ -32,6 +33,7 @@ export function BundlePageShell({
   bundleName,
   displayName,
   subnavSlug,
+  subnavEnvironmentSlug,
   linkSearch = "",
   subtitle,
   tertiaryLink,
@@ -61,6 +63,7 @@ export function BundlePageShell({
           <div className="shrink-0">
             <BundleSubnav
               projectSlug={subnavSlug}
+              environmentSlug={subnavEnvironmentSlug}
               bundleName={bundleName}
               variant="embedded"
               linkSearch={linkSearch}

@@ -16,7 +16,9 @@ export function formatApiDetail(detail: unknown): string {
     });
     return parts.join("; ");
   }
-  if (typeof detail === "object") {
+  if (typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
+    const o = detail as Record<string, unknown>;
+    if (typeof o.message === "string") return o.message;
     try {
       return JSON.stringify(detail);
     } catch {

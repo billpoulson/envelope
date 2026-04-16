@@ -17,6 +17,7 @@ type Props = {
   /** Optional display title in the header (defaults to stackName). */
   displayName?: string;
   subnavSlug?: string;
+  subnavEnvironmentSlug?: string;
   linkSearch?: string;
   subtitle: string;
   tertiaryLink?: StackTertiaryLink;
@@ -63,6 +64,7 @@ export function StackPageShell({
           </div>
           <StackSubnav
             projectSlug={subnavSlug}
+            environmentSlug={subnavEnvironmentSlug}
             stackName={stackName}
             variant="embedded"
             linkSearch={linkSearch}

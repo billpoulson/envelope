@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { listProjectEnvironments } from "@/api/projectEnvironments";
 import {
   deleteBundle,
@@ -14,28 +14,32 @@ import {
   upsertSecret,
   type BundlePayload,
 } from "@/api/bundles";
+import { DangerTypeConfirmModal } from "@/components/DangerTypeConfirmModal";
 import { BundlePageShell } from "@/components/BundlePageShell";
 import { BundleVarActionsMenu } from "@/components/BundleVarActionsMenu";
 import { EditNameSlugModal } from "@/components/EditNameSlugModal";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
-import { envSearchParam, keyParamFromSearch, resourceScopeFromNav } from "@/projectEnv";
+import { PickEnvironmentForAmbiguousResource } from "@/components/PickEnvironmentForAmbiguousResource";
+import { keyParamFromSearch } from "@/projectEnv";
+import { projectBundlesBase, resourceScopeFromPath, searchWithoutEnv } from "@/projectPaths";
+import { isAmbiguousBundleScopeError, resourceScopeQueryRetry } from "@/util/ambiguousScopeError";
 
 export default function BundleVariablesPage() {
-  const { projectSlug: projectSlugParam, bundleName = "" } = useParams<{
+  const { projectSlug: projectSlugParam, environmentSlug = "", bundleName = "" } = useParams<{
     projectSlug?: string;
+    environmentSlug?: string;
     bundleName: string;
   }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const envTag = envSearchParam(searchParams.get("env")) ?? "";
-  const resourceScope = resourceScopeFromNav(projectSlugParam, searchParams.get("env"));
+  const resourceScope = resourceScopeFromPath(projectSlugParam, environmentSlug);
   const qc = useQueryClient();
   const q = useQuery({
-    queryKey: ["bundle", bundleName, projectSlugParam ?? "", envTag],
+    queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug],
     queryFn: () => getBundle(bundleName, resourceScope),
     enabled: !!bundleName,
+    retry: resourceScopeQueryRetry,
   });
   const [addOpen, setAddOpen] = useState(false);
   const [newKey, setNewKey] = useState("");
@@ -45,8 +49,8 @@ export default function BundleVariablesPage() {
   const [editingKey, setEditingKey] = useState("");
   const [editVal, setEditVal] = useState("");
   const [editSecret, setEditSecret] = useState(true);
-  const [deleteConfirm, setDeleteConfirm] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [deleteBundleOpen, setDeleteBundleOpen] = useState(false);
   const [actionsMenuKey, setActionsMenuKey] = useState<string | null>(null);
   const urlKeyConsumedRef = useRef(false);
   const [displayName, setDisplayName] = useState("");
@@ -111,7 +115,7 @@ export default function BundleVariablesPage() {
         const qs = sp.toString();
         navigate(
           {
-            pathname: `/projects/${encodeURIComponent(projectSlugParam)}/bundles/${encodeURIComponent(ss)}/edit`,
+            pathname: `${projectBundlesBase(projectSlugParam, environmentSlug)}/${encodeURIComponent(ss)}/edit`,
             search: qs ? `?${qs}` : "",
           },
           { replace: true },
@@ -168,14 +172,13 @@ export default function BundleVariablesPage() {
   const delBundleM = useMutation({
     mutationFn: () => deleteBundle(bundleName, resourceScope),
     onSuccess: () => {
+      setDeleteBundleOpen(false);
       void qc.invalidateQueries({ queryKey: ["bundles"] });
       const cached = qc.getQueryData<BundlePayload>(["bundle", bundleName]);
       const ps = projectSlugParam ?? cached?.project_slug ?? null;
-      window.location.href = ps
-        ? `/projects/${encodeURIComponent(ps)}/bundles`
-        : "/bundles";
+      const es = environmentSlug;
+      window.location.href = ps && es ? projectBundlesBase(ps, es) : "/bundles";
     },
-    onError: (e: unknown) => setErr(formatApiError(e)),
   });
 
   const copyKeys = async () => {
@@ -198,28 +201,39 @@ export default function BundleVariablesPage() {
   useEffect(() => {
     if (!q.data || urlKeyConsumedRef.current) return;
     const sp = new URLSearchParams(location.search);
-    const k = keyParamFromSearch(sp, searchParams.get("env"));
+    const k = keyParamFromSearch(sp, undefined);
     urlKeyConsumedRef.current = true;
     if (!k || !(k in q.data.secrets)) return;
     openEditForKey(k, q.data);
     navigate({ pathname: location.pathname, search: "" }, { replace: true });
-  }, [q.data, bundleName, location.pathname, navigate, searchParams]);
+  }, [q.data, bundleName, location.pathname, navigate]);
 
   if (!bundleName) return <p className="text-red-400">Missing bundle name</p>;
   if (q.isLoading) return <p className="text-slate-400">Loading…</p>;
-  if (q.isError || !q.data) {
+  if (q.isError) {
+    if (projectSlugParam && isAmbiguousBundleScopeError(q.error)) {
+      return (
+        <PickEnvironmentForAmbiguousResource
+          projectSlug={projectSlugParam}
+          kind="bundle"
+          resourceSegment={bundleName}
+        />
+      );
+    }
     return (
       <p className="text-red-400">{q.error instanceof Error ? q.error.message : "Failed"}</p>
     );
+  }
+  if (!q.data) {
+    return <p className="text-red-400">Failed</p>;
   }
 
   const data = q.data;
   const envAssignmentLocked = data.project_environment_slug != null;
   const projectSlug = projectSlugParam ?? data.project_slug ?? "";
   const subnavProjectSlug = projectSlugParam ?? (projectSlug || undefined);
-  const bundlesListTo = projectSlug
-    ? `/projects/${encodeURIComponent(projectSlug)}/bundles`
-    : "/bundles";
+  const bundlesListTo =
+    projectSlug && environmentSlug ? projectBundlesBase(projectSlug, environmentSlug) : "/bundles";
   const entries = Object.entries(data.secrets).sort(([a], [b]) => a.localeCompare(b));
 
   return (
@@ -227,9 +241,10 @@ export default function BundleVariablesPage() {
       bundleName={bundleName}
       displayName={data.name}
       subnavSlug={subnavProjectSlug}
-      linkSearch={location.search}
+      subnavEnvironmentSlug={environmentSlug || undefined}
+      linkSearch={searchWithoutEnv(location.search)}
       subtitle="Variables"
-      tertiaryLink={{ to: `${bundlesListTo}${location.search}`, label: "← Bundles" }}
+      tertiaryLink={{ to: `${bundlesListTo}${searchWithoutEnv(location.search)}`, label: "← Bundles" }}
       titleAccessory={
         <button
           type="button"
@@ -264,10 +279,9 @@ export default function BundleVariablesPage() {
             disabled={envsQ.isLoading || patchEnvM.isPending}
             onChange={(e) => {
               const v = e.target.value;
-              patchEnvM.mutate(v === "" ? null : v);
+              if (v) patchEnvM.mutate(v);
             }}
           >
-            <option value="">Unassigned</option>
             {(envsQ.data ?? []).map((row) => (
               <option key={row.id} value={row.slug}>
                 {row.name}
@@ -314,7 +328,7 @@ export default function BundleVariablesPage() {
                       onEncrypt={() =>
                         encryptSecret(bundleName, k, resourceScope).then(() =>
                           qc.invalidateQueries({
-                            queryKey: ["bundle", bundleName, projectSlugParam ?? "", envTag ?? ""],
+                            queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug ?? ""],
                           }),
                         )
                       }
@@ -326,7 +340,7 @@ export default function BundleVariablesPage() {
                         ) {
                           return declassifySecret(bundleName, k, resourceScope).then(() =>
                             qc.invalidateQueries({
-                              queryKey: ["bundle", bundleName, projectSlugParam ?? "", envTag ?? ""],
+                              queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug ?? ""],
                             }),
                           );
                         }
@@ -335,7 +349,7 @@ export default function BundleVariablesPage() {
                         if (confirm(`Remove ${k} from this bundle?\n\nThis cannot be undone.`)) {
                           return deleteSecret(bundleName, k, resourceScope).then(() =>
                             qc.invalidateQueries({
-                              queryKey: ["bundle", bundleName, projectSlugParam ?? "", envTag ?? ""],
+                              queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug ?? ""],
                             }),
                           );
                         }
@@ -452,29 +466,62 @@ export default function BundleVariablesPage() {
         </div>
       ) : null}
 
-      <div className="mt-10 border-t border-border/60 pt-6">
-        <h2 className="mb-2 text-lg text-red-300">Danger zone</h2>
-        <p className="mb-2 text-sm text-slate-400">
-          Type the bundle name <span className="font-mono">{bundleName}</span> to delete.
+      <div className="mt-10 rounded-lg border border-red-900/50 bg-red-950/[0.12] p-5">
+        <h2 className="text-sm font-semibold text-red-300">Danger zone</h2>
+        <p className="mt-1 max-w-xl text-xs text-slate-500">
+          Deleting a bundle removes all of its variables. Stacks or envs that reference this bundle may break until you
+          fix their layers.
         </p>
-        <input
-          className="mb-2 w-full max-w-xs rounded border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm"
-          value={deleteConfirm}
-          onChange={(e) => setDeleteConfirm(e.target.value)}
-          placeholder={bundleName}
-        />
-        <div>
-          <Button
-            type="button"
-            variant="secondary"
-            className="border-red-900 text-red-300"
-            disabled={deleteConfirm !== bundleName || delBundleM.isPending}
-            onClick={() => delBundleM.mutate()}
-          >
-            Delete bundle
-          </Button>
-        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          className="mt-4 border-red-900/40 text-red-300 hover:bg-red-950/30"
+          onClick={() => {
+            delBundleM.reset();
+            setDeleteBundleOpen(true);
+          }}
+        >
+          Delete bundle…
+        </Button>
       </div>
+
+      <DangerTypeConfirmModal
+        open={deleteBundleOpen}
+        onClose={() => {
+          if (delBundleM.isPending) return;
+          setDeleteBundleOpen(false);
+          delBundleM.reset();
+        }}
+        title="Delete this bundle?"
+        description={
+          <>
+            This removes every variable in this bundle. Other stacks or environments that still reference it will be
+            affected until you update them.
+            <span className="mt-2 block font-mono text-xs text-slate-500">
+              URL segment: {bundleName}
+              {data.slug && data.slug !== data.name ? (
+                <>
+                  {" "}
+                  · slug: <span className="text-slate-400">{data.slug}</span>
+                </>
+              ) : null}
+            </span>
+          </>
+        }
+        confirmationPhrase={data.name}
+        typeFieldLabel="Type the bundle display name to confirm:"
+        typeFieldHint="Display name"
+        confirmButtonLabel="Delete bundle"
+        pending={delBundleM.isPending}
+        error={delBundleM.isError ? formatApiError(delBundleM.error) : null}
+        onConfirm={async () => {
+          try {
+            await delBundleM.mutateAsync();
+          } catch {
+            /* Error shown via delBundleM */
+          }
+        }}
+      />
     </BundlePageShell>
   );
 }

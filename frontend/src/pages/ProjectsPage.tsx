@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Globe, Layers, Package, Settings } from "lucide-react";
 import { Link } from "react-router-dom";
 import { listProjects } from "@/api/projects";
+import { projectGatewayPath } from "@/projectPaths";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 
@@ -68,7 +69,7 @@ export default function ProjectsPage() {
       ) : (
         <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {rows.map((p) => {
-            const base = `/projects/${encodeURIComponent(p.slug)}`;
+            const gateway = projectGatewayPath(p.slug);
             return (
               <li key={p.id}>
                 <article
@@ -78,7 +79,7 @@ export default function ProjectsPage() {
                     <div className="min-w-0 flex-1">
                       <h2 className="text-lg font-semibold leading-tight tracking-tight text-slate-100">
                         <Link
-                          to={`${base}/bundles`}
+                          to={gateway}
                           className="transition hover:text-accent focus:outline-none focus-visible:text-accent focus-visible:underline"
                         >
                           {p.name}
@@ -106,19 +107,19 @@ export default function ProjectsPage() {
                     className="mt-5 flex flex-wrap gap-x-5 gap-y-2 border-t border-border/45 pt-4"
                     aria-label={`Quick links for ${p.name}`}
                   >
-                    <Link to={`${base}/environments`} className={navLinkClass}>
+                    <Link to={`/projects/${encodeURIComponent(p.slug)}/environments`} className={navLinkClass}>
                       <Globe className={navIconClass} aria-hidden />
                       Environments
                     </Link>
-                    <Link to={`${base}/bundles`} className={navLinkClass}>
+                    <Link to={gateway} className={navLinkClass}>
                       <Package className={navIconClass} aria-hidden />
                       Bundles
                     </Link>
-                    <Link to={`${base}/stacks`} className={navLinkClass}>
+                    <Link to={gateway} className={navLinkClass}>
                       <Layers className={navIconClass} aria-hidden />
                       Stacks
                     </Link>
-                    <Link to={`${base}/settings`} className={navLinkClass}>
+                    <Link to={`/projects/${encodeURIComponent(p.slug)}/settings`} className={navLinkClass}>
                       <Settings className={navIconClass} aria-hidden />
                       Settings
                     </Link>

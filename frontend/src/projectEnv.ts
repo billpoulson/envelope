@@ -1,14 +1,10 @@
 import type { ResourceScopeOpts } from "@/api/bundles";
 
-/** Matches backend `UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL` — list filter for resources with no environment. */
-export const UNASSIGNED_ENV_SLUG = "__unassigned__";
-
 /**
- * Normalizes `env` from the location search string.
- * Malformed links sometimes use `?env=__unassigned__?key=foo` instead of `?env=__unassigned__&key=foo`,
- * which puts `__unassigned__?key=foo` in the `env` param — strip anything after the first `?`.
+ * Normalizes a path or query segment (legacy `?env=`).
+ * Malformed links sometimes embed `?key=` inside the value — strip anything after the first `?`.
  */
-export function envSearchParam(env: string | null | undefined): string | undefined {
+export function envSegmentParam(env: string | null | undefined): string | undefined {
   if (env == null) return undefined;
   let s = env.trim();
   if (!s) return undefined;
@@ -18,8 +14,7 @@ export function envSearchParam(env: string | null | undefined): string | undefin
 }
 
 /**
- * Reads `key` from search params, or from a malformed `env` value that embedded `?key=...`
- * (see {@link envSearchParam}).
+ * Reads `key` from search params, or from a malformed legacy `env` value that embedded `?key=...`.
  */
 export function keyParamFromSearch(
   searchParams: URLSearchParams,
@@ -40,68 +35,45 @@ export function keyParamFromSearch(
   }
 }
 
-/** API query params to disambiguate duplicate bundle/stack names (use with project routes + `?env=`). */
+/** @deprecated use {@link resourceScopeFromPath} from `@/projectPaths` */
 export function resourceScopeFromNav(
   projectSlug: string | undefined,
   envFromSearch: string | null | undefined,
 ): ResourceScopeOpts | undefined {
   if (!projectSlug?.trim()) return undefined;
-  const e = envSearchParam(envFromSearch);
+  const e = envSegmentParam(envFromSearch);
   return { projectSlug: projectSlug.trim(), ...(e ? { environmentSlug: e } : {}) };
 }
 
-/** Resolve a bundle row for API calls from its environment slug (null → unassigned sentinel). */
+/** Resolve bundle row scope for API — requires an environment slug. */
 export function bundleScopeForApi(
   projectSlug: string | undefined,
   bundleEnvironmentSlug: string | null | undefined,
 ): ResourceScopeOpts | undefined {
   if (!projectSlug?.trim()) return undefined;
+  if (bundleEnvironmentSlug == null || String(bundleEnvironmentSlug).trim() === "") return undefined;
   return {
     projectSlug: projectSlug.trim(),
-    environmentSlug:
-      bundleEnvironmentSlug != null && String(bundleEnvironmentSlug).trim() !== ""
-        ? String(bundleEnvironmentSlug).trim()
-        : UNASSIGNED_ENV_SLUG,
+    environmentSlug: String(bundleEnvironmentSlug).trim(),
   };
 }
 
-/**
- * Slug to send as `project_environment_slug` when creating a bundle/stack from the SPA.
- * Undefined when the nav filter is “All” or “Unassigned” — creation must pick a concrete environment.
- */
-export function environmentSlugForCreate(envFromUrl: string | null | undefined): string | undefined {
-  const s = envSearchParam(envFromUrl);
-  if (!s || s === UNASSIGNED_ENV_SLUG) return undefined;
-  return s;
+/** Slug for `project_environment_slug` when creating a bundle/stack (must be set in workspace routes). */
+export function environmentSlugForCreate(envSlug: string | null | undefined): string | undefined {
+  const s = envSegmentParam(envSlug);
+  return s || undefined;
 }
 
-/** True when `environmentSlugForCreate` would return a concrete environment (create allowed). */
-export function hasEnvironmentSlugForCreate(envFromUrl: string | null | undefined): boolean {
-  return environmentSlugForCreate(envFromUrl) !== undefined;
+export function hasEnvironmentSlugForCreate(envSlug: string | null | undefined): boolean {
+  return environmentSlugForCreate(envSlug) !== undefined;
 }
 
-/**
- * Query options for project bundle/stack list APIs when the nav environment filter is active.
- * - No `env` → no filter (show all in project).
- * - `__unassigned__` → only unassigned resources.
- * - Named env → only rows tagged with that environment (strict; excludes unassigned “shared” rows).
- */
-export function environmentListApiOpts(envFromUrl: string | null | undefined): {
+/** List APIs for the current environment scope (strict; no unassigned rows). */
+export function environmentListApiOpts(environmentSlug: string | undefined): {
   environmentSlug?: string;
   includeUnassigned?: boolean;
 } {
-  const s = envSearchParam(envFromUrl);
+  const s = envSegmentParam(environmentSlug);
   if (!s) return {};
-  if (s === UNASSIGNED_ENV_SLUG) return { environmentSlug: s };
   return { environmentSlug: s, includeUnassigned: false };
-}
-
-/** Label for list-row chips from API `project_environment_*` fields. */
-export function environmentChipLabel(row: {
-  project_environment_slug: string | null;
-  project_environment_name: string | null;
-}): string {
-  if (row.project_environment_slug == null) return "Unassigned";
-  const n = row.project_environment_name?.trim();
-  return n || row.project_environment_slug;
 }

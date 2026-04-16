@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import {
   createStackEnvLink,
   deleteStackEnvLink,
@@ -8,30 +8,33 @@ import {
   listStackEnvLinks,
 } from "@/api/stacks";
 import { envLinkRowId, useEnvLinkRowHighlight } from "@/hooks/useEnvLinkRowHighlight";
+import { PickEnvironmentForAmbiguousResource } from "@/components/PickEnvironmentForAmbiguousResource";
 import { StackPageShell } from "@/components/StackPageShell";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
-import { envSearchParam, resourceScopeFromNav } from "@/projectEnv";
+import { isAmbiguousStackScopeError, resourceScopeQueryRetry } from "@/util/ambiguousScopeError";
+import { projectStacksBase, resourceScopeFromPath, searchWithoutEnv } from "@/projectPaths";
 
 export default function StackEnvLinksPage() {
-  const { projectSlug: projectSlugParam, stackName = "" } = useParams<{
+  const { projectSlug: projectSlugParam, environmentSlug = "", stackName = "" } = useParams<{
     projectSlug?: string;
+    environmentSlug?: string;
     stackName: string;
   }>();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const envTag = envSearchParam(searchParams.get("env")) ?? "";
-  const resourceScope = resourceScopeFromNav(projectSlugParam, envTag);
+  const resourceScope = resourceScopeFromPath(projectSlugParam, environmentSlug);
   const qc = useQueryClient();
   const stackQ = useQuery({
-    queryKey: ["stack", stackName, projectSlugParam ?? "", envTag ?? ""],
+    queryKey: ["stack", stackName, projectSlugParam ?? "", environmentSlug],
     queryFn: () => getStack(stackName, resourceScope),
     enabled: !!stackName,
+    retry: resourceScopeQueryRetry,
   });
   const q = useQuery({
-    queryKey: ["stack-env-links", stackName, projectSlugParam ?? "", envTag ?? ""],
+    queryKey: ["stack-env-links", stackName, projectSlugParam ?? "", environmentSlug],
     queryFn: () => listStackEnvLinks(stackName, resourceScope),
-    enabled: !!stackName,
+    enabled: !!stackName && stackQ.isSuccess,
+    retry: resourceScopeQueryRetry,
   });
   const linkRowsForHighlight = q.data ?? [];
   const { isHighlighted } = useEnvLinkRowHighlight(
@@ -69,15 +72,25 @@ export default function StackEnvLinksPage() {
   if (!stackName) return <p className="text-red-400">Missing stack</p>;
   if (stackQ.isLoading) return <p className="text-slate-400">Loading…</p>;
   if (stackQ.isError) {
+    if (projectSlugParam && isAmbiguousStackScopeError(stackQ.error)) {
+      return (
+        <PickEnvironmentForAmbiguousResource
+          projectSlug={projectSlugParam}
+          kind="stack"
+          resourceSegment={stackName}
+        />
+      );
+    }
     return (
       <p className="text-red-400">{stackQ.error instanceof Error ? stackQ.error.message : "Failed"}</p>
     );
   }
   const projectSlug = projectSlugParam ?? stackQ.data?.project_slug ?? "";
   const subnavSlug = projectSlugParam ?? (projectSlug || undefined);
-  const editTo = projectSlug
-    ? `/projects/${encodeURIComponent(projectSlug)}/stacks/${encodeURIComponent(stackName)}/edit`
-    : `/stacks/${encodeURIComponent(stackName)}/edit`;
+  const editTo =
+    projectSlug && environmentSlug
+      ? `${projectStacksBase(projectSlug, environmentSlug)}/${encodeURIComponent(stackName)}/edit`
+      : `/stacks/${encodeURIComponent(stackName)}/edit`;
 
   if (q.isLoading) return <p className="text-slate-400">Loading…</p>;
   if (q.isError) {
@@ -104,9 +117,10 @@ export default function StackEnvLinksPage() {
       stackName={stackName}
       displayName={stackQ.data?.name}
       subnavSlug={subnavSlug}
-      linkSearch={location.search}
+      subnavEnvironmentSlug={environmentSlug}
+      linkSearch={searchWithoutEnv(location.search)}
       subtitle="Secret env URLs"
-      tertiaryLink={{ to: `${editTo}${location.search}`, label: "← Edit stack layers" }}
+      tertiaryLink={{ to: `${editTo}${searchWithoutEnv(location.search)}`, label: "← Edit stack layers" }}
       fullBleed
     >
       <h2 className="mb-2 text-lg font-medium text-white">Secret env URL</h2>

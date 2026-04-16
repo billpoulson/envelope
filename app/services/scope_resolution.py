@@ -8,20 +8,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import Bundle, BundleStack
-from app.services.project_environments import UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL
 from app.services.projects import get_project_by_slug_or_404
+
+# Stable identifiers for API clients (SPA, CLI) — pair with HTTP 400.
+AMBIGUOUS_BUNDLE_SCOPE_CODE = "ambiguous_bundle_scope"
+AMBIGUOUS_STACK_SCOPE_CODE = "ambiguous_stack_scope"
 
 
 def _bundle_matches_env_slug(b: Bundle, environment_slug: str) -> bool:
-    if environment_slug == UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL:
-        return b.project_environment_id is None
     pe = b.project_environment
     return pe is not None and pe.slug == environment_slug
 
 
 def _stack_matches_env_slug(s: BundleStack, environment_slug: str) -> bool:
-    if environment_slug == UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL:
-        return s.project_environment_id is None
     pe = s.project_environment
     return pe is not None and pe.slug == environment_slug
 
@@ -57,8 +56,7 @@ async def fetch_bundle_for_path(
     else:
         scoped = rows
 
-    # Single row in this project: name is unambiguous; ignore environment_slug mismatches so
-    # clients (e.g. nav ?env=__unassigned__) still resolve when the row is tagged differently.
+    # Single row in this project: name is unambiguous.
     if len(scoped) == 1:
         return scoped[0]
 
@@ -66,17 +64,23 @@ async def fetch_bundle_for_path(
     if not es:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Multiple bundles share this name; add query parameters project_slug and environment_slug "
-                f"(use {UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL!r} for bundles without an environment)."
-            ),
+            detail={
+                "code": AMBIGUOUS_BUNDLE_SCOPE_CODE,
+                "message": (
+                    "Multiple bundles share this name; add query parameters project_slug and "
+                    "environment_slug to select one."
+                ),
+            },
         )
     if g_id is None:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Multiple bundles share this name; add project_slug and environment_slug to select one."
-            ),
+            detail={
+                "code": AMBIGUOUS_BUNDLE_SCOPE_CODE,
+                "message": (
+                    "Multiple bundles share this name; add project_slug and environment_slug to select one."
+                ),
+            },
         )
     for b in scoped:
         if _bundle_matches_env_slug(b, es):
@@ -122,17 +126,23 @@ async def fetch_stack_for_path(
     if not es:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Multiple stacks share this name; add query parameters project_slug and environment_slug "
-                f"(use {UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL!r} for stacks without an environment)."
-            ),
+            detail={
+                "code": AMBIGUOUS_STACK_SCOPE_CODE,
+                "message": (
+                    "Multiple stacks share this name; add query parameters project_slug and "
+                    "environment_slug to select one."
+                ),
+            },
         )
     if g_id is None:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Multiple stacks share this name; add project_slug and environment_slug to select one."
-            ),
+            detail={
+                "code": AMBIGUOUS_STACK_SCOPE_CODE,
+                "message": (
+                    "Multiple stacks share this name; add project_slug and environment_slug to select one."
+                ),
+            },
         )
     for s in scoped:
         if _stack_matches_env_slug(s, es):

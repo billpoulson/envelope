@@ -7,12 +7,11 @@ import {
   useLocation,
   useMatch,
   useNavigate,
-  useSearchParams,
 } from "react-router-dom";
 import { fetchCsrf, logout } from "@/api/auth";
 import { listProjectEnvironments } from "@/api/projectEnvironments";
 import { listProjects } from "@/api/projects";
-import { envSearchParam, UNASSIGNED_ENV_SLUG } from "@/projectEnv";
+import { projectBundlesBase, projectGatewayPath, projectStacksBase } from "@/projectPaths";
 
 const linkBase =
   "rounded-md px-2 py-1 text-sm transition hover:bg-white/5 hover:text-slate-200";
@@ -35,6 +34,9 @@ export function Layout() {
   const projectMatch = useMatch({ path: "/projects/:projectSlug/*", end: false });
   const rawSlug = projectMatch?.params.projectSlug;
   const projectSlug = rawSlug && rawSlug !== "new" ? rawSlug : undefined;
+
+  const envWorkspaceMatch = useMatch({ path: "/projects/:projectSlug/env/:environmentSlug/*", end: false });
+  const environmentSlug = envWorkspaceMatch?.params.environmentSlug;
 
   const onAdminPage =
     pathname === "/backup" ||
@@ -78,20 +80,24 @@ export function Layout() {
     queryFn: listProjects,
     enabled: !!projectSlug,
   });
-  const projectLabel =
+  const projectDisplayName =
     projectSlug &&
     (projectsQ.data?.find((p) => p.slug === projectSlug)?.name ?? projectSlug);
-
-  const [searchParams, setSearchParams] = useSearchParams();
-  const location = useLocation();
-  const projectSearch = projectSlug ? location.search : "";
-  const envParam = envSearchParam(searchParams.get("env")) ?? "";
 
   const environmentsQ = useQuery({
     queryKey: ["project-environments", projectSlug],
     queryFn: () => listProjectEnvironments(projectSlug!),
     enabled: !!projectSlug,
   });
+
+  const environmentDisplayName =
+    environmentSlug &&
+    (environmentsQ.data?.find((e) => e.slug === environmentSlug)?.name ?? environmentSlug);
+
+  const projectNavLabel =
+    projectDisplayName && environmentSlug && environmentDisplayName
+      ? `${projectDisplayName}@${environmentDisplayName}`
+      : projectDisplayName;
 
   async function handleLogout() {
     const csrf = await fetchCsrf();
@@ -213,87 +219,40 @@ export function Layout() {
 
           {projectSlug ? (
             <nav
-              className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border/40 py-2 text-sm"
+              className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border/40 py-2 text-sm"
               aria-label="Project"
             >
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <Link
-                  to="/projects"
-                  className="font-medium text-accent hover:underline"
-                  title="Projects — switch or open another project"
+                  to={environmentSlug ? projectGatewayPath(projectSlug) : "/projects"}
+                  className="min-w-0 truncate font-medium text-accent hover:underline"
+                  title={
+                    environmentSlug
+                      ? "Project dashboard — pick another environment or open settings"
+                      : "All projects"
+                  }
                 >
-                  {projectLabel}
+                  {projectNavLabel}
                 </Link>
-                <span className="text-slate-600" aria-hidden="true">
-                  |
-                </span>
-                <NavLink
-                  to={{
-                    pathname: `/projects/${encodeURIComponent(projectSlug)}/environments`,
-                    search: projectSearch,
-                  }}
-                  className={({ isActive }) => navLinkClass(isActive)}
-                >
-                  Environments
-                </NavLink>
-                <NavLink
-                  to={{
-                    pathname: `/projects/${encodeURIComponent(projectSlug)}/bundles`,
-                    search: projectSearch,
-                  }}
-                  className={({ isActive }) => navLinkClass(isActive)}
-                >
-                  Bundles
-                </NavLink>
-                <NavLink
-                  to={{
-                    pathname: `/projects/${encodeURIComponent(projectSlug)}/stacks`,
-                    search: projectSearch,
-                  }}
-                  className={({ isActive }) => navLinkClass(isActive)}
-                >
-                  Stacks
-                </NavLink>
-                <NavLink
-                  to={{
-                    pathname: `/projects/${encodeURIComponent(projectSlug)}/settings`,
-                    search: projectSearch,
-                  }}
-                  className={({ isActive }) => navLinkClass(isActive)}
-                >
-                  Settings
-                </NavLink>
-              </div>
-              <div className="flex w-full min-w-0 items-center justify-end gap-2 sm:w-auto sm:shrink-0">
-                <label htmlFor="project-env-filter" className="shrink-0 text-slate-500">
-                  Environment
-                </label>
-                <select
-                  id="project-env-filter"
-                  className="max-w-[min(14rem,calc(100vw-12rem))] rounded-md border border-border/80 bg-[#0b0f14] px-2 py-1 text-sm text-slate-200 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-                  value={envParam}
-                  disabled={environmentsQ.isLoading}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setSearchParams(
-                      (prev) => {
-                        const next = new URLSearchParams(prev);
-                        if (!v) next.delete("env");
-                        else next.set("env", v);
-                        return next;
-                      },
-                      { replace: true },
-                    );
-                  }}
-                >
-                  <option value="">All environments</option>
-                  <option value={UNASSIGNED_ENV_SLUG}>Unassigned</option>
-                  {(environmentsQ.data ?? []).map((row) => (
-                    <option key={row.id} value={row.slug}>
-                      {row.name}
-                    </option>
-                  ))}
-                </select>
+                {environmentSlug ? (
+                  <>
+                    <span className="text-slate-600" aria-hidden="true">
+                      |
+                    </span>
+                    <NavLink
+                      to={projectBundlesBase(projectSlug, environmentSlug)}
+                      className={({ isActive }) => navLinkClass(isActive)}
+                    >
+                      Bundles
+                    </NavLink>
+                    <NavLink
+                      to={projectStacksBase(projectSlug, environmentSlug)}
+                      className={({ isActive }) => navLinkClass(isActive)}
+                    >
+                      Stacks
+                    </NavLink>
+                  </>
+                ) : null}
               </div>
             </nav>
           ) : null}

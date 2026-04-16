@@ -403,6 +403,106 @@ def _migrate_sqlite_bundles_slug(sync_conn) -> None:
     )
 
 
+def _migrate_sqlite_assign_environment_to_unassigned_bundles_stacks(sync_conn) -> None:
+    """Assign project environments to bundles/stacks that were never tagged.
+
+    Must not violate ``uq_*_scoped_group_slug_env``: same (group, slug) cannot appear twice in one env.
+    A naive bulk UPDATE to the first environment can duplicate slug rows and crash startup.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    if "project_environments" not in insp.get_table_names():
+        return
+
+    def _assign_rows(
+        table: str,
+        *,
+        slug_col: str,
+    ) -> None:
+        if table not in insp.get_table_names():
+            return
+        r = sync_conn.execute(
+            text(
+                f"SELECT id, group_id, {slug_col}, name FROM {table} "
+                "WHERE project_environment_id IS NULL AND group_id IS NOT NULL "
+                "ORDER BY id"
+            )
+        )
+        rows = r.fetchall()
+        for bid, gid, slug_raw, _name in rows:
+            slug_val = (slug_raw or "").strip()
+            env_rows = sync_conn.execute(
+                text(
+                    "SELECT id FROM project_environments WHERE group_id = :gid "
+                    "ORDER BY sort_order ASC, id ASC"
+                ),
+                {"gid": gid},
+            ).fetchall()
+            if not env_rows:
+                continue
+
+            # Partial unique index only applies when slug != '' — multiple empty slugs per env OK.
+            if not slug_val:
+                pe_id = env_rows[0][0]
+                sync_conn.execute(
+                    text(
+                        f"UPDATE {table} SET project_environment_id = :peid WHERE id = :bid"
+                    ),
+                    {"peid": pe_id, "bid": bid},
+                )
+                continue
+
+            assigned = False
+            for (pe_id,) in env_rows:
+                conflict = sync_conn.execute(
+                    text(
+                        f"SELECT 1 FROM {table} WHERE group_id = :gid AND {slug_col} = :slug "
+                        "AND project_environment_id = :peid AND id != :bid LIMIT 1"
+                    ),
+                    {"gid": gid, "slug": slug_val, "peid": pe_id, "bid": bid},
+                ).scalar()
+                if conflict is None:
+                    sync_conn.execute(
+                        text(
+                            f"UPDATE {table} SET project_environment_id = :peid WHERE id = :bid"
+                        ),
+                        {"peid": pe_id, "bid": bid},
+                    )
+                    assigned = True
+                    break
+
+            if assigned:
+                continue
+
+            # Same slug already occupies every environment — disambiguate slug, then use first env.
+            pe_first = env_rows[0][0]
+            base = slug_val[:100]
+            n = 2
+            while n < 10000:
+                cand = f"{base}-m{n}"[:128]
+                conflict = sync_conn.execute(
+                    text(
+                        f"SELECT 1 FROM {table} WHERE group_id = :gid AND {slug_col} = :cand "
+                        "AND project_environment_id = :peid LIMIT 1"
+                    ),
+                    {"gid": gid, "cand": cand, "peid": pe_first},
+                ).scalar()
+                if conflict is None:
+                    sync_conn.execute(
+                        text(
+                            f"UPDATE {table} SET {slug_col} = :cand, project_environment_id = :peid "
+                            "WHERE id = :bid"
+                        ),
+                        {"cand": cand, "peid": pe_first, "bid": bid},
+                    )
+                    break
+                n += 1
+
+    _assign_rows("bundles", slug_col="slug")
+    _assign_rows("bundle_stacks", slug_col="slug")
+
+
 def _migrate_cleanup_orphan_bundle_stack_layers(sync_conn) -> None:
     """Remove stack layer rows whose bundle no longer exists (legacy rows if FK cascade did not run)."""
     from sqlalchemy import inspect, text
@@ -432,6 +532,7 @@ async def init_db() -> None:
             await conn.run_sync(_migrate_sqlite_bundle_stack_layer_keys)
             await conn.run_sync(_migrate_sqlite_stack_env_links_slice)
             await conn.run_sync(_migrate_sqlite_bundles_stacks_project_environment)
+            await conn.run_sync(_migrate_sqlite_assign_environment_to_unassigned_bundles_stacks)
             await conn.run_sync(_migrate_sqlite_bundles_stacks_scoped_names)
             await conn.run_sync(_migrate_sqlite_bundle_stacks_slug)
             await conn.run_sync(_migrate_sqlite_bundles_slug)

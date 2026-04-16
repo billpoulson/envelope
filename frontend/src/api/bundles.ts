@@ -4,7 +4,7 @@ import { fetchCsrf } from "./auth";
 /** Matches backend disambiguation for duplicate bundle/stack names per environment. */
 export type ResourceScopeOpts = {
   projectSlug?: string;
-  /** Same as SPA `?env=` (including `__unassigned__`). */
+  /** Project environment slug (matches admin UI env-in-path routes). */
   environmentSlug?: string | null;
 };
 
@@ -24,7 +24,7 @@ export type ImportKind = "skip" | "json_object" | "json_array" | "csv_quoted" | 
 
 export type ListBundlesOptions = {
   environmentSlug?: string;
-  /** Default true: with a concrete environment, also include bundles not assigned to any environment. */
+  /** When false, asks the API to exclude legacy unassigned rows (deprecated server-side). */
   includeUnassigned?: boolean;
 };
 
