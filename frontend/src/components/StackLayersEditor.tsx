@@ -29,6 +29,15 @@ export type LayerEditorState = {
   aliasRows: { target: string; source: string }[];
 };
 
+/** Heading shown in the layer card when the optional label is blank: use bundle name, then a generic fallback. */
+function layerHeadingLabel(label: string, bundle: string, index: number): string {
+  const l = (label || "").trim();
+  if (l) return l;
+  const b = (bundle || "").trim();
+  if (b) return b;
+  return `Layer ${index + 1}`;
+}
+
 function stackLayerToEditor(l: StackLayer): LayerEditorState {
   const label = typeof l.label === "string" ? l.label : "";
   const aliasRows: { target: string; source: string }[] = [];
@@ -345,9 +354,8 @@ export function StackLayersEditor({
       </p>
       {layers.map((layer, index) => {
         const rowBundleOpts = bundleNamesForLayerSelect(opts, layers, index);
-        const badge =
-          (layer.label || "").trim() ||
-          `Layer ${index + 1}`;
+        const badge = layerHeadingLabel(layer.label, layer.bundle, index);
+        const hasCustomLabel = !!(layer.label || "").trim();
         const kd = keyData[index];
         const pickKeys =
           kd && kd !== "loading" && kd !== "error" ? kd.keys : [];
@@ -415,7 +423,7 @@ export function StackLayersEditor({
                         ? "Top — wins on duplicate keys"
                         : "Middle"}
                   </span>
-                  {!isExpanded && layer.bundle.trim() ? (
+                  {!isExpanded && layer.bundle.trim() && hasCustomLabel ? (
                     <span className="ml-2 truncate font-mono text-xs text-slate-400" title={layer.bundle}>
                       · {layer.bundle}
                     </span>
@@ -472,7 +480,7 @@ export function StackLayersEditor({
                 className="w-full max-w-lg rounded border border-border bg-[#121820] px-3 py-2 text-sm"
                 value={layer.label}
                 onChange={(e) => updateLayer(index, { label: e.target.value })}
-                placeholder="Shown in the UI; underlying bundle is unchanged"
+                placeholder="Optional; when empty, the bundle name is shown"
               />
             </div>
 
