@@ -1014,5 +1014,56 @@ class StackKeyGraphApiTests(unittest.TestCase):
         self.assertEqual(oidc["cells_alias_source"], [None, None])
 
 
+class OidcAuthApiTests(unittest.TestCase):
+    """OIDC app settings, login-options, and callback redirect."""
+
+    _token = "tfstate-http-test-admin-key"
+
+    def test_login_options_default(self) -> None:
+        with TestClient(app) as client:
+            r = client.get("/api/v1/auth/login-options")
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertFalse(r.json()["oidc_available"])
+
+    def test_oidc_settings_requires_auth(self) -> None:
+        with TestClient(app) as client:
+            r = client.get("/api/v1/settings/oidc")
+            self.assertEqual(r.status_code, 401, r.text)
+
+    def test_oidc_settings_patch_and_login_options(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        body = {
+            "enabled": True,
+            "issuer": "https://example-tenant.example.com/oauth2/default",
+            "client_id": "test-client-id",
+            "client_secret": "test-client-secret",
+            "scopes": "openid email profile",
+            "proxy_admin_key_id": 1,
+            "post_login_path": "/projects",
+        }
+        with TestClient(app) as client:
+            r = client.patch("/api/v1/settings/oidc", json=body, headers=h)
+            self.assertEqual(r.status_code, 200, r.text)
+            j = r.json()
+            self.assertTrue(j["enabled"])
+            self.assertTrue(j["client_secret_configured"])
+            self.assertTrue(j["oidc_login_ready"])
+            self.assertIn("suggested_callback_url", j)
+            self.assertIn("/api/v1/auth/oidc/callback", j["suggested_callback_url"])
+            r2 = client.get("/api/v1/auth/login-options")
+            self.assertEqual(r2.status_code, 200, r2.text)
+            self.assertTrue(r2.json()["oidc_available"])
+
+    def test_oidc_callback_without_session_redirects(self) -> None:
+        with TestClient(app) as client:
+            r = client.get(
+                "/api/v1/auth/oidc/callback",
+                params={"code": "x", "state": "y"},
+                follow_redirects=False,
+            )
+            self.assertEqual(r.status_code, 302, r.text)
+            self.assertIn("/login?oidc_error=1", r.headers.get("location", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

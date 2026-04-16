@@ -26,6 +26,17 @@ class Settings(BaseSettings):
     # Terraform HTTP remote state API (/tfstate/...). See docs/terraform-http-remote-state.md
     pulumi_state_enabled: bool = True
 
+    # OIDC (browser admin only). Used when no `oidc_app_settings` row exists; otherwise DB wins.
+    oidc_enabled: bool = False
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_proxy_admin_key_id: int | None = None
+    oidc_scopes: str = "openid email profile"
+    oidc_allowed_email_domains: str = ""
+    oidc_post_login_path: str = "/projects"
+    oidc_redirect_uri_override: str = ""
+
     @field_validator("root_path", mode="before")
     @classmethod
     def _normalize_root_path(cls, v: object) -> str:

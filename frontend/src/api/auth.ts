@@ -25,3 +25,7 @@ export async function logout(csrf: string): Promise<void> {
 export async function sessionInfo(): Promise<{ admin: boolean }> {
   return apiFetch("/auth/session", { method: "GET" });
 }
+
+export async function loginOptions(): Promise<{ oidc_available: boolean }> {
+  return apiFetch("/auth/login-options", { method: "GET" });
+}

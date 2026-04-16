@@ -41,6 +41,7 @@ export function Layout() {
   const onAdminPage =
     pathname === "/backup" ||
     pathname === "/keys" ||
+    pathname === "/settings" ||
     pathname === "/certificates" ||
     pathname.startsWith("/tools/");
   /** Match classic UI: Projects stays highlighted for any project subtree and global bundle/stack lists. */
@@ -182,6 +183,16 @@ export function Layout() {
                       onClick={() => setAdminOpen(false)}
                     >
                       API keys
+                    </NavLink>
+                    <NavLink
+                      to="/settings"
+                      role="menuitem"
+                      className={({ isActive }) =>
+                        `block px-3 py-2 text-sm ${isActive ? "bg-white/10 text-white" : "text-slate-300 hover:bg-white/5"}`
+                      }
+                      onClick={() => setAdminOpen(false)}
+                    >
+                      App settings
                     </NavLink>
                     <NavLink
                       to="/certificates"

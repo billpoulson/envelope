@@ -300,6 +300,25 @@ class PulumiStateLock(Base):
     )
 
 
+class OidcAppSettings(Base):
+    """Singleton row (id=1): OIDC / OAuth2 settings for the browser admin UI."""
+
+    __tablename__ = "oidc_app_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    issuer: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    client_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    client_secret_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    scopes: Mapped[str] = mapped_column(String(512), default="openid email profile")
+    allowed_email_domains: Mapped[str | None] = mapped_column(Text, nullable=True)
+    post_login_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    proxy_admin_key_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True
+    )
+    redirect_uri_override: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+
 class ApiKey(Base):
     __tablename__ = "api_keys"
 

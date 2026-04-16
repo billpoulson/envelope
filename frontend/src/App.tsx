@@ -14,6 +14,7 @@ import EnvLinkHashPage from "@/pages/EnvLinkHashPage";
 import { PublicDocsLayout } from "@/components/PublicDocsLayout";
 import HelpPage from "@/pages/HelpPage";
 import TutorialPage from "@/pages/TutorialPage";
+import AppSettingsPage from "@/pages/AppSettingsPage";
 import LoginPage from "@/pages/LoginPage";
 import NewBundlePage from "@/pages/NewBundlePage";
 import NewProjectPage from "@/pages/NewProjectPage";
@@ -123,6 +124,7 @@ export default function App() {
           <Route path="/stacks/:stackName/key-graph" element={<StackKeyGraphPage />} />
           <Route path="/stacks/:stackName/env-links" element={<StackEnvLinksPage />} />
           <Route path="/keys" element={<ApiKeysPage />} />
+          <Route path="/settings" element={<AppSettingsPage />} />
           <Route path="/certificates" element={<CertificatesPage />} />
           <Route path="/backup" element={<BackupPage />} />
           <Route path="/tools/env-link-hash" element={<EnvLinkHashPage />} />

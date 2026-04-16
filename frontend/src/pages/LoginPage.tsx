@@ -1,14 +1,18 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "@/api/client";
-import { login } from "@/api/auth";
+import { login, loginOptions } from "@/api/auth";
 import { Button } from "@/components/ui";
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [key, setKey] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  const optsQ = useQuery({ queryKey: ["login-options"], queryFn: loginOptions });
+  const oidcFailed = searchParams.get("oidc_error");
 
   const m = useMutation({
     mutationFn: async () => {
@@ -32,6 +36,11 @@ export default function LoginPage() {
       <p className="mb-6 text-sm text-slate-400">
         Enter an admin API key. The session is stored in a signed browser cookie.
       </p>
+      {oidcFailed ? (
+        <p className="mb-4 text-sm text-red-400">
+          SSO sign-in did not complete. Try again or use an API key.
+        </p>
+      ) : null}
       <form
         className="space-y-4"
         onSubmit={(ev) => {
@@ -57,6 +66,16 @@ export default function LoginPage() {
           {m.isPending ? "Signing in…" : "Sign in"}
         </Button>
       </form>
+      {optsQ.data?.oidc_available ? (
+        <p className="mt-8 text-center text-sm text-slate-400">
+          <a
+            href="/api/v1/auth/oidc/login"
+            className="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
+          >
+            Sign in with SSO
+          </a>
+        </p>
+      ) : null}
     </div>
   );
 }
