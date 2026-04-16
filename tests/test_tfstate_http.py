@@ -1058,6 +1058,23 @@ class OidcAuthApiTests(unittest.TestCase):
             r = client.get("/api/v1/auth/oidc/link", follow_redirects=False)
             self.assertEqual(r.status_code, 401, r.text)
 
+    def test_oidc_login_redirects_info_when_not_configured(self) -> None:
+        with TestClient(app) as client:
+            r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
+            self.assertEqual(r.status_code, 302, r.text)
+            loc = r.headers.get("location", "")
+            self.assertIn("/login", loc)
+            self.assertIn("oidc_info=not_configured", loc)
+
+    def test_oidc_link_redirects_info_when_not_configured(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        with TestClient(app) as client:
+            r = client.get("/api/v1/auth/oidc/link", headers=h, follow_redirects=False)
+            self.assertEqual(r.status_code, 302, r.text)
+            loc = r.headers.get("location", "")
+            self.assertIn("/account", loc)
+            self.assertIn("oidc_info=not_configured", loc)
+
     def test_oidc_status_requires_auth(self) -> None:
         with TestClient(app) as client:
             r = client.get("/api/v1/auth/oidc/status")

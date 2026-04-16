@@ -1,6 +1,6 @@
 # Envelope — usage guide
 
-> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **[Installation & hosting](/help/installation)**, **`/help/web-ui`**, **`/help/api`**, **`/help/certificates`**, **`/help/terraform`**, **`/help/pulumi`**, **[CLI (opaque env)](/help/cli)**, **[GitHub Actions](/help/github-actions)**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
+> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **[Installation & hosting](/help/installation)**, **`/help/web-ui`**, **[OpenID Connect (SSO)](/help/oidc)**, **`/help/api`**, **`/help/certificates`**, **`/help/terraform`**, **`/help/pulumi`**, **[CLI (opaque env)](/help/cli)**, **[GitHub Actions](/help/github-actions)**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
 
 Envelope is a self-hosted **secure environment bundle** manager: named groups of variables (like a `.env` file), **encrypted at rest** for secret values, with **API keys** for automation and a **web UI** for administration.
 
@@ -69,6 +69,46 @@ In the web UI, use projects in this order:
 4. **Stacks** — Create stacks (ordered **layers**, each referencing a bundle). A stack is also tagged to an environment; layers resolve bundles in the same project (matching that environment or a shared unassigned bundle, per server rules).
 
 There is no automatic default environment when you create a project—add environments before **New bundle** or **New stack** will succeed.
+
+---
+
+## OpenID Connect (SSO)
+
+Envelope can use **OpenID Connect** so people sign in to the admin UI through your identity provider (Okta, Azure AD, Keycloak, Auth0, etc.) instead of pasting an API key every time. The server stores **no passwords** for SSO users: the IdP issues tokens; Envelope maps **`issuer` + `sub`** to an existing **admin API key** after a one-time link.
+
+### Operator setup (App settings)
+
+1. In the web UI, open **Admin → App settings** (admin session required).
+2. Enable **OIDC sign-in** and fill in **Issuer URL**, **Client ID**, and **Client secret** from your IdP’s OIDC application.
+3. Register the **redirect URL** shown on that page with your IdP (typically `…/api/v1/auth/oidc/callback` on your public Envelope base URL; use **`ENVELOPE_ROOT_PATH`** consistently if the app is behind a path prefix).
+4. Adjust **Scopes** if needed (defaults usually include `openid email profile`). Optional **Allowed email domains** restricts which IdP accounts may complete SSO sign-in.
+5. Save. When the UI shows that **OIDC is ready**, users can link and use SSO.
+
+Configuration may also come from environment variables on the server (see deployment docs); **App settings** in the database override env defaults when present.
+
+### Per-user link (Account)
+
+SSO is tied to a **specific API key**:
+
+1. Sign in with an **admin API key** (normal login).
+2. Open **Account** and use **Connect SSO**. You are sent to your IdP; after consent, that IdP identity is **linked** to the API key you used to sign in.
+3. Next time, you can use **Sign in with SSO** on the login page; the session uses the **same** underlying key and permissions.
+
+Only one IdP identity can be linked to a given API key at a time. Use **Disconnect SSO** on Account to remove the link.
+
+### If SSO is not available yet
+
+Until OIDC is fully configured, **Connect SSO** is hidden and the Account page explains that an administrator must complete **App settings**. The login page only offers **Sign in with SSO** when the server reports OIDC as configured (`GET /api/v1/auth/login-options` → `oidc_configured`).
+
+### API surface (for automation)
+
+- Start login: `GET /api/v1/auth/oidc/login` (browser; redirects to IdP).
+- Start link (Bearer admin key): `GET /api/v1/auth/oidc/link`.
+- Callback: `GET /api/v1/auth/oidc/callback` (registered with IdP).
+- Link status: `GET /api/v1/auth/oidc/status`.
+- Unlink: `DELETE /api/v1/auth/oidc/link` (CSRF + session).
+
+Flows use **authorization code + PKCE**. Details match your IdP’s OIDC discovery document.
 
 ---
 

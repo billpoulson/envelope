@@ -10,6 +10,7 @@ const SECTIONS: { id: HelpSectionId; label: string; path: string }[] = [
   { id: "index", label: "Overview", path: "/help" },
   { id: "installation", label: "Installation & hosting", path: "/help/installation" },
   { id: "web-ui", label: "Web UI", path: "/help/web-ui" },
+  { id: "oidc", label: "OpenID Connect (SSO)", path: "/help/oidc" },
   { id: "api", label: "API export", path: "/help/api" },
   {
     id: "certificates",

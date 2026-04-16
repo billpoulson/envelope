@@ -13,6 +13,7 @@ export default function LoginPage() {
 
   const optsQ = useQuery({ queryKey: ["login-options"], queryFn: loginOptions });
   const oidcErr = searchParams.get("oidc_error");
+  const oidcInfo = searchParams.get("oidc_info");
 
   const m = useMutation({
     mutationFn: async () => {
@@ -36,6 +37,15 @@ export default function LoginPage() {
       <p className="mb-6 text-sm text-slate-400">
         Enter an admin API key. The session is stored in a signed browser cookie.
       </p>
+      {oidcInfo === "not_configured" ? (
+        <div className="mb-4 rounded-xl border border-sky-500/30 bg-sky-500/5 p-4 text-sm leading-relaxed text-slate-200">
+          <p className="font-medium text-slate-100">SSO is not configured on this server</p>
+          <p className="mt-2 text-slate-300">
+            An administrator must enable OpenID Connect under App settings (Admin menu) before &quot;Sign in with
+            SSO&quot; can work. You can still sign in with an admin API key below.
+          </p>
+        </div>
+      ) : null}
       {oidcErr === "unlinked" ? (
         <p className="mb-4 text-sm text-amber-200/90">
           SSO is not linked yet. Sign in with an admin API key, open{" "}

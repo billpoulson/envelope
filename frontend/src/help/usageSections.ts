@@ -6,6 +6,7 @@ export type HelpSectionId =
   | "index"
   | "installation"
   | "web-ui"
+  | "oidc"
   | "api"
   | "certificates"
   | "terraform"
@@ -18,6 +19,7 @@ function headingToSectionId(title: string): HelpSectionId | null {
   const t = title.trim();
   if (t === "Installation & hosting") return "installation";
   if (t === "Web UI") return "web-ui";
+  if (t === "OpenID Connect (SSO)") return "oidc";
   if (t.startsWith("Exporting bundles")) return "api";
   if (t.startsWith("Certificate-backed")) return "certificates";
   if (t.startsWith("Terraform HTTP")) return "terraform";

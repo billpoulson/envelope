@@ -66,6 +66,16 @@ def _account_error_redirect(code: str) -> RedirectResponse:
     return RedirectResponse(url=f"/account?oidc_error={code}", status_code=302)
 
 
+def _oidc_not_configured_login_redirect() -> RedirectResponse:
+    """Unauthenticated SSO entry: explain on the login page."""
+    return RedirectResponse(url="/login?oidc_info=not_configured", status_code=302)
+
+
+def _oidc_not_configured_account_redirect() -> RedirectResponse:
+    """Link flow hit without IdP config: show message on Account (same tab after redirect)."""
+    return RedirectResponse(url="/account?oidc_info=not_configured", status_code=302)
+
+
 def _clear_oidc_flow_keys(request: Request) -> None:
     for k in (
         "oidc_state",
@@ -157,7 +167,7 @@ async def auth_logout(
 async def oidc_login_start(request: Request, session: AsyncSession = Depends(get_db)) -> RedirectResponse:
     cfg = await load_effective_oidc_config(session)
     if not cfg.is_oidc_configured():
-        raise HTTPException(status_code=400, detail="OIDC is not configured")
+        return _oidc_not_configured_login_redirect()
     redirect_uri = oidc_callback_redirect_uri(request, cfg)
     state = generate_oauth_state()
     nonce = generate_oauth_state()
@@ -193,7 +203,7 @@ async def oidc_link_start(
         raise HTTPException(status_code=403, detail="Admin scope required")
     cfg = await load_effective_oidc_config(session)
     if not cfg.is_oidc_configured():
-        raise HTTPException(status_code=400, detail="OIDC is not configured")
+        return _oidc_not_configured_account_redirect()
     redirect_uri = oidc_callback_redirect_uri(request, cfg)
     state = generate_oauth_state()
     nonce = generate_oauth_state()
