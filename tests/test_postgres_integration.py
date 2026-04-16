@@ -38,8 +38,9 @@ from sqlalchemy import delete, func, select  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.database.backends.postgresql import PostgresqlDatabaseAdapter  # noqa: E402
 from app.db import get_database_adapter, get_engine, get_session_factory, init_db, reset_engine  # noqa: E402
+from app.deps import get_fernet  # noqa: E402
 from app.models import Bundle, BundleGroup, Secret  # noqa: E402
-from app.services.bundles import bulk_upsert_bundle_secrets  # noqa: E402
+from app.services.bundles import bulk_upsert_bundle_secrets, decode_stored_value  # noqa: E402
 
 if _REASON is None:
     get_settings.cache_clear()
@@ -99,7 +100,8 @@ class PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             row = (
                 await session.execute(select(Secret).where(Secret.bundle_id == bid, Secret.key_name == "K"))
             ).scalar_one()
-            self.assertIn("second", row.value_ciphertext or "")
+            plain = decode_stored_value(get_fernet(), row.value_ciphertext or "", row.is_secret)
+            self.assertEqual(plain, "second")
 
         async with factory() as session:
             await session.execute(delete(Secret).where(Secret.bundle_id == bid))
