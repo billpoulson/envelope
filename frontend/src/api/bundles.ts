@@ -61,6 +61,24 @@ export async function listProjectBundles(
   return apiFetch<ProjectBundleListRow[]>(`/bundles${q}`, { method: "GET" });
 }
 
+/** Persists bundle list order for the given project environment (admin UI). */
+export async function reorderProjectBundles(
+  projectSlug: string,
+  environmentSlug: string,
+  slugs: string[],
+): Promise<void> {
+  const csrf = await fetchCsrf();
+  await apiFetch("/bundles/order", {
+    method: "PUT",
+    headers: getCsrfHeader(csrf),
+    json: {
+      project_slug: projectSlug,
+      environment_slug: environmentSlug,
+      slugs,
+    },
+  });
+}
+
 export type BundlePayload = {
   name: string;
   slug: string;

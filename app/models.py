@@ -97,6 +97,8 @@ class Bundle(Base):
     project_environment_id: Mapped[int | None] = mapped_column(
         ForeignKey("project_environments.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Order within a project environment (list UI / API); lower first.
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     __table_args__ = (
         Index(

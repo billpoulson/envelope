@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 
 from app.api.resource_scope import ResourcePathScope
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, nulls_last, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy.orm import selectinload
@@ -25,6 +25,7 @@ from app.services.scopes import (
     can_create_bundle,
     can_read_bundle,
     can_write_bundle,
+    can_write_project,
     parse_scopes_json,
     scopes_allow_admin,
 )
@@ -94,6 +95,15 @@ class CreateBundleBody(BaseModel):
     group_id: int | None = None
     project_slug: str | None = None
     project_environment_slug: str | None = None
+
+
+class ReorderBundlesBody(BaseModel):
+    project_slug: str = Field(..., min_length=1)
+    environment_slug: str = Field(..., min_length=1)
+    slugs: list[str] = Field(
+        ...,
+        description="Every bundle slug in this project environment, in the desired order.",
+    )
 
 
 class PatchBundleBody(BaseModel):
@@ -167,10 +177,17 @@ async def list_bundles(
             status_code=400,
             detail="with_environment=true requires project_slug",
         )
-    q = select(Bundle).options(
-        selectinload(Bundle.group),
-        selectinload(Bundle.project_environment),
-    ).order_by(Bundle.name)
+    q = (
+        select(Bundle)
+        .options(selectinload(Bundle.group), selectinload(Bundle.project_environment))
+        .outerjoin(ProjectEnvironment, Bundle.project_environment_id == ProjectEnvironment.id)
+        .order_by(
+            nulls_last(Bundle.group_id.asc()),
+            nulls_last(ProjectEnvironment.sort_order.asc()),
+            Bundle.sort_order.asc(),
+            Bundle.name.asc(),
+        )
+    )
     if project_slug is not None and str(project_slug).strip():
         g = await get_project_by_slug_or_404(session, project_slug.strip())
         q = q.where(Bundle.group_id == g.id)
@@ -214,6 +231,46 @@ async def list_bundles(
             else:
                 out_str.append(b.slug)
     return out_detail if (with_environment and has_ps) else out_str
+
+
+@router.put("/bundles/order", status_code=204)
+async def reorder_bundles(
+    body: ReorderBundlesBody,
+    key: ApiKey = Depends(get_api_key),
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    scopes = parse_scopes_json(key.scopes)
+    g = await get_project_by_slug_or_404(session, body.project_slug.strip())
+    if not can_write_project(
+        scopes,
+        project_id=g.id,
+        project_name=g.name,
+        project_slug=g.slug,
+    ):
+        raise HTTPException(status_code=403, detail="Insufficient scope for this project")
+    raw = str(body.environment_slug).strip()
+    if raw == UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL:
+        raise HTTPException(
+            status_code=400,
+            detail="environment_slug must be a real environment, not the legacy unassigned sentinel.",
+        )
+    env = await get_project_environment_by_group_and_slug(session, group_id=g.id, slug=raw)
+    r = await session.execute(
+        select(Bundle).where(
+            Bundle.group_id == g.id,
+            Bundle.project_environment_id == env.id,
+        )
+    )
+    existing = {b.slug: b for b in r.scalars().all()}
+    if sorted(body.slugs) != sorted(existing.keys()):
+        raise HTTPException(
+            status_code=400,
+            detail="slugs must list every bundle in this environment exactly once",
+        )
+    for i, slug in enumerate(body.slugs):
+        existing[slug].sort_order = i
+    await session.commit()
+    return Response(status_code=204)
 
 
 @router.post("/bundles", status_code=201)
@@ -302,7 +359,19 @@ async def create_bundle(
         dup_slug = dup_slug.where(Bundle.project_environment_id == env_fk)
     if (await session.execute(dup_slug)).scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="Bundle slug already exists in this environment")
-    b = Bundle(name=display_name, slug=slug_out, group_id=gid, project_environment_id=env_fk)
+    max_so_stmt = select(func.coalesce(func.max(Bundle.sort_order), -1)).where(Bundle.group_id == gid)
+    if env_fk is None:
+        max_so_stmt = max_so_stmt.where(Bundle.project_environment_id.is_(None))
+    else:
+        max_so_stmt = max_so_stmt.where(Bundle.project_environment_id == env_fk)
+    next_sort = int((await session.execute(max_so_stmt)).scalar_one()) + 1
+    b = Bundle(
+        name=display_name,
+        slug=slug_out,
+        group_id=gid,
+        project_environment_id=env_fk,
+        sort_order=next_sort,
+    )
     session.add(b)
     await session.flush()
     if entry_rows:

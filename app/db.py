@@ -549,6 +549,38 @@ def _migrate_cleanup_orphan_bundle_stack_layers(sync_conn) -> None:
     )
 
 
+def _migrate_sqlite_bundles_sort_order(sync_conn) -> None:
+    """Per-environment display order for bundle lists (matches drag-and-drop in the admin UI)."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    if "bundles" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("bundles")}
+    if "sort_order" in cols:
+        return
+    sync_conn.execute(text("ALTER TABLE bundles ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"))
+    rows = sync_conn.execute(
+        text(
+            "SELECT id, group_id, project_environment_id, name FROM bundles "
+            "ORDER BY COALESCE(group_id, 0), COALESCE(project_environment_id, 0), name"
+        )
+    ).fetchall()
+    # Assign 0..n-1 per (group_id, project_environment_id) preserving former name order.
+    current_key = None
+    i = 0
+    for bid, gid, peid, _name in rows:
+        key = (gid, peid)
+        if key != current_key:
+            current_key = key
+            i = 0
+        sync_conn.execute(
+            text("UPDATE bundles SET sort_order = :so WHERE id = :id"),
+            {"so": i, "id": bid},
+        )
+        i += 1
+
+
 def _migrate_sqlite_oidc_drop_proxy_column(sync_conn) -> None:
     """Remove legacy proxy_admin_key_id from oidc_app_settings (OIDC links to existing keys per-user)."""
     from sqlalchemy import inspect, text
@@ -579,6 +611,7 @@ def run_sqlite_migrations_after_create_all(sync_conn) -> None:
     _migrate_sqlite_bundles_stacks_scoped_names(sync_conn)
     _migrate_sqlite_bundle_stacks_slug(sync_conn)
     _migrate_sqlite_bundles_slug(sync_conn)
+    _migrate_sqlite_bundles_sort_order(sync_conn)
     _migrate_sqlite_oidc_drop_proxy_column(sync_conn)
 
 
