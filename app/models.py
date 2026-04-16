@@ -341,6 +341,8 @@ class ApiKey(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128))
     key_hash: Mapped[str] = mapped_column(String(256))
+    # HMAC-SHA256 hex (64 chars) derived from master + raw key; unique index from migrations. NULL = legacy row.
+    key_lookup_hmac: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # JSON array of scope strings, e.g. ["admin"] or ["read:bundle:*","read:project:prod-*"]
     scopes: Mapped[str] = mapped_column(Text, default='["read:bundle:*"]')
     created_at: Mapped[datetime] = mapped_column(

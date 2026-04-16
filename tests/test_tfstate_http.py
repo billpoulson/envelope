@@ -1091,5 +1091,68 @@ class OidcAuthApiTests(unittest.TestCase):
             self.assertIn("/login?oidc_error=1", r.headers.get("location", ""))
 
 
+class ApiKeyResolutionTests(unittest.TestCase):
+    """Indexed key_lookup_hmac + legacy NULL fallback (see app/deps.resolve_api_key)."""
+
+    _token = "tfstate-http-test-admin-key"
+
+    def setUp(self) -> None:
+        """Ensure lifespan has run so SQLite tables exist (this class may run first in the module)."""
+        h = {"Authorization": f"Bearer {self._token}"}
+        with TestClient(app) as client:
+            r = client.get("/api/v1/bundles", headers=h)
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def test_bootstrap_row_has_key_lookup_hmac(self) -> None:
+        import sqlite3
+
+        conn = sqlite3.connect(str(_db_path))
+        row = conn.execute("SELECT key_lookup_hmac FROM api_keys WHERE id = 1").fetchone()
+        conn.close()
+        self.assertIsNotNone(row)
+        self.assertIsNotNone(row[0])
+        self.assertEqual(len(row[0]), 64)
+
+    def test_bearer_auth_legacy_path_when_lookup_null(self) -> None:
+        import sqlite3
+
+        from app.auth_keys import key_lookup_hmac
+        from app.config import get_settings
+
+        settings = get_settings()
+        hmac_val = key_lookup_hmac(self._token, settings.master_key)
+        conn = sqlite3.connect(str(_db_path))
+        conn.execute("UPDATE api_keys SET key_lookup_hmac = NULL WHERE id = 1")
+        conn.commit()
+        conn.close()
+        try:
+            h = {"Authorization": f"Bearer {self._token}"}
+            with TestClient(app) as client:
+                r = client.get("/api/v1/bundles", headers=h)
+            self.assertEqual(r.status_code, 200, r.text)
+        finally:
+            conn = sqlite3.connect(str(_db_path))
+            conn.execute(
+                "UPDATE api_keys SET key_lookup_hmac = ? WHERE id = 1",
+                (hmac_val,),
+            )
+            conn.commit()
+            conn.close()
+
+    def test_created_api_key_bearer_uses_lookup(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                headers=h,
+                json={"name": "lookup-ci-key", "scopes": ["read:bundle:*"]},
+            )
+            self.assertEqual(r.status_code, 201, r.text)
+            plain = r.json()["plain_key"]
+            h2 = {"Authorization": f"Bearer {plain}"}
+            r2 = client.get("/api/v1/bundles", headers=h2)
+            self.assertEqual(r2.status_code, 200, r.text)
+
+
 if __name__ == "__main__":
     unittest.main()

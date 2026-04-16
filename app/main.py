@@ -19,7 +19,7 @@ from app.limiter import limiter
 from app.config import Settings, get_settings
 from app.db import get_session_factory, init_db, reset_engine
 from app.models import ApiKey
-from app.auth_keys import hash_api_key
+from app.auth_keys import hash_api_key, key_lookup_hmac
 from app.web.routes import router as web_router
 
 
@@ -63,6 +63,7 @@ async def _bootstrap_admin_if_needed(session: AsyncSession, settings: Settings) 
     row = ApiKey(
         name="bootstrap",
         key_hash=hash_api_key(raw),
+        key_lookup_hmac=key_lookup_hmac(raw, settings.master_key),
         scopes='["admin"]',
     )
     session.add(row)

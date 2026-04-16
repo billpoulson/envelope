@@ -13,9 +13,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
-from app.auth_keys import verify_api_key
 from app.db import get_db
-from app.deps import get_api_key
+from app.deps import get_api_key, resolve_api_key
 from app.models import ApiKey, OidcIdentity
 from app.services.oidc import (
     build_authorization_redirect_url,
@@ -142,15 +141,20 @@ async def auth_login(
     raw = body.api_key.strip()
     if not raw:
         raise HTTPException(status_code=400, detail="API key required")
-    r = await session.execute(select(ApiKey))
-    rows = r.scalars().all()
-    for row in rows:
-        if verify_api_key(raw, row.key_hash) and scopes_allow_admin(parse_scopes_json(row.scopes)):
-            request.session["admin"] = True
-            request.session["admin_key_id"] = row.id
-            request.session.pop("csrf", None)
-            return LoginResponse(csrf_token=csrf_token(request))
-    raise HTTPException(status_code=401, detail="Invalid admin API key")
+    try:
+        row = await resolve_api_key(raw, session)
+    except HTTPException as e:
+        if e.status_code != 401:
+            raise
+        if e.detail == "API key expired":
+            raise
+        raise HTTPException(status_code=401, detail="Invalid admin API key") from e
+    if not scopes_allow_admin(parse_scopes_json(row.scopes)):
+        raise HTTPException(status_code=401, detail="Invalid admin API key")
+    request.session["admin"] = True
+    request.session["admin_key_id"] = row.id
+    request.session.pop("csrf", None)
+    return LoginResponse(csrf_token=csrf_token(request))
 
 
 @router.post("/auth/logout")

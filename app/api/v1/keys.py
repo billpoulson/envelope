@@ -5,10 +5,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth_keys import generate_raw_api_key, hash_api_key, key_lookup_hmac
+from app.config import get_settings
 from app.db import get_db
 from app.deps import require_admin
 from app.models import ApiKey, OidcIdentity
-from app.auth_keys import generate_raw_api_key, hash_api_key
 from app.services.scopes import parse_scopes_json, scopes_to_json, validate_scopes_list
 
 router = APIRouter()
@@ -68,9 +69,11 @@ async def create_api_key(
 ) -> CreateApiKeyResponse:
     validate_scopes_list(body.scopes)
     plain = generate_raw_api_key()
+    settings = get_settings()
     row = ApiKey(
         name=body.name.strip(),
         key_hash=hash_api_key(plain),
+        key_lookup_hmac=key_lookup_hmac(plain, settings.master_key),
         scopes=scopes_to_json(body.scopes),
     )
     session.add(row)

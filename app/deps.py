@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db import get_db
 from app.models import ApiKey
-from app.auth_keys import verify_api_key
+from app.auth_keys import key_lookup_hmac, verify_api_key
 from app.services.scopes import parse_scopes_json, scopes_allow_admin, scopes_allow_terraform_http_state
 
 
@@ -36,13 +36,23 @@ async def resolve_api_key(
     token: str,
     session: AsyncSession,
 ) -> ApiKey:
-    result = await session.execute(select(ApiKey))
-    rows = result.scalars().all()
-    for row in rows:
-        if verify_api_key(token, row.key_hash):
-            if row.expires_at and row.expires_at < datetime.now(timezone.utc):
+    settings = get_settings()
+    lookup = key_lookup_hmac(token, settings.master_key)
+    r = await session.execute(select(ApiKey).where(ApiKey.key_lookup_hmac == lookup))
+    row = r.scalar_one_or_none()
+    if row is not None:
+        if row.expires_at and row.expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=401, detail="API key expired")
+        if not verify_api_key(token, row.key_hash):
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        return row
+
+    r_legacy = await session.execute(select(ApiKey).where(ApiKey.key_lookup_hmac.is_(None)))
+    for legacy_row in r_legacy.scalars().all():
+        if verify_api_key(token, legacy_row.key_hash):
+            if legacy_row.expires_at and legacy_row.expires_at < datetime.now(timezone.utc):
                 raise HTTPException(status_code=401, detail="API key expired")
-            return row
+            return legacy_row
     raise HTTPException(status_code=401, detail="Invalid API key")
 
 

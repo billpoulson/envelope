@@ -101,6 +101,24 @@ def _migrate_sqlite_api_keys_scopes(sync_conn) -> None:
             pass
 
 
+def _migrate_sqlite_api_keys_key_lookup_hmac(sync_conn) -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    if "api_keys" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("api_keys")}
+    if "key_lookup_hmac" not in cols:
+        sync_conn.execute(text("ALTER TABLE api_keys ADD COLUMN key_lookup_hmac VARCHAR(64)"))
+    # Fast lookup + uniqueness for non-NULL values (SQLite allows multiple NULLs in UNIQUE)
+    sync_conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_api_keys_key_lookup_hmac "
+            "ON api_keys(key_lookup_hmac)"
+        )
+    )
+
+
 def _migrate_sqlite_bundle_groups_slug(sync_conn) -> None:
     import re
 
@@ -544,6 +562,7 @@ async def init_db() -> None:
             await conn.run_sync(_migrate_sqlite_secrets_is_secret)
             await conn.run_sync(_migrate_sqlite_bundles_group_id)
             await conn.run_sync(_migrate_sqlite_api_keys_scopes)
+            await conn.run_sync(_migrate_sqlite_api_keys_key_lookup_hmac)
             await conn.run_sync(_migrate_sqlite_bundle_groups_slug)
             await conn.run_sync(_migrate_sqlite_bundle_stack_layer_keys)
             await conn.run_sync(_migrate_sqlite_stack_env_links_slice)

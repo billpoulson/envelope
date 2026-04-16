@@ -17,15 +17,15 @@ State is **scoped to an Envelope project** (same “project” as bundles). Use:
 
 ## Legacy flat keys (no project)
 
-`GET/POST/DELETE/LOCK/UNLOCK` on `/tfstate/blobs/<key>` still works for keys with scope **`terraform:http_state`** or **`pulumi:state`** (or **admin**). Prefer per-project URLs for new setups.
+`GET/POST/DELETE/LOCK/UNLOCK` on `/tfstate/blobs/<key>` still works for keys with scope `**terraform:http_state`** or `**pulumi:state**` (or **admin**). Prefer per-project URLs for new setups.
 
 ## Pulumi
 
 Envelope’s `/tfstate/…` API implements the **Terraform HTTP backend** wire protocol. The **Pulumi CLI** does not use that protocol — there is no supported `pulumi login https://…/tfstate/…` that stores state in Envelope’s HTTP API.
 
-**Use a [Pulumi-supported backend](https://www.pulumi.com/docs/concepts/state/)** (e.g. **`pulumi login postgres://…`**, **`s3://…`**) and keep the URL and credentials in an Envelope **bundle** or CI secrets exported from Envelope.
+**Use a [Pulumi-supported backend](https://www.pulumi.com/docs/concepts/state/)** (e.g. `**pulumi login postgres://…`**, `**s3://…**`) and keep the URL and credentials in an Envelope **bundle** or CI secrets exported from Envelope.
 
-The legacy scope **`pulumi:state`** only authorizes Envelope’s flat **`/tfstate/blobs/…`** paths; it does not connect the stock Pulumi CLI to this HTTP API.
+The legacy scope `**pulumi:state`** only authorizes Envelope’s flat `**/tfstate/blobs/…**` paths; it does not connect the stock Pulumi CLI to this HTTP API.
 
 ## Envelope configuration
 
@@ -34,7 +34,7 @@ The legacy scope **`pulumi:state`** only authorizes Envelope’s flat **`/tfstat
 
 ## Terraform example (per project)
 
-**Do not put your Envelope API key in `.tf` files.** HashiCorp warns that `password` (and similar) in backend config can end up in the `.terraform` directory and in plan files. Supply the password with environment variables instead ([`TF_HTTP_PASSWORD`](https://developer.hashicorp.com/terraform/language/settings/backends/http), optional [`TF_HTTP_USERNAME`](https://developer.hashicorp.com/terraform/language/settings/backends/http)).
+**Do not put your Envelope API key in `.tf` files.** HashiCorp warns that `password` (and similar) in backend config can end up in the `.terraform` directory and in plan files. Supply the password with environment variables instead (`[TF_HTTP_PASSWORD](https://developer.hashicorp.com/terraform/language/settings/backends/http)`, optional `[TF_HTTP_USERNAME](https://developer.hashicorp.com/terraform/language/settings/backends/http)`).
 
 ```hcl
 terraform {

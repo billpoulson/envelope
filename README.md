@@ -38,6 +38,10 @@ Self-hosted **secure environment bundle** manager: named groups of secrets (like
 
 Use HTTP only on trusted networks. In production, terminate **HTTPS** in front of Envelope (Caddy, Traefik, nginx, a cloud load balancer).
 
+### Security posture and enterprise use
+
+For **known limitations** (API key lookup model, SQLite, CSRF/header/audit expectations, CI scanning), see [docs/security-gaps.md](docs/security-gaps.md).
+
 ### Behind a gateway
 
 Uvicorn applies **forwarded headers** only from **trusted** client addresses (`FORWARDED_ALLOW_IPS`, default `127.0.0.1`). Set this to your gateway’s subnet (for example Docker bridge `172.18.0.0/16`) so `X-Forwarded-Proto` and `X-Forwarded-For` are honored. The Docker image passes `--forwarded-allow-ips` from that environment variable. Without it, opaque env URLs and `request.base_url` may show `http://` and rate limits may see the proxy as the only client.
