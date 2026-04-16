@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 from cryptography.fernet import Fernet
@@ -58,6 +59,11 @@ class PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_adapter_is_postgresql(self) -> None:
         self.assertIsInstance(get_database_adapter(), PostgresqlDatabaseAdapter)
         self.assertEqual(get_engine().dialect.name, "postgresql")
+
+    def test_postgresql_run_migrations_is_noop(self) -> None:
+        sync_conn = MagicMock()
+        PostgresqlDatabaseAdapter().run_migrations_after_create_all(sync_conn)
+        sync_conn.execute.assert_not_called()
 
     async def test_bulk_upsert_merges_on_conflict(self) -> None:
         tag = uuid4().hex[:12]
