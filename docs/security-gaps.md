@@ -9,6 +9,7 @@ This document lists **known limitations** relative to typical **enterprise** or 
 - OIDC admin login uses **state**, **nonce**, and **PKCE** (see `app/api/v1/auth.py`).
 - **Rate limits** on sensitive routes (e.g. backup/restore, some exports, Terraform HTTP state).
 - **CSRF** tokens for JSON auth flows and many mutating SPA calls (`X-CSRF-Token`).
+- **Browser hardening headers** in-app (`app/security_headers.py`): baseline headers, optional default CSP (Swagger paths excluded), HSTS when `ENVELOPE_HTTPS_COOKIES=true`.
 - SQLAlchemy ORM usage reduces raw-SQL injection risk.
 - `.env` is gitignored; compose expects secrets via environment, not committed files.
 
@@ -30,15 +31,13 @@ This document lists **known limitations** relative to typical **enterprise** or 
 
 ## Gap: Browser hardening headers not set in-app
 
-**Issue:** The FastAPI app does not set **CSP**, **HSTS**, **X-Frame-Options** / **frame-ancestors**, etc. (`app/main.py`).
+**Status (partially addressed):** `[app/security_headers.py](../app/security_headers.py)` middleware (registered from `[app/main.py](../app/main.py)`) sets `**X-Content-Type-Options`**, `**X-Frame-Options: DENY**`, `**Referrer-Policy**`, `**Permissions-Policy**`, and a **default `Content-Security-Policy`** on routes **outside** Swagger/OpenAPI UI (`/docs`, `/redoc`, `/openapi.json`). `**Strict-Transport-Security`** is sent when `**ENVELOPE_HTTPS_COOKIES=true**` (same signal as secure session cookies). Disable all of this with `**ENVELOPE_SECURITY_HEADERS_ENABLED=false**`, or override CSP via `**ENVELOPE_SECURITY_CSP**` (`-` turns CSP off).
 
-**Why it matters:** Defense in depth against XSS clickjacking and mixed-content mistakes. Regulated environments often expect explicit headers or documented proxy ownership.
-
-**Mitigation direction:** Terminate TLS and set headers at a **reverse proxy** or API gateway (many teams prefer that layer). If headers must be app-owned, add middleware or Starlette/FastAPI extensions.
+**Why it still matters:** TLS termination, CDN, and corporate gateways often own **stronger** or **complementary** policies (e.g. broader CSP, `includeSubDomains` on HSTS). Document proxy behavior for audits.
 
 ## Gap: CSRF coverage may be incomplete for cookie session auth
 
-**Status (partially addressed):** For `/api/v1` routes that use [`get_api_key`](../app/deps.py), mutating requests authenticated via **session cookie** (no `Authorization: Bearer`) must send a valid **`X-CSRF-Token`** matching the session; safe methods (`GET`, `HEAD`, `OPTIONS`) do not. Bearer-based clients are unchanged.
+**Status (partially addressed):** For `/api/v1` routes that use `[get_api_key](../app/deps.py)`, mutating requests authenticated via **session cookie** (no `Authorization: Bearer`) must send a valid `**X-CSRF-Token`** matching the session; safe methods (`GET`, `HEAD`, `OPTIONS`) do not. Bearer-based clients are unchanged.
 
 **Remaining vigilance:** New JSON routes must continue to depend on `get_api_key` (or otherwise enforce CSRF for cookie auth). Same-origin defaults and `SameSite` cookies are still not a substitute for reviewing new endpoints.
 

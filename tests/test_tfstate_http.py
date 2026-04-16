@@ -1212,5 +1212,33 @@ class ApiKeyResolutionTests(unittest.TestCase):
             self.assertEqual(r2.status_code, 200, r.text)
 
 
+class SecurityHeadersHttpTests(unittest.TestCase):
+    """Baseline browser hardening headers from app/security_headers.py."""
+
+    def test_api_response_includes_baseline_and_csp(self) -> None:
+        with TestClient(app) as client:
+            r = client.get("/api/v1/auth/login-options")
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(r.headers.get("X-Content-Type-Options"), "nosniff")
+            self.assertEqual(r.headers.get("X-Frame-Options"), "DENY")
+            self.assertEqual(
+                r.headers.get("Referrer-Policy"),
+                "strict-origin-when-cross-origin",
+            )
+            self.assertIn("Permissions-Policy", r.headers)
+            csp = r.headers.get("Content-Security-Policy", "")
+            self.assertIn("default-src", csp)
+            self.assertIn("frame-ancestors", csp)
+
+    def test_csp_skipped_for_docs_and_openapi_paths(self) -> None:
+        from app.security_headers import should_attach_content_security_policy
+
+        self.assertFalse(should_attach_content_security_policy("/openapi.json"))
+        self.assertFalse(should_attach_content_security_policy("/docs"))
+        self.assertFalse(should_attach_content_security_policy("/docs/oauth2-redirect"))
+        self.assertFalse(should_attach_content_security_policy("/redoc"))
+        self.assertTrue(should_attach_content_security_policy("/api/v1/auth/login-options"))
+
+
 if __name__ == "__main__":
     unittest.main()

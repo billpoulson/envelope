@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     root_path: str = ""
     # Set true when users use HTTPS so session cookies get the Secure flag (TLS terminated at the gateway).
     https_cookies: bool = False
+    # Response headers: nosniff, frame denial, Referrer-Policy, Permissions-Policy; optional CSP / HSTS (see docs).
+    security_headers_enabled: bool = True
+    # Content-Security-Policy: empty = default policy on routes outside /docs, /redoc, /openapi.json; "-" disables CSP.
+    security_csp: str = ""
     # Terraform HTTP remote state API (/tfstate/projects/...). See docs/terraform-http-remote-state.md
     terraform_http_state_enabled: bool = True
 

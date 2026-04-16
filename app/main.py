@@ -15,6 +15,7 @@ from starlette.responses import FileResponse, Response
 
 from app.api.tfstate.routes import router as tfstate_router
 from app.api.v1.router import router as api_v1_router
+from app.security_headers import make_security_headers_middleware
 from app.limiter import limiter
 from app.config import Settings, get_settings
 from app.db import get_session_factory, init_db, reset_engine
@@ -132,6 +133,7 @@ def create_app() -> FastAPI:
         secret_key=session_secret,
         https_only=settings.https_cookies,
     )
+    app.middleware("http")(make_security_headers_middleware(settings))
     app.middleware("http")(_no_store_html_middleware)
 
     app.include_router(web_router)
