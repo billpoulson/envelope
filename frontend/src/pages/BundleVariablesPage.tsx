@@ -35,12 +35,8 @@ export default function BundleVariablesPage() {
   const location = useLocation();
   const resourceScope = resourceScopeFromPath(projectSlugParam, environmentSlug);
   const qc = useQueryClient();
-  const q = useQuery({
-    queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug],
-    queryFn: () => getBundle(bundleName, resourceScope),
-    enabled: !!bundleName,
-    retry: resourceScopeQueryRetry,
-  });
+  const urlKeyConsumedRef = useRef(false);
+  const [showSecrets, setShowSecrets] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [newKey, setNewKey] = useState("");
   const [newVal, setNewVal] = useState("");
@@ -52,10 +48,16 @@ export default function BundleVariablesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [deleteBundleOpen, setDeleteBundleOpen] = useState(false);
   const [actionsMenuKey, setActionsMenuKey] = useState<string | null>(null);
-  const urlKeyConsumedRef = useRef(false);
   const [displayName, setDisplayName] = useState("");
   const [bundleSlug, setBundleSlug] = useState("");
   const [bundleDetailsOpen, setBundleDetailsOpen] = useState(false);
+
+  const q = useQuery({
+    queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug, showSecrets],
+    queryFn: () => getBundle(bundleName, resourceScope, showSecrets),
+    enabled: !!bundleName,
+    retry: resourceScopeQueryRetry,
+  });
 
   const projectSlugForEnv = projectSlugParam ?? q.data?.project_slug ?? "";
   const envsQ = useQuery({
@@ -72,6 +74,8 @@ export default function BundleVariablesPage() {
     },
     onError: (e: unknown) => setErr(formatApiError(e)),
   });
+
+  const bundleQueryKey = ["bundle", bundleName, projectSlugParam ?? "", environmentSlug] as const;
 
   useLayoutEffect(() => {
     if (q.data && !bundleDetailsOpen) {
@@ -98,31 +102,55 @@ export default function BundleVariablesPage() {
       if (dn !== d.name) body.name = dn;
       if (ss !== d.slug) body.slug = ss;
       if (Object.keys(body).length === 0) {
-        return { ss, slugChanged: ss !== bundleName, skipped: true as const };
+        return {
+          ss,
+          skipped: true as const,
+          slugPatched: false as const,
+          needsUrlSync: ss !== bundleName,
+        };
       }
       await patchBundle(bundleName, body, resourceScope);
-      return { ss, slugChanged: ss !== bundleName, skipped: false as const };
+      return { ss, skipped: false as const, slugPatched: body.slug !== undefined };
     },
     onSuccess: async (result) => {
       setBundleDetailsOpen(false);
-      if (result.skipped) return;
-      await qc.invalidateQueries({ queryKey: ["bundle"] });
-      await qc.invalidateQueries({ queryKey: ["bundles"] });
-      setErr(null);
-      const { ss, slugChanged } = result;
-      if (slugChanged && projectSlugParam) {
+
+      const goToCanonicalBundleUrl = (ss: string) => {
         const sp = new URLSearchParams(location.search);
         const qs = sp.toString();
-        navigate(
-          {
-            pathname: `${projectBundlesBase(projectSlugParam, environmentSlug)}/${encodeURIComponent(ss)}/edit`,
-            search: qs ? `?${qs}` : "",
-          },
-          { replace: true },
-        );
-      } else if (slugChanged) {
-        navigate(`/bundles/${encodeURIComponent(ss)}/edit${location.search}`, { replace: true });
+        if (projectSlugParam) {
+          navigate(
+            {
+              pathname: `${projectBundlesBase(projectSlugParam, environmentSlug)}/${encodeURIComponent(ss)}/edit`,
+              search: qs ? `?${qs}` : "",
+            },
+            { replace: true },
+          );
+        } else {
+          navigate(`/bundles/${encodeURIComponent(ss)}/edit${location.search}`, { replace: true });
+        }
+      };
+
+      const navigatedToNewSlug =
+        result.slugPatched || (result.skipped && result.needsUrlSync);
+
+      if (result.skipped && !result.needsUrlSync) {
+        return;
       }
+
+      if (navigatedToNewSlug) {
+        const stalePrefix = { queryKey: bundleQueryKey, exact: false as const };
+        await qc.cancelQueries(stalePrefix);
+        qc.removeQueries(stalePrefix);
+        goToCanonicalBundleUrl(result.ss);
+        setErr(null);
+        await qc.invalidateQueries({ queryKey: ["bundles"] });
+        return;
+      }
+
+      setErr(null);
+      await qc.invalidateQueries({ queryKey: ["bundles"] });
+      await qc.invalidateQueries({ queryKey: ["bundle"] });
     },
     onError: (e: unknown) => setErr(formatApiError(e)),
   });
@@ -174,7 +202,10 @@ export default function BundleVariablesPage() {
     onSuccess: () => {
       setDeleteBundleOpen(false);
       void qc.invalidateQueries({ queryKey: ["bundles"] });
-      const cached = qc.getQueryData<BundlePayload>(["bundle", bundleName]);
+      const cached = qc
+        .getQueriesData<BundlePayload>({ queryKey: ["bundle", bundleName] })
+        .map(([, d]) => d)
+        .find(Boolean);
       const ps = projectSlugParam ?? cached?.project_slug ?? null;
       const es = environmentSlug;
       window.location.href = ps && es ? projectBundlesBase(ps, es) : "/bundles";
@@ -188,8 +219,13 @@ export default function BundleVariablesPage() {
 
   function openEditForKey(k: string, payload: BundlePayload) {
     const isSec = payload.secret_flags[k] ?? true;
+    const raw = payload.secrets[k];
     setEditingKey(k);
-    setEditVal(isSec ? "" : payload.secrets[k]);
+    if (isSec) {
+      setEditVal(payload.secret_values_included && raw != null ? raw : "");
+    } else {
+      setEditVal(raw ?? "");
+    }
     setEditSecret(isSec);
     setEditOpen(true);
   }
@@ -257,14 +293,22 @@ export default function BundleVariablesPage() {
         </button>
       }
       belowSubnav={
-        <>
+        <div className="flex flex-wrap items-center gap-4">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={showSecrets}
+              onChange={(e) => setShowSecrets(e.target.checked)}
+            />
+            Show secret values
+          </label>
           <Button type="button" variant="secondary" onClick={() => void copyKeys()}>
             Copy key names
           </Button>
           <Button type="button" onClick={() => setAddOpen(true)}>
             Add entry
           </Button>
-        </>
+        </div>
       }
     >
       {err && !bundleDetailsOpen ? <p className="mb-4 text-sm text-red-400">{err}</p> : null}
@@ -310,8 +354,21 @@ export default function BundleVariablesPage() {
                 <tr key={k} className="border-b border-border/40">
                   <td className="px-3 py-2 font-mono text-slate-200">{k}</td>
                   <td className="px-3 py-2 text-slate-400">{isSec ? "encrypted" : "plain"}</td>
-                  <td className="max-w-md truncate px-3 py-2 font-mono text-xs text-slate-300">
-                    {isSec ? "••••" : v}
+                  <td
+                    className="max-w-md truncate px-3 py-2 font-mono text-xs text-slate-300"
+                    title={
+                      isSec && data.secret_values_included && v != null
+                        ? undefined
+                        : isSec
+                          ? "Enable “Show secret values” to load plaintext from the server"
+                          : undefined
+                    }
+                  >
+                    {isSec
+                      ? data.secret_values_included && v != null
+                        ? v
+                        : "••••"
+                      : (v ?? "")}
                   </td>
                   <td
                     className={`relative isolate px-3 py-2 align-top ${menuOpen ? "z-[280]" : ""}`}
@@ -327,9 +384,7 @@ export default function BundleVariablesPage() {
                       onEdit={() => openEditForKey(k, data)}
                       onEncrypt={() =>
                         encryptSecret(bundleName, k, resourceScope).then(() =>
-                          qc.invalidateQueries({
-                            queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug ?? ""],
-                          }),
+                          qc.invalidateQueries({ queryKey: ["bundle", bundleName] }),
                         )
                       }
                       onDeclassify={() => {
@@ -339,18 +394,14 @@ export default function BundleVariablesPage() {
                           )
                         ) {
                           return declassifySecret(bundleName, k, resourceScope).then(() =>
-                            qc.invalidateQueries({
-                              queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug ?? ""],
-                            }),
+                            qc.invalidateQueries({ queryKey: ["bundle", bundleName] }),
                           );
                         }
                       }}
                       onRemove={() => {
                         if (confirm(`Remove ${k} from this bundle?\n\nThis cannot be undone.`)) {
                           return deleteSecret(bundleName, k, resourceScope).then(() =>
-                            qc.invalidateQueries({
-                              queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug ?? ""],
-                            }),
+                            qc.invalidateQueries({ queryKey: ["bundle", bundleName] }),
                           );
                         }
                       }}

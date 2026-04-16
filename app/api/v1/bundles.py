@@ -46,6 +46,7 @@ from app.services.bundles import (
     format_secrets_dotenv,
     list_bundle_secret_key_names,
     load_bundle_entries,
+    load_bundle_entries_list_masked,
     load_bundle_secrets,
     normalize_env_key,
     parse_bundle_entries_dict,
@@ -518,10 +519,18 @@ async def delete_bundle(
 async def get_bundle_decrypted(
     name: str,
     scope: ResourcePathScope = Depends(),
+    include_secret_values: bool = Query(
+        False,
+        description="Include plaintext for encrypted entries (default false; same idea as stack key-graph).",
+    ),
     key: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    bundle, entries = await load_bundle_entries(session, name, **_bundle_scope_query(scope))
+    scope_kw = _bundle_scope_query(scope)
+    if include_secret_values:
+        bundle, entries = await load_bundle_entries(session, name, **scope_kw)
+    else:
+        bundle, entries = await load_bundle_entries_list_masked(session, name, **scope_kw)
     scopes = parse_scopes_json(key.scopes)
     pn = bundle.group.name if bundle.group else None
     pslug = _pslug(bundle.group)
@@ -541,6 +550,7 @@ async def get_bundle_decrypted(
         "slug": bundle.slug,
         "secrets": secrets_map,
         "secret_flags": secret_flags,
+        "secret_values_included": include_secret_values,
         "group_id": bundle.group_id,
         "project_name": bundle.group.name if bundle.group else None,
         "project_slug": pslug,

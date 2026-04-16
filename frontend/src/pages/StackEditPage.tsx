@@ -83,6 +83,8 @@ export default function StackEditPage() {
     onError: (e: unknown) => setErr(formatApiError(e)),
   });
 
+  const stackQueryKey = ["stack", stackName, projectSlugParam ?? "", environmentSlug] as const;
+
   useLayoutEffect(() => {
     if (q.data?.layers) {
       setLayerUi(stackLayersFromApi(q.data.layers));
@@ -131,19 +133,21 @@ export default function StackEditPage() {
       if (ss !== detail.slug) body.slug = ss;
       const ps = projectSlugParam ?? detail.project_slug ?? "";
       if (Object.keys(body).length === 0) {
-        return { ss, ps, slugChanged: ss !== stackName, skipped: true as const };
+        return {
+          ss,
+          ps,
+          skipped: true as const,
+          slugPatched: false as const,
+          needsUrlSync: ss !== stackName,
+        };
       }
       await patchStack(stackName, body, resourceScope);
-      return { ss, ps, slugChanged: ss !== stackName, skipped: false as const };
+      return { ss, ps, skipped: false as const, slugPatched: body.slug !== undefined };
     },
     onSuccess: async (result) => {
       setStackDetailsOpen(false);
-      if (result.skipped) return;
-      await qc.invalidateQueries({ queryKey: ["stack"] });
-      await qc.invalidateQueries({ queryKey: ["stacks"] });
-      setErr(null);
-      const { ss, ps, slugChanged } = result;
-      if (slugChanged) {
+
+      const goToCanonicalStackUrl = (ss: string, ps: string) => {
         if (ps && environmentSlug) {
           navigate(
             `${projectStacksBase(ps, environmentSlug)}/${encodeURIComponent(ss)}/edit${searchWithoutEnv(location.search)}`,
@@ -152,7 +156,24 @@ export default function StackEditPage() {
         } else {
           navigate(`/stacks/${encodeURIComponent(ss)}/edit${location.search}`, { replace: true });
         }
+      };
+
+      if (result.skipped) {
+        if (result.needsUrlSync) {
+          qc.removeQueries({ queryKey: stackQueryKey, exact: true });
+          goToCanonicalStackUrl(result.ss, result.ps);
+        }
+        return;
       }
+
+      if (result.slugPatched) {
+        qc.removeQueries({ queryKey: stackQueryKey, exact: true });
+        goToCanonicalStackUrl(result.ss, result.ps);
+      }
+
+      setErr(null);
+      await qc.invalidateQueries({ queryKey: ["stack"] });
+      await qc.invalidateQueries({ queryKey: ["stacks"] });
     },
     onError: (e: unknown) => setErr(formatApiError(e)),
   });

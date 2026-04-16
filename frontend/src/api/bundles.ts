@@ -64,19 +64,27 @@ export async function listProjectBundles(
 export type BundlePayload = {
   name: string;
   slug: string;
-  secrets: Record<string, string>;
+  /** Plaintext; `null` for encrypted rows when `secret_values_included` is false. */
+  secrets: Record<string, string | null>;
   secret_flags: Record<string, boolean>;
+  /** When false, encrypted values were not loaded from the server (see GET `include_secret_values`). */
+  secret_values_included: boolean;
   group_id: number | null;
   project_name: string | null;
   project_slug: string | null;
   project_environment_slug: string | null;
 };
 
-export async function getBundle(name: string, scope?: ResourceScopeOpts): Promise<BundlePayload> {
-  return apiFetch<BundlePayload>(
-    appendResourceScope(`/bundles/${encodeURIComponent(name)}`, scope),
-    { method: "GET" },
-  );
+export async function getBundle(
+  name: string,
+  scope?: ResourceScopeOpts,
+  includeSecretValues = false,
+): Promise<BundlePayload> {
+  const base =
+    includeSecretValues === true
+      ? `/bundles/${encodeURIComponent(name)}?include_secret_values=true`
+      : `/bundles/${encodeURIComponent(name)}`;
+  return apiFetch<BundlePayload>(appendResourceScope(base, scope), { method: "GET" });
 }
 
 export async function createBundle(body: {
