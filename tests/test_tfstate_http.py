@@ -389,6 +389,64 @@ class StacksHttpTests(unittest.TestCase):
             self.assertEqual(sr.status_code, 400)
             self.assertIn("project_environment_slug", sr.json()["detail"].lower())
 
+    def test_delete_bundle_removes_layer_stack_still_readable(self) -> None:
+        """Deleting a bundle must drop its stack layer rows so GET /stacks/{name} still works."""
+        nonce = uuid4().hex[:8]
+        project_slug = f"delstk-{nonce}"
+        b1 = f"bundle-a-{nonce}"
+        b2 = f"bundle-b-{nonce}"
+        stack_name = f"twolayer-{nonce}"
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        with TestClient(app) as client:
+            pr = client.post(
+                "/api/v1/projects",
+                json={"name": f"Del stack {nonce}", "slug": project_slug},
+                headers=hj,
+            )
+            self.assertEqual(pr.status_code, 201, pr.text)
+            _ensure_default_environment(client, hj, project_slug)
+            for bn in (b1, b2):
+                br = client.post(
+                    "/api/v1/bundles",
+                    json={
+                        "name": bn,
+                        "project_slug": project_slug,
+                        "project_environment_slug": "default",
+                    },
+                    headers=hj,
+                )
+                self.assertEqual(br.status_code, 201, br.text)
+            sr = client.post(
+                "/api/v1/stacks",
+                json={
+                    "name": stack_name,
+                    "project_slug": project_slug,
+                    "project_environment_slug": "default",
+                    "layers": [{"bundle": b1, "keys": "*"}, {"bundle": b2, "keys": "*"}],
+                },
+                headers=hj,
+            )
+            self.assertEqual(sr.status_code, 201, sr.text)
+
+            dr = client.delete(
+                f"/api/v1/bundles/{b1}",
+                params={"project_slug": project_slug, "environment_slug": "default"},
+                headers=h,
+            )
+            self.assertEqual(dr.status_code, 204, dr.text)
+
+            gr = client.get(
+                f"/api/v1/stacks/{stack_name}",
+                params={"project_slug": project_slug, "environment_slug": "default"},
+                headers=h,
+            )
+            self.assertEqual(gr.status_code, 200, gr.text)
+            body = gr.json()
+            layers = body.get("layers") or []
+            self.assertEqual(len(layers), 1)
+            self.assertEqual(layers[0].get("bundle"), b2)
+
     def test_stack_merge_last_layer_wins(self) -> None:
         h = {"Authorization": f"Bearer {self._token}"}
         hj = {**h, "Content-Type": "application/json"}
