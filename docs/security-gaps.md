@@ -7,10 +7,11 @@ This document lists **known limitations** relative to typical **enterprise** or 
 - Fernet-backed encryption at rest (`ENVELOPE_MASTER_KEY`), required at startup.
 - API keys stored as **bcrypt hashes**, not plaintext; resolution uses an **indexed lookup** (`key_lookup_hmac`) plus bcrypt verify for current keys (`app/deps.py`).
 - OIDC admin login uses **state**, **nonce**, and **PKCE** (see `app/api/v1/auth.py`).
-- **Rate limits** on sensitive routes (e.g. backup/restore, some exports, Terraform HTTP state).
+- **Rate limits** on sensitive routes (auth, OIDC, API keys, certificates, sealed secrets, bundles, stacks, env resolve, backup/restore, exports, Terraform HTTP state, system endpoints, and selected web routes — see `app/limiter.py` and route decorators).
 - **CSRF** tokens for JSON auth flows and many mutating SPA calls (`X-CSRF-Token`).
 - **Browser hardening headers** in-app (`app/security_headers.py`): baseline headers, optional default CSP (Swagger paths excluded), HSTS when `ENVELOPE_HTTPS_COOKIES=true`.
 - SQLAlchemy ORM usage reduces raw-SQL injection risk.
+- **PostgreSQL** is supported for production-style deployments via `ENVELOPE_DATABASE_URL` (`postgresql+asyncpg://…`); see [database-configuration.md](database-configuration.md).
 - `.env` is gitignored; compose expects secrets via environment, not committed files.
 
 ## API key resolution (indexed lookup; residual legacy path)
@@ -21,33 +22,33 @@ This document lists **known limitations** relative to typical **enterprise** or 
 
 **Operational note:** If `ENVELOPE_MASTER_KEY` is rotated, existing `key_lookup_hmac` values no longer match; those rows behave as legacy until keys are recreated with a known plaintext.
 
-## Gap: SQLite-centric data plane
+## Gap: Default SQLite vs enterprise database expectations
 
-**Issue:** Default deployment uses **file-backed SQLite** (`ENVELOPE_DATABASE_URL`).
+**Issue:** If unset, `ENVELOPE_DATABASE_URL` defaults to **file-backed SQLite**. That fits single-node and small-team ops but not every enterprise requirement (managed HA, platform-native backup/PITR, DBA separation of duties) unless you add your own discipline around the file.
 
-**Why it matters:** Many enterprises require **HA**, online backup primitives, replication, and separation of duties that managed RDBMS (or cloud DB) provides. SQLite is often acceptable only for **single-node** or **small team** deployments with agreed ops.
+**Mitigation in product:** Configure **PostgreSQL** (`postgresql+asyncpg://…`) for managed-DB, multi-instance, and backup patterns; see [database-configuration.md](database-configuration.md) and the main `README.md`.
 
-**Mitigation direction:** Run behind agreed RPO/RTO with file snapshots; or extend the product to support a server-grade database if required.
+**Residual:** Operators who never change the default still run a single SQLite file; review RPO/RTO and access controls for that path, or move to PostgreSQL.
 
-## Gap: Browser hardening headers not set in-app
+## Gap: Strongest browser policy may live at the edge
 
-**Status (partially addressed):** `[app/security_headers.py](../app/security_headers.py)` middleware (registered from `[app/main.py](../app/main.py)`) sets `**X-Content-Type-Options`**, `**X-Frame-Options: DENY`**, `**Referrer-Policy**`, `**Permissions-Policy**`, and a default `Content-Security-Policy` on routes outside Swagger/OpenAPI UI (`/docs`, `/redoc`, `/openapi.json`). `**Strict-Transport-Security**` is sent when `**ENVELOPE_HTTPS_COOKIES=true**` (same signal as secure session cookies). Disable all of this with `**ENVELOPE_SECURITY_HEADERS_ENABLED=false**`, or override CSP via `**ENVELOPE_SECURITY_CSP**` (`-` turns CSP off).
+**Status (partially addressed):** `[app/security_headers.py](../app/security_headers.py)` middleware (registered from `[app/main.py](../app/main.py)`) sets `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a default `Content-Security-Policy` on routes outside Swagger/OpenAPI UI (`/docs`, `/redoc`, `/openapi.json`). `Strict-Transport-Security` is sent when `ENVELOPE_HTTPS_COOKIES=true` (same signal as secure session cookies). Disable all of this with `ENVELOPE_SECURITY_HEADERS_ENABLED=false`, or override CSP via `ENVELOPE_SECURITY_CSP` (`-` turns CSP off).
 
 **Why it still matters:** TLS termination, CDN, and corporate gateways often own **stronger** or **complementary** policies (e.g. broader CSP, `includeSubDomains` on HSTS). Document proxy behavior for audits.
 
 ## Gap: CSRF coverage may be incomplete for cookie session auth
 
-**Status (partially addressed):** For `/api/v1` routes that use `[get_api_key](../app/deps.py)`, mutating requests authenticated via **session cookie** (no `Authorization: Bearer`) must send a valid `**X-CSRF-Token`** matching the session; safe methods (`GET`, `HEAD`, `OPTIONS`) do not. Bearer-based clients are unchanged.
+**Status (partially addressed):** For `/api/v1` routes that use `[get_api_key](../app/deps.py)`, mutating requests authenticated via **session cookie** (no `Authorization: Bearer`) must send a valid `X-CSRF-Token` matching the session; safe methods (`GET`, `HEAD`, `OPTIONS`) do not. Bearer-based clients are unchanged.
 
 **Remaining vigilance:** New JSON routes must continue to depend on `get_api_key` (or otherwise enforce CSRF for cookie auth). Same-origin defaults and `SameSite` cookies are still not a substitute for reviewing new endpoints.
 
 **Historical note:** The SPA auth ADR (`docs/react-migration/adr/001-spa-auth.md`) described extending CSRF as the app grew; enforcement is centralized in `get_api_key` for session-backed API calls.
 
-## Gap: No built-in security audit trail
+## Gap: Audit evidence for compliance (beyond in-app logging)
 
-**Status (partially addressed):** The app emits **structured JSON audit lines** on logger `envelope.audit` and stores **append-only** rows in `audit_events` (see `app/services/audit.py`, `app/models.py` `AuditEvent`). Admin API: `GET /api/v1/system/audit-events`. Flags: `ENVELOPE_AUDIT_LOG_ENABLED`, `ENVELOPE_AUDIT_DATABASE_ENABLED` (see main `README.md`). **Operator guide:** [docs/audit-trail.md](audit-trail.md); in-app **Help** → **Security audit trail** (`/help/audit`).
+**Status (in-app trail implemented; residual expectations remain):** The app emits **structured JSON audit lines** on logger `envelope.audit` and stores **append-only** rows in `audit_events` (see `app/services/audit.py`, `app/models.py` `AuditEvent`). Admin API: `GET /api/v1/system/audit-events`. Flags: `ENVELOPE_AUDIT_LOG_ENABLED`, `ENVELOPE_AUDIT_DATABASE_ENABLED` (see main `README.md`). **Operator guide:** [docs/audit-trail.md](audit-trail.md); in-app **Help** → **Security audit trail** (`/help/audit`).
 
-**Residual expectations:** True immutability, long-term retention, and authoritative client IP for compliance are still typically owned by **SIEM/log pipelines**, **database access controls**, and/or **reverse-proxy access logs**. Opaque `/env/{token}` downloads have no API key identity in-app; correlate via `token_sha256` prefix in audit rows and gateway logs.
+**Residual expectations:** True immutability, long-term retention, and authoritative client IP for strict compliance are still typically owned by **SIEM/log pipelines**, **database access controls**, and/or **reverse-proxy access logs**. Opaque `/env/{token}` downloads have no API key identity in-app; correlate via `token_sha256` prefix in audit rows and gateway logs.
 
 **Mitigation direction:** Continue to log at the proxy/WAF for defense in depth; ship `envelope.audit` JSON to your aggregator; tune retention in your log/DB stack.
 
@@ -61,7 +62,9 @@ This document lists **known limitations** relative to typical **enterprise** or 
 
 ## Supply-chain / CI security checks
 
-**Status (addressed in default CI):** [`.github/workflows/ci-ghcr.yml`](../.github/workflows/ci-ghcr.yml) runs **`pip-audit`** on [`requirements.txt`](../requirements.txt), **`npm audit --audit-level=high`** after `npm ci` in [`frontend/`](../frontend/), **Bandit** (`-ll`, config [`bandit.yaml`](../bandit.yaml)) on `app/` and `cli/`, and **Trivy** on the built image (CRITICAL/HIGH, non-zero exit on matches). These steps are **blocking** for merges that use this workflow as a required check.
+**Status (addressed in default CI):** `[.github/workflows/ci-ghcr.yml](../.github/workflows/ci-ghcr.yml)` runs **pip-audit** on `[requirements.txt](../requirements.txt)`, `**npm audit --audit-level=high`** after `npm ci` in `[frontend/](../frontend/)`, **Bandit** (`-ll`, config `[bandit.yaml](../bandit.yaml)`) on `app/` and `cli/`, and **Trivy** on the built image (CRITICAL/HIGH, non-zero exit on matches). These steps are **blocking** for merges that use this workflow as a required check.
+
+**Optional:** `[.github/workflows/postgres-integration.yml](../.github/workflows/postgres-integration.yml)` exercises PostgreSQL-related paths when those files change.
 
 **Residual:** Tune severities (`npm audit` level, Trivy `severity` / `ignore-unfixed`) if your org wants stricter or advisory-only runs; optional SARIF upload to GitHub Advanced Security is not wired here.
 
@@ -71,7 +74,7 @@ This document lists **known limitations** relative to typical **enterprise** or 
 
 **Why it matters:** Abuse and accidental hot loops can still stress less-limited routes.
 
-**Mitigation direction:** App limits now cover JSON login, OIDC flows, API key and certificate CRUD, and sealed-secret endpoints, in addition to exports/backups/tfstate/system (see `app/limiter.py`). Add **gateway-level** rate zones for coarse caps; tune per deployment (see main `README.md`, “Behind a gateway” → “Edge rate limits”).
+**Mitigation direction:** App limits now cover JSON login, OIDC flows, API key and certificate CRUD, sealed-secret endpoints, bundles/stacks/env workflows, system maintenance, and Terraform HTTP state, among others (see `app/limiter.py` and per-route `@limiter.limit` usage). Add **gateway-level** rate zones for coarse caps; tune per deployment (see main `README.md`, “Behind a gateway” → “Edge rate limits”).
 
 ---
 

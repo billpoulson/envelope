@@ -12,3 +12,5 @@ data/
 node_modules/
 frontend/node_modules/
 frontend/dist/
+# Vite calver daily build counter (see frontend/vite.config.ts)
+frontend/.vite-daily-build.json

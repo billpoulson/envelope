@@ -1,6 +1,10 @@
 services:
   envelope:
-    build: .
+    build:
+      context: .
+      args:
+        # Optional: set in `.env` so each image build gets a distinct UI version (default empty → calver in Docker is 1 per clean build).
+        VITE_BUILD_NUMBER: ${VITE_BUILD_NUMBER:-}
     ports:
       - "8080:8080"
     environment:

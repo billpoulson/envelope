@@ -4,7 +4,9 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
 # React Router basename must match `/app` (see app/main.py _register_react_spa).
-ENV VITE_ADMIN_BASENAME=/app
+ARG VITE_BUILD_NUMBER=
+ENV VITE_ADMIN_BASENAME=/app \
+    VITE_BUILD_NUMBER=${VITE_BUILD_NUMBER}
 RUN npm run build
 
 FROM python:3.12-slim AS base

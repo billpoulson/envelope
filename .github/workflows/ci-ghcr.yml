@@ -93,6 +93,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             CACHEBUST=${{ github.run_id }}-${{ github.run_attempt }}
+            VITE_BUILD_NUMBER=${{ github.run_number }}
 
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@v0.35.0
