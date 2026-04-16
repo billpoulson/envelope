@@ -28,6 +28,7 @@ from app.services.scopes import (
     parse_scopes_json,
     scopes_allow_admin,
 )
+from app.services.audit import emit_audit_event
 from app.services.backup_crypto import (
     WrongPassphraseError,
     decrypt_bytes,
@@ -518,6 +519,7 @@ async def delete_bundle(
 @router.get("/bundles/{name}")
 async def get_bundle_decrypted(
     name: str,
+    request: Request,
     scope: ResourcePathScope = Depends(),
     include_secret_values: bool = Query(
         False,
@@ -543,6 +545,16 @@ async def get_bundle_decrypted(
         project_slug=pslug,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
+    if include_secret_values:
+        await emit_audit_event(
+            session,
+            request,
+            event_type="bundle.secrets_read",
+            actor=key,
+            bundle_id=bundle.id,
+            bundle_name=bundle.name,
+            details={"include_secret_values": True},
+        )
     secrets_map = {k: v[0] for k, v in entries.items()}
     secret_flags = {k: v[1] for k, v in entries.items()}
     return {
@@ -614,6 +626,15 @@ async def export_bundle(
         project_slug=pslug,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
+    await emit_audit_event(
+        session,
+        request,
+        event_type="bundle.export",
+        actor=key,
+        bundle_id=bundle.id,
+        bundle_name=bundle.name,
+        details={"format": format},
+    )
     if format == "json":
         body = json.dumps(secrets_map, sort_keys=True, indent=2) + "\n"
         return Response(
@@ -631,6 +652,7 @@ async def export_bundle(
 
 @router.get("/bundles/{name}/backup")
 async def export_bundle_backup_json(
+    request: Request,
     name: str,
     scope: ResourcePathScope = Depends(),
     key: ApiKey = Depends(get_api_key),
@@ -651,6 +673,15 @@ async def export_bundle_backup_json(
         project_slug=pslug,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
+    await emit_audit_event(
+        session,
+        request,
+        event_type="bundle.backup_json",
+        actor=key,
+        bundle_id=bundle.id,
+        bundle_name=bundle.name,
+        details={},
+    )
     secrets_map = {k: v[0] for k, v in entries.items()}
     secret_flags = {k: v[1] for k, v in entries.items()}
     return {
@@ -688,6 +719,15 @@ async def export_bundle_backup_encrypted(
         project_slug=pslug,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
+    await emit_audit_event(
+        session,
+        request,
+        event_type="bundle.backup_encrypted",
+        actor=key,
+        bundle_id=bundle.id,
+        bundle_name=bundle.name,
+        details={},
+    )
     payload = {
         "format": BUNDLE_BACKUP_FORMAT,
         "bundle": bundle.name,

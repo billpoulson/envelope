@@ -33,7 +33,11 @@ export default function TutorialPage() {
         Envelope stores named groups of environment variables (like{" "}
         <code className="rounded bg-white/10 px-1 font-mono text-slate-200">.env</code> files), encrypts
         secrets at rest, and exposes them to you and to automation via API keys. This page walks through the
-        web app in order. For long-form reference (API paths, Terraform state, backups), use{" "}
+        web app in order. For long-form reference (API paths, Terraform state, backups,{" "}
+        <Link to="/help/audit" className="text-accent underline">
+          audit trail
+        </Link>
+        ), use{" "}
         <Link to="/help" className="text-accent underline">
           Help
         </Link>
@@ -79,6 +83,11 @@ export default function TutorialPage() {
           <li>
             <a href="#admin" className="text-accent hover:underline">
               API keys and other admin tools
+            </a>
+          </li>
+          <li>
+            <a href="#audit-trail" className="text-accent hover:underline">
+              Audit trail (compliance)
             </a>
           </li>
         </ol>
@@ -184,6 +193,29 @@ export default function TutorialPage() {
               Help
             </Link>
             .
+          </p>
+        </Section>
+
+        <Section id="audit-trail" n={8} title="Audit trail (compliance)">
+          <p>
+            Exports, backups, cleartext bundle reads (when opted in), full-database backup/restore, and downloads via{" "}
+            <strong className="text-slate-200">Secret env URL</strong> tokens can be recorded for security review:{" "}
+            <strong className="text-slate-200">structured JSON logs</strong> (logger{" "}
+            <code className="font-mono text-slate-200">envelope.audit</code>) and optional rows in the{" "}
+            <strong className="text-slate-200">audit_events</strong> table. Configure{" "}
+            <code className="rounded bg-white/10 px-1 font-mono text-slate-200">ENVELOPE_AUDIT_LOG_ENABLED</code> and{" "}
+            <code className="rounded bg-white/10 px-1 font-mono text-slate-200">ENVELOPE_AUDIT_DATABASE_ENABLED</code>{" "}
+            in your deployment environment; use your log pipeline and/or{" "}
+            <code className="font-mono text-xs text-slate-200">GET /api/v1/system/audit-events</code> (admin) to query
+            events.
+          </p>
+          <p>
+            Step-by-step setup, proxy IP notes, and the admin API are in Help →{" "}
+            <Link to="/help/audit" className="text-accent underline">
+              Security audit trail
+            </Link>
+            . Operators can also read <strong className="text-slate-200">docs/audit-trail.md</strong> in the repository
+            for retention and gateway alignment.
           </p>
         </Section>
       </div>

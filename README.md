@@ -7,45 +7,42 @@ Self-hosted **secure environment bundle** manager: named groups of secrets (like
 - **Fernet (AES)** encryption of secret values at rest (SQLite or PostgreSQL) using `ENVELOPE_MASTER_KEY`
 - **API keys** (bcrypt-hashed): `read` (export bundles) and `admin` (manage bundles and keys)
 - **Export** for pipelines: `GET /api/v1/bundles/{name}/export?format=dotenv|json` with `Authorization: Bearer …`
-- **Bundle stacks** — ordered layers of existing bundles merged into one composite `.env` / JSON (`GET /api/v1/stacks/{name}/export`). Later layers **overwrite** duplicate keys from earlier layers. Scopes: `read:stack:…`, `write:stack:…` (and project scopes for stacks in a project). Web: **Stacks**; same opaque `/env/{token}` links as bundles (`POST /api/v1/stacks/{name}/env-links`). Stack links can optionally be a **prefix slice**: merge from the bottom through a chosen layer only (`POST` body `{"through_layer_position": <n>}` matching a layer position). **`GET /api/v1/bundles/{name}`** and **stack key graph** (`GET /api/v1/stacks/{name}/key-graph`) omit encrypted secret plaintext by default; pass `?include_secret_values=true` when you need cleartext (automation and scripts must opt in).
+- **Bundle stacks** — ordered layers of existing bundles merged into one composite `.env` / JSON (`GET /api/v1/stacks/{name}/export`). Later layers **overwrite** duplicate keys from earlier layers. Scopes: `read:stack:…`, `write:stack:…` (and project scopes for stacks in a project). Web: **Stacks**; same opaque `/env/{token}` links as bundles (`POST /api/v1/stacks/{name}/env-links`). Stack links can optionally be a **prefix slice**: merge from the bottom through a chosen layer only (`POST` body `{"through_layer_position": <n>}` matching a layer position). `**GET /api/v1/bundles/{name}`** and **stack key graph** (`GET /api/v1/stacks/{name}/key-graph`) omit encrypted secret plaintext by default; pass `?include_secret_values=true` when you need cleartext (automation and scripts must opt in).
 - **Opaque env URLs**: download a bundle **or merged stack** (full or prefix slice) as `.env` or JSON via `GET /env/{secret-token}` — the path is a random token only (no project, bundle, or stack name). Create links from a bundle’s or stack’s **Secret env URL** page (`…/bundles/{name}/env-links`, `…/stacks/{name}/env-links`) or the matching `POST /api/v1/…/env-links` API (API key with write access).
 - **Backups**: full SQLite snapshots and passphrase-encrypted files (admin; SQLite deployments only); per-bundle JSON/encrypted export and merge import (scoped API keys). PostgreSQL: use operator-managed backups.
 - **Rate limits** on sensitive routes (export, web login)
 - **Certificate-backed sealed secrets** (zero-knowledge path): store client-encrypted ciphertext + wrapped data keys per recipient certificate; server does not need private keys to decrypt
 - **Terraform HTTP remote state** (optional): per-project URLs `/tfstate/projects/<slug>/…` with **read/write project** scopes (or **admin**). See [docs/terraform-http-remote-state.md](docs/terraform-http-remote-state.md) and [docs/usage.md](docs/usage.md) (storage model and scopes).
-- **Help** in the web UI at **`/help`** (no login required) — usage overview including Terraform state storage.
+- **Help** in the web UI at `**/help`** (no login required) — usage overview including Terraform state storage.
 
 ## Quick start (Docker)
 
 1. Copy `.env.example` to `.env` and set:
-
-   - `ENVELOPE_MASTER_KEY` — generate with:
-     `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-   - `ENVELOPE_SESSION_SECRET` — long random string (web session signing)
-   - `ENVELOPE_INITIAL_ADMIN_KEY` — **first run only**: a chosen admin API key (stored hashed); remove after you create keys in the UI
-
+  - `ENVELOPE_MASTER_KEY` — generate with:
+   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+  - `ENVELOPE_SESSION_SECRET` — long random string (web session signing)
+  - `ENVELOPE_INITIAL_ADMIN_KEY` — **first run only**: a chosen admin API key (stored hashed); remove after you create keys in the UI
 2. Build and run:
-
-   ```bash
+  ```bash
    docker compose --env-file .env up --build
-   ```
-
+  ```
 3. Open `http://localhost:8080`, sign in with the **admin** key you set in `ENVELOPE_INITIAL_ADMIN_KEY`, create a **read** key for CI, add bundles and secrets.
-
 4. Remove `ENVELOPE_INITIAL_ADMIN_KEY` from your compose/env once you have another admin key saved.
 
 ## Database configuration
 
-Envelope stores API keys, bundles, secrets, Terraform HTTP state, and related data in **one** SQL database. Set **`ENVELOPE_DATABASE_URL`** if you do not want the default (file-backed SQLite).
+Envelope stores API keys, bundles, secrets, Terraform HTTP state, and related data in **one** SQL database. Set `**ENVELOPE_DATABASE_URL`** if you do not want the default (file-backed SQLite).
 
-| Backend | When to use | Example `ENVELOPE_DATABASE_URL` |
-| --- | --- | --- |
-| **SQLite** | Default; single node, dev, small deployments | `sqlite+aiosqlite:///./data/envelope.db` or, in Docker with a `/data` volume, `sqlite+aiosqlite:////data/envelope.db` |
-| **PostgreSQL** | Managed DB, HA, larger teams | `postgresql+asyncpg://user:password@host:5432/dbname` |
 
-- Copy **`ENVELOPE_DATABASE_URL`** into `.env` or your orchestration env (see [`.env.example`](.env.example)).
+| Backend        | When to use                                  | Example `ENVELOPE_DATABASE_URL`                                                                                       |
+| -------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **SQLite**     | Default; single node, dev, small deployments | `sqlite+aiosqlite:///./data/envelope.db` or, in Docker with a `/data` volume, `sqlite+aiosqlite:////data/envelope.db` |
+| **PostgreSQL** | Managed DB, HA, larger teams                 | `postgresql+asyncpg://user:password@host:5432/dbname`                                                                 |
+
+
+- Copy `**ENVELOPE_DATABASE_URL`** into `.env` or your orchestration env (see `[.env.example](.env.example)`).
 - **SQLite** — The admin backup API/UI can download a full **SQLite file** snapshot. Use a persistent volume so the file survives container restarts.
-- **PostgreSQL** — Requires the **`asyncpg`** driver (listed in [`requirements.txt`](requirements.txt), included in the Docker image). Create an empty database first; the app creates tables on startup. Use **`pg_dump`**, managed backups, or your cloud’s tools—**not** the in-app full-database download (that path is SQLite-only).
+- **PostgreSQL** — Requires the `**asyncpg`** driver (listed in `[requirements.txt](requirements.txt)`, included in the Docker image). Create an empty database first; the app creates tables on startup. Use `**pg_dump**`, managed backups, or your cloud’s tools—**not** the in-app full-database download (that path is SQLite-only).
 
 **Full guide:** [docs/database-configuration.md](docs/database-configuration.md) — Docker Compose with Postgres, TLS to the server, troubleshooting, and notes on moving from SQLite to PostgreSQL.
 
@@ -56,6 +53,15 @@ Use HTTP only on trusted networks. In production, terminate **HTTPS** in front o
 ## Security posture and enterprise use
 
 For **known limitations** (API key lookup model, SQLite, CSRF/header/audit expectations, CI scanning), see [docs/security-gaps.md](docs/security-gaps.md).
+
+## Audit trail
+
+Sensitive reads (bundle/stack export, bundle JSON backup, encrypted bundle backup, full-database backup/restore, `GET /api/v1/bundles/{name}?include_secret_values=true`, and opaque `GET /env/{token}` downloads) emit **structured audit records**:
+
+- **Logs:** JSON lines on the Python logger `envelope.audit` (one JSON object per line). Point your log agent at process stdout/stderr or structured log shipping. Records include API key id/name when the caller authenticated with a key, resource identifiers, client connection info, and a short hash prefix for env-link events (never the raw token).
+- **Database:** Rows in table `audit_events` (insert-only from the application). Query via admin API `GET /api/v1/system/audit-events?limit=50` with optional `before_id` for older pages (max `limit` 200). Long-term retention and immutability are still operator concerns (SIEM retention, DB privileges, or proxy access logs for defense in depth).
+
+**Environment:** `ENVELOPE_AUDIT_LOG_ENABLED` (default `true`), `ENVELOPE_AUDIT_DATABASE_ENABLED` (default `true`). Set either to `false` only if you rely entirely on another sink.
 
 ## Behind a gateway
 
@@ -71,16 +77,16 @@ This is **pattern A**: Envelope stays at the **root path** `/` on its own host n
 
 1. Point DNS (**A** / **AAAA**) for `envelope.example.com` to the machine or load balancer that runs Traefik (or another proxy).
 2. Terminate **TLS** at the proxy with a real certificate (Let’s Encrypt, etc.).
-3. Forward HTTP to the container on port **8080** (or your mapped port). Preserve the original **`Host`** header (Traefik does this by default).
-4. Set **`ENVELOPE_HTTPS_COOKIES=true`** so the web UI session cookie is marked **Secure**—browsers only send it over HTTPS to that host.
-5. Set **`FORWARDED_ALLOW_IPS`** so it includes the **proxy’s IP range** (see below). Uvicorn only trusts `X-Forwarded-Proto` / `X-Forwarded-For` from those addresses, which keeps generated opaque env URLs and `request.base_url` on `https://…`.
+3. Forward HTTP to the container on port **8080** (or your mapped port). Preserve the original `**Host`** header (Traefik does this by default).
+4. Set `**ENVELOPE_HTTPS_COOKIES=true**` so the web UI session cookie is marked **Secure**—browsers only send it over HTTPS to that host.
+5. Set `**FORWARDED_ALLOW_IPS`** so it includes the **proxy’s IP range** (see below). Uvicorn only trusts `X-Forwarded-Proto` / `X-Forwarded-For` from those addresses, which keeps generated opaque env URLs and `request.base_url` on `https://…`.
 
 ### Traefik (example)
 
-Traefik usually sets **`X-Forwarded-*`** for you when it proxies to the backend. Envelope must **trust** Traefik’s IP (not only `127.0.0.1`) or forwarded headers are ignored.
+Traefik usually sets `**X-Forwarded-*`** for you when it proxies to the backend. Envelope must **trust** Traefik’s IP (not only `127.0.0.1`) or forwarded headers are ignored.
 
 - Put Traefik and Envelope on the **same Docker network** and route by **host** rule.
-- Set **`FORWARDED_ALLOW_IPS`** on the Envelope service to the **Docker bridge** subnet Traefik uses (often something like `172.16.0.0/12`—inspect with `docker network inspect`). If Traefik is the only entry to Envelope on that network, restricting to that CIDR is enough for trust; avoid `*` unless you understand the risk.
+- Set `**FORWARDED_ALLOW_IPS`** on the Envelope service to the **Docker bridge** subnet Traefik uses (often something like `172.16.0.0/12`—inspect with `docker network inspect`). If Traefik is the only entry to Envelope on that network, restricting to that CIDR is enough for trust; avoid `*` unless you understand the risk.
 
 Example **Docker Compose** fragments (Traefik v2 style labels; adjust names, networks, and cert resolver to your setup):
 
@@ -111,7 +117,7 @@ services:
       - "traefik.http.services.envelope.loadbalancer.server.port=8080"
 ```
 
-Use **`websecure`** (HTTPS) for production; redirect HTTP → HTTPS with a global middleware if you expose port 80. After deploy, open `https://envelope.example.com` and confirm API/env links show **https** in generated URLs.
+Use `**websecure**` (HTTPS) for production; redirect HTTP → HTTPS with a global middleware if you expose port 80. After deploy, open `https://envelope.example.com` and confirm API/env links show **https** in generated URLs.
 
 ## CI example (GitHub Actions)
 
@@ -129,7 +135,7 @@ Use `format=json` for JSON instead of dotenv text.
 
 ## React admin (SPA)
 
-A **Vite + React + TypeScript + Tailwind** admin app lives under [`frontend/`](frontend/).
+A **Vite + React + TypeScript + Tailwind** admin app lives under `[frontend/](frontend/)`.
 
 **Local development** (API + Vite together):
 
@@ -145,9 +151,9 @@ Optional: run the API and Vite in two terminals — `uvicorn app.main:app --relo
 
 Install **pytest** for the default runner (`pip install pytest`). If pytest is missing, the scripts fall back to `python -m unittest discover` (same idea as CI). Pass extra arguments through to pytest (for example `./scripts/test.sh tests/test_bundle_entries_parse.py -v`).
 
-**Production-style process** (no reload, default port **8080** like the container): `scripts/start.sh` or `powershell -File scripts/start.ps1`. Put secrets in a **`.env`** file next to `.env.example` (see [Quick start](#quick-start-docker)); the app loads it when the working directory is the repo root. You can still set `ENVELOPE_*` in the shell; those override `.env`. Override bind address and proxy options with `PORT`, `HOST`, `FORWARDED_ALLOW_IPS`, `ENVELOPE_ROOT_PATH` as needed. On Windows, the scripts pick **Python 3.10+** via the `py` launcher if plain `python` is an older install.
+**Production-style process** (no reload, default port **8080** like the container): `scripts/start.sh` or `powershell -File scripts/start.ps1`. Put secrets in a `**.env`** file next to `.env.example` (see [Quick start](#quick-start-docker)); the app loads it when the working directory is the repo root. You can still set `ENVELOPE_*` in the shell; those override `.env`. Override bind address and proxy options with `PORT`, `HOST`, `FORWARDED_ALLOW_IPS`, `ENVELOPE_ROOT_PATH` as needed. On Windows, the scripts pick **Python 3.10+** via the `py` launcher if plain `python` is an older install.
 
-The **Docker image** builds the SPA and serves it at **`/app`**. Details: [`docs/react-migration/README.md`](docs/react-migration/README.md).
+The **Docker image** builds the SPA and serves it at `**/app`**. Details: `[docs/react-migration/README.md](docs/react-migration/README.md)`.
 
 ### Without project or bundle names in the download URL
 
@@ -160,7 +166,7 @@ Download: `curl -fsS "$URL" -o .env` or append `?format=json`. Revoke unused lin
 
 ## Opaque `/env/…` URLs and encrypted values
 
-**`GET /env/{token}`.** The `{token}` segment is a **random secret** Envelope generates when you create an env link. It is **not** `ENVELOPE_MASTER_KEY`, not something you paste from another system, and it does not encode the bundle or project name. Holders of the URL can download variables **without** `Authorization: Bearer`; treat the URL like a password. Query: `?format=dotenv` (default) or `?format=json`. The HTTP body is **plaintext** dotenv or JSON—protect it with **HTTPS**.
+`**GET /env/{token}`.** The `{token}` segment is a **random secret** Envelope generates when you create an env link. It is **not** `ENVELOPE_MASTER_KEY`, not something you paste from another system, and it does not encode the bundle or project name. Holders of the URL can download variables **without** `Authorization: Bearer`; treat the URL like a password. Query: `?format=dotenv` (default) or `?format=json`. The HTTP body is **plaintext** dotenv or JSON—protect it with **HTTPS**.
 
 **At-rest encryption.** Variable values marked secret are stored in SQLite as **Fernet** ciphertext using the server’s `ENVELOPE_MASTER_KEY`. Exports (`/api/v1/…/export`, `/env/…`, decrypted API responses) return **cleartext** for use in apps; the master key never appears in those responses.
 
@@ -198,7 +204,7 @@ curl -fsS "$ENVELOPE_SECRET_ENV_URL?format=json" | python -m json.tool
   run: curl -fsS "${{ secrets.ENVELOPE_ENV_URL }}" -o .env
 ```
 
-**Reusable action** (same behavior as [`cli/envelope_run.py`](cli/envelope_run.py): JSON export, optional `GITHUB_ENV` for later steps, HTTPS-only unless you opt into insecure HTTP). Pin a **release tag** or **commit SHA** (not a moving branch). Examples below use `v1.0.0` as a placeholder—substitute the tag you publish, or use `main` / a commit SHA until then.
+**Reusable action** (same behavior as `[cli/envelope_run.py](cli/envelope_run.py)`: JSON export, optional `GITHUB_ENV` for later steps, HTTPS-only unless you opt into insecure HTTP). Pin a **release tag** or **commit SHA** (not a moving branch). Examples below use `v1.0.0` as a placeholder—substitute the tag you publish, or use `main` / a commit SHA until then.
 
 ```yaml
 - uses: billpoulson/envelope/.github/actions/envelope-env@v1.0.0
@@ -219,7 +225,7 @@ Or pass the **full opaque URL** from a secret (like the `curl` example above):
 **Reference / vendoring** — browse or download raw files at a tag (replace `v1.0.0` with the tag you pin):
 
 - Folder: `https://github.com/billpoulson/envelope/tree/v1.0.0/.github/actions/envelope-env`
-- [`action.yml`](https://raw.githubusercontent.com/billpoulson/envelope/v1.0.0/.github/actions/envelope-env/action.yml) · [`envelope_run.py`](https://raw.githubusercontent.com/billpoulson/envelope/v1.0.0/.github/actions/envelope-env/envelope_run.py) (keep both under `.github/actions/envelope-env/` if you copy them into another repo)
+- `[action.yml](https://raw.githubusercontent.com/billpoulson/envelope/v1.0.0/.github/actions/envelope-env/action.yml)` · `[envelope_run.py](https://raw.githubusercontent.com/billpoulson/envelope/v1.0.0/.github/actions/envelope-env/envelope_run.py)` (keep both under `.github/actions/envelope-env/` if you copy them into another repo)
 
 If Envelope is behind a **path prefix** (`ENVELOPE_ROOT_PATH`), the `url` from the API already includes that prefix—use it exactly as returned.
 
@@ -231,7 +237,7 @@ Download the helper and wrappers from your Envelope origin (paths are stable):
 - `GET /cli/envelope-run.sh` — shell wrapper (`exec python3` next to `envelope_run.py`)
 - `GET /cli/envelope-run.ps1` — PowerShell wrapper
 
-In the **web UI**, open **Help → CLI (opaque env)** (path **`/app/help/cli`** when the admin SPA is served under `/app`) for an interactive page that detects this deployment’s base URL and generates **Bash** or **PowerShell** install scripts, with your choice of **user** or **system** `PATH`.
+In the **web UI**, open **Help → CLI (opaque env)** (path `**/app/help/cli`** when the admin SPA is served under `/app`) for an interactive page that detects this deployment’s base URL and generates **Bash** or **PowerShell** install scripts, with your choice of **user** or **system** `PATH`.
 
 Example:
 
@@ -251,7 +257,7 @@ curl -fsS "$ENVELOPE_URL/cli/envelope-run.sh" -o envelope-run.sh && chmod +x env
 python3 envelope_run.py --envelope-url "$ENVELOPE_URL" --token "$TOKEN" --out .env.local
 ```
 
-You can set **`ENVELOPE_URL`** and **`ENVELOPE_ENV_TOKEN`** instead of `--envelope-url` / `--token`. Errors avoid echoing the token or full request URL. **HTTPS only** unless **`ENVELOPE_CLI_INSECURE=1`** (local dev). **`--out`** files are cleartext secrets—protect like any `.env`.
+You can set `**ENVELOPE_URL**` and `**ENVELOPE_ENV_TOKEN**` instead of `--envelope-url` / `--token`. Errors avoid echoing the token or full request URL. **HTTPS only** unless `**ENVELOPE_CLI_INSECURE=1`** (local dev). `**--out**` files are cleartext secrets—protect like any `.env`.
 
 ## Certificate-backed sealed secrets (server-blind mode)
 
@@ -280,7 +286,7 @@ curl -fsS -X POST -H "Authorization: Bearer $ADMIN_KEY" \
   -d '{"name":"team-a-prod","certificate_pem":"-----BEGIN CERTIFICATE-----\n..."}'
 ```
 
-2. Upload a sealed secret (write scope for bundle):
+1. Upload a sealed secret (write scope for bundle):
 
 ```bash
 curl -fsS -X POST -H "Authorization: Bearer $WRITE_KEY" \
@@ -299,7 +305,7 @@ curl -fsS -X POST -H "Authorization: Bearer $WRITE_KEY" \
   }'
 ```
 
-3. Read/delete sealed secret metadata (read/write scope for bundle):
+1. Read/delete sealed secret metadata (read/write scope for bundle):
 
 - `GET /api/v1/bundles/{name}/sealed-secrets`
 - `DELETE /api/v1/bundles/{name}/sealed-secrets?key_name=...`
@@ -320,43 +326,46 @@ API docs: `http://localhost:8080/docs`
 
 ## API overview
 
-| Method | Path | Scope |
-|--------|------|--------|
-| GET | `/api/v1/bundles` | admin — list bundle names |
-| POST | `/api/v1/bundles` | admin — create bundle |
-| PATCH | `/api/v1/bundles/{name}` | write — optional `project_slug` / `group_id` (move project) and/or `entries` (upsert keys; same JSON rules as create) |
-| DELETE | `/api/v1/bundles/{name}` | admin |
-| GET | `/api/v1/bundles/{name}` | read (scoped) — JSON with keys; encrypted values omitted unless `?include_secret_values=true` |
-| GET | `/api/v1/bundles/{name}/export?format=dotenv` or `format=json` | read or admin |
-| POST | `/api/v1/bundles/{name}/secrets` | admin — body: `key_name`, `value` |
-| DELETE | `/api/v1/bundles/{name}/secrets?key_name=…` | admin |
-| GET | `/api/v1/bundles/{name}/env-links` | write scope for bundle — list link ids and `token_sha256` (not full URLs) |
-| POST | `/api/v1/bundles/{name}/env-links` | write — returns `{ "url": "…/env/<token>" }` once |
-| DELETE | `/api/v1/bundles/{name}/env-links/{id}` | write — revoke |
-| GET | `/api/v1/stacks` | list stack names (scoped) |
-| POST | `/api/v1/stacks` | create — body `name`, `layers` (bundle names, bottom→top), `project_slug` or `group_id` |
-| GET | `/api/v1/stacks/{name}` | read stack — metadata + ordered `layers` |
-| PATCH | `/api/v1/stacks/{name}` | write — optional `layers`, `project_slug` / `group_id` |
-| DELETE | `/api/v1/stacks/{name}` | write — deletes stack only (bundles unchanged) |
-| GET | `/api/v1/stacks/{name}/export?format=dotenv` or `format=json` | read stack **and** read every layer bundle |
-| GET/POST/DELETE | `/api/v1/stacks/{name}/env-links` | write — list links (`through_layer_position`, `slice_label`, `token_sha256`); POST optional JSON `{"through_layer_position": n}` for a prefix slice; merged export at `/env/{token}` |
-| GET | `/api/v1/certificates` | admin — list recipient certificates |
-| POST | `/api/v1/certificates` | admin — body `{"name":"…","certificate_pem":"-----BEGIN CERTIFICATE-----..."}` |
-| DELETE | `/api/v1/certificates/{id}` | admin — delete certificate (fails if in use) |
-| GET | `/api/v1/bundles/{name}/sealed-secrets` | read access to bundle — list ciphertext envelopes + recipients |
-| POST | `/api/v1/bundles/{name}/sealed-secrets` | write access to bundle — upsert ciphertext envelope + recipients |
-| DELETE | `/api/v1/bundles/{name}/sealed-secrets?key_name=…` | write access to bundle — delete one sealed secret row |
-| GET | `/api/v1/api-keys` | admin |
-| POST | `/api/v1/api-keys` | admin — body `{"name":"…","scopes":["…"]}`; use `read:project:…` / `write:project:…` for Terraform state under `/tfstate/projects/<slug>/…` |
-| DELETE | `/api/v1/api-keys/{id}` | admin |
-| GET | `/api/v1/system/backup/database` | admin — raw SQLite snapshot (`application/octet-stream`) |
-| POST | `/api/v1/system/backup/database` | admin — body `{"passphrase":"..."}`; encrypted `.envelope-db` download |
-| POST | `/api/v1/system/restore/database` | admin — multipart `file` (+ optional `passphrase` for encrypted files); **requires** `ENVELOPE_RESTORE_ENABLED=true` |
-| GET | `/api/v1/bundles/{name}/backup` | read access to bundle — structured JSON (`envelope-bundle-backup-v1`) |
-| POST | `/api/v1/bundles/{name}/backup/encrypted` | read — JSON `{"passphrase":"..."}`; encrypted bundle file |
-| PUT | `/api/v1/bundles/{name}/backup` | write access — merge secrets from JSON backup (upsert keys) |
-| POST | `/api/v1/bundles/{name}/backup/import-encrypted` | write — multipart `file` + form `passphrase` |
-| GET/POST/DELETE/LOCK/UNLOCK | `/tfstate/projects/{slug}/{path}` | **read:project…** / **write:project…** (or admin); Terraform state per project |
+
+| Method                      | Path                                                           | Scope                                                                                                                                                                                |
+| --------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET                         | `/api/v1/bundles`                                              | admin — list bundle names                                                                                                                                                            |
+| POST                        | `/api/v1/bundles`                                              | admin — create bundle                                                                                                                                                                |
+| PATCH                       | `/api/v1/bundles/{name}`                                       | write — optional `project_slug` / `group_id` (move project) and/or `entries` (upsert keys; same JSON rules as create)                                                                |
+| DELETE                      | `/api/v1/bundles/{name}`                                       | admin                                                                                                                                                                                |
+| GET                         | `/api/v1/bundles/{name}`                                       | read (scoped) — JSON with keys; encrypted values omitted unless `?include_secret_values=true`                                                                                        |
+| GET                         | `/api/v1/bundles/{name}/export?format=dotenv` or `format=json` | read or admin                                                                                                                                                                        |
+| POST                        | `/api/v1/bundles/{name}/secrets`                               | admin — body: `key_name`, `value`                                                                                                                                                    |
+| DELETE                      | `/api/v1/bundles/{name}/secrets?key_name=…`                    | admin                                                                                                                                                                                |
+| GET                         | `/api/v1/bundles/{name}/env-links`                             | write scope for bundle — list link ids and `token_sha256` (not full URLs)                                                                                                            |
+| POST                        | `/api/v1/bundles/{name}/env-links`                             | write — returns `{ "url": "…/env/<token>" }` once                                                                                                                                    |
+| DELETE                      | `/api/v1/bundles/{name}/env-links/{id}`                        | write — revoke                                                                                                                                                                       |
+| GET                         | `/api/v1/stacks`                                               | list stack names (scoped)                                                                                                                                                            |
+| POST                        | `/api/v1/stacks`                                               | create — body `name`, `layers` (bundle names, bottom→top), `project_slug` or `group_id`                                                                                              |
+| GET                         | `/api/v1/stacks/{name}`                                        | read stack — metadata + ordered `layers`                                                                                                                                             |
+| PATCH                       | `/api/v1/stacks/{name}`                                        | write — optional `layers`, `project_slug` / `group_id`                                                                                                                               |
+| DELETE                      | `/api/v1/stacks/{name}`                                        | write — deletes stack only (bundles unchanged)                                                                                                                                       |
+| GET                         | `/api/v1/stacks/{name}/export?format=dotenv` or `format=json`  | read stack **and** read every layer bundle                                                                                                                                           |
+| GET/POST/DELETE             | `/api/v1/stacks/{name}/env-links`                              | write — list links (`through_layer_position`, `slice_label`, `token_sha256`); POST optional JSON `{"through_layer_position": n}` for a prefix slice; merged export at `/env/{token}` |
+| GET                         | `/api/v1/certificates`                                         | admin — list recipient certificates                                                                                                                                                  |
+| POST                        | `/api/v1/certificates`                                         | admin — body `{"name":"…","certificate_pem":"-----BEGIN CERTIFICATE-----..."}`                                                                                                       |
+| DELETE                      | `/api/v1/certificates/{id}`                                    | admin — delete certificate (fails if in use)                                                                                                                                         |
+| GET                         | `/api/v1/bundles/{name}/sealed-secrets`                        | read access to bundle — list ciphertext envelopes + recipients                                                                                                                       |
+| POST                        | `/api/v1/bundles/{name}/sealed-secrets`                        | write access to bundle — upsert ciphertext envelope + recipients                                                                                                                     |
+| DELETE                      | `/api/v1/bundles/{name}/sealed-secrets?key_name=…`             | write access to bundle — delete one sealed secret row                                                                                                                                |
+| GET                         | `/api/v1/api-keys`                                             | admin                                                                                                                                                                                |
+| POST                        | `/api/v1/api-keys`                                             | admin — body `{"name":"…","scopes":["…"]}`; use `read:project:…` / `write:project:…` for Terraform state under `/tfstate/projects/<slug>/…`                                          |
+| DELETE                      | `/api/v1/api-keys/{id}`                                        | admin                                                                                                                                                                                |
+| GET                         | `/api/v1/system/backup/database`                               | admin — raw SQLite snapshot (`application/octet-stream`)                                                                                                                             |
+| POST                        | `/api/v1/system/backup/database`                               | admin — body `{"passphrase":"..."}`; encrypted `.envelope-db` download                                                                                                               |
+| POST                        | `/api/v1/system/restore/database`                              | admin — multipart `file` (+ optional `passphrase` for encrypted files); **requires** `ENVELOPE_RESTORE_ENABLED=true`                                                                 |
+| GET                         | `/api/v1/system/audit-events`                                  | admin — paginated security audit log (`limit`, `before_id`)                                                                                                                          |
+| GET                         | `/api/v1/bundles/{name}/backup`                                | read access to bundle — structured JSON (`envelope-bundle-backup-v1`)                                                                                                                |
+| POST                        | `/api/v1/bundles/{name}/backup/encrypted`                      | read — JSON `{"passphrase":"..."}`; encrypted bundle file                                                                                                                            |
+| PUT                         | `/api/v1/bundles/{name}/backup`                                | write access — merge secrets from JSON backup (upsert keys)                                                                                                                          |
+| POST                        | `/api/v1/bundles/{name}/backup/import-encrypted`               | write — multipart `file` + form `passphrase`                                                                                                                                         |
+| GET/POST/DELETE/LOCK/UNLOCK | `/tfstate/projects/{slug}/{path}`                              | **read:project…** / **write:project…** (or admin); Terraform state per project                                                                                                       |
+
 
 Never log request bodies or API keys.
 
@@ -365,7 +374,6 @@ Never log request bodies or API keys.
 Two levels:
 
 1. **Full database (disaster recovery)** — Admin API key only (`GET`/`POST /api/v1/system/backup/database`). The raw file is sensitive (metadata, Fernet ciphertext, API key hashes). Encrypted downloads use **Scrypt** + **AES-256-GCM**; passphrases must only be sent over **HTTPS** in production. The backup file does **not** include `ENVELOPE_MASTER_KEY`; keep the Fernet key in a separate secret store so you can decrypt secret values after restore.
-
 2. **Single bundle** — Any key with read access can export `GET /api/v1/bundles/{name}/backup` or request an encrypted bundle file; keys with write access can `PUT` merge-import JSON or `POST` an encrypted file. This is for moving one bundle between instances without sharing the whole database.
 
 **Restore** replaces the SQLite file on disk (`/data/envelope.db` in Docker). It is **disabled** by default (`ENVELOPE_RESTORE_ENABLED=false`). Enable only when you need in-app recovery; otherwise stop the container and replace the file on the volume manually. The web UI exposes the same operations at `/backup` (signed-in admin).

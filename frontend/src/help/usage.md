@@ -1,6 +1,6 @@
 # Envelope — usage guide
 
-> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **[Installation & hosting](/help/installation)**, **`/help/web-ui`**, **[OpenID Connect (SSO)](/help/oidc)**, **`/help/api`**, **`/help/certificates`**, **`/help/terraform`**, **[CLI (opaque env)](/help/cli)**, **[GitHub Actions](/help/github-actions)**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
+> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **[Installation & hosting](/help/installation)**, **`/help/web-ui`**, **[OpenID Connect (SSO)](/help/oidc)**, **`/help/api`**, **`/help/certificates`**, **`/help/terraform`**, **[CLI (opaque env)](/help/cli)**, **[GitHub Actions](/help/github-actions)**, **[Security audit trail](/help/audit)**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
 
 Envelope is a self-hosted **secure environment bundle** manager: named groups of variables (like a `.env` file), **encrypted at rest** for secret values, with **API keys** for automation and a **web UI** for administration.
 
@@ -26,7 +26,7 @@ For **installation**, **environment variables**, **TLS**, and **reverse proxies*
 | **`ENVELOPE_DATABASE_URL`** | Optional. Defaults to **SQLite** under the app data directory (e.g. `sqlite+aiosqlite:////data/envelope.db` in Docker with a `/data` volume). For **PostgreSQL**, use `postgresql+asyncpg://user:pass@host:5432/dbname` (managed DB, HA, backups via your platform). |
 | **`ENVELOPE_INITIAL_ADMIN_KEY`** | **First deployment only:** plaintext admin API key, stored hashed; remove after bootstrap. |
 
-Optional flags (see also **Behind a reverse proxy**): `ENVELOPE_RESTORE_ENABLED`, `ENVELOPE_HTTPS_COOKIES`, `ENVELOPE_ROOT_PATH`, `FORWARDED_ALLOW_IPS`, `ENVELOPE_TERRAFORM_HTTP_STATE_ENABLED`, etc., as documented for your image or compose file.
+Optional flags (see also **Behind a reverse proxy**): `ENVELOPE_RESTORE_ENABLED`, `ENVELOPE_HTTPS_COOKIES`, `ENVELOPE_ROOT_PATH`, `FORWARDED_ALLOW_IPS`, `ENVELOPE_TERRAFORM_HTTP_STATE_ENABLED`, `ENVELOPE_AUDIT_LOG_ENABLED`, `ENVELOPE_AUDIT_DATABASE_ENABLED`, etc., as documented for your image or compose file.
 
 ### Database backend (`ENVELOPE_DATABASE_URL`)
 
@@ -289,6 +289,39 @@ For **GitHub Actions**, see **[GitHub Actions](/help/github-actions)** (reusable
 ## GitHub Actions
 
 The same opaque-env fetch logic as [`cli/envelope_run.py`](https://github.com/billpoulson/envelope/blob/main/cli/envelope_run.py) is published as a **reusable composite action** in the [Envelope](https://github.com/billpoulson/envelope) repository: **`.github/actions/envelope-env/`**. Reference it with `uses: billpoulson/envelope/.github/actions/envelope-env@<tag>` and pin a **semver tag** or **commit SHA**. The **tutorial** below walks through secrets, workflow YAML, and optional vendoring.
+
+---
+
+## Security audit trail
+
+Envelope records **who** accessed sensitive data **when** (API key id and name snapshot, resource ids, request path, client connection info). This supports compliance and incident review alongside your **reverse-proxy access logs**.
+
+### What is audited
+
+Typical events include bundle/stack **export**, bundle **JSON or encrypted backup** download, **`GET /api/v1/bundles/{name}?include_secret_values=true`**, full-database **backup/restore** (admin), and **`GET /env/{token}`** opaque env downloads. Env-link downloads include a **short prefix** of the stored token hash for correlation—not the raw URL token.
+
+### Configuration (environment)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| **`ENVELOPE_AUDIT_LOG_ENABLED`** | `true` | Emit one **JSON object per line** on the Python logger **`envelope.audit`** (process stdout/stderr in Docker). |
+| **`ENVELOPE_AUDIT_DATABASE_ENABLED`** | `true` | Append rows to the **`audit_events`** table. Set to `false` if you ingest logs only. |
+
+### Logs (SIEM / aggregators)
+
+- Ship container or process logs to your platform (CloudWatch, Datadog, Splunk, Loki, …) and **filter or parse** lines from logger `envelope.audit`. Each line is a single JSON object (no secret values or request bodies).
+- **Client IP:** The app logs the ASGI client host. When Envelope runs behind a trusted proxy, set **`FORWARDED_ALLOW_IPS`** (see **Installation & hosting**) so Uvicorn can apply **`X-Forwarded-For`** / **`X-Forwarded-Proto`**; otherwise rely on **gateway access logs** for authoritative client IP.
+
+### Database and admin API
+
+- Rows accumulate in **`audit_events`**. Plan **disk** (SQLite) or **table growth** (PostgreSQL); the product does not prune old rows automatically.
+- Admins can page events: **`GET /api/v1/system/audit-events?limit=50`** with optional **`before_id`** for older pages (see OpenAPI **`/docs`**). Requires an **admin** API key (or signed-in admin session for browser calls).
+
+### Opaque env URLs and gateways
+
+Unauthenticated **`/env/…`** downloads have **no API key** in the audit row (actor is empty). Correlate using **`token_sha256_prefix`** plus your **proxy or WAF logs** (path, source IP, user-agent).
+
+**Repository reference:** [docs/audit-trail.md](https://github.com/billpoulson/envelope/blob/main/docs/audit-trail.md) (operator-focused guide: retention, immutability, proxy alignment).
 
 ---
 

@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_db
 from app.deps import get_api_key
+from app.services.audit import emit_audit_event
 from app.limiter import limiter
 from app.models import ApiKey, BundleGroup, BundleStack, BundleStackLayer, ProjectEnvironment, StackEnvLink
 from app.services.bundles import format_secrets_dotenv
@@ -675,6 +676,15 @@ async def export_stack(
         raise HTTPException(status_code=404, detail="Stack not found")
     scopes = parse_scopes_json(key.scopes)
     await _ensure_can_export_stack(session, st, scopes)
+    await emit_audit_event(
+        session,
+        request,
+        event_type="stack.export",
+        actor=key,
+        stack_id=st.id,
+        stack_name=st.name,
+        details={"format": format},
+    )
     secrets_map = await load_stack_secrets(session, st)
     safe_fn = st.slug or name
     if format == "json":

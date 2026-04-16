@@ -12,6 +12,7 @@ export type HelpSectionId =
   | "terraform"
   | "cli"
   | "github-actions"
+  | "audit"
   | "backup";
 
 function headingToSectionId(title: string): HelpSectionId | null {
@@ -24,6 +25,7 @@ function headingToSectionId(title: string): HelpSectionId | null {
   if (t.startsWith("Terraform HTTP")) return "terraform";
   if (t === "CLI tool") return "cli";
   if (t === "GitHub Actions") return "github-actions";
+  if (t === "Security audit trail") return "audit";
   return null;
 }
 

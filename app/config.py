@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     oidc_post_login_path: str = "/projects"
     oidc_redirect_uri_override: str = ""
 
+    # Structured security audit: JSON lines via logger `envelope.audit` + optional `audit_events` table.
+    audit_log_enabled: bool = True
+    audit_database_enabled: bool = True
+
     @field_validator("root_path", mode="before")
     @classmethod
     def _normalize_root_path(cls, v: object) -> str:

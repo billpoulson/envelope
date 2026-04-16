@@ -1,13 +1,15 @@
 # Database configuration
 
-Envelope stores all application data (API keys, bundles, secrets, Terraform HTTP state, OIDC settings, etc.) in a **single** SQL database. You choose the backend with **`ENVELOPE_DATABASE_URL`** (SQLAlchemy [async URL](https://docs.sqlalchemy.org/en/20/core/engines.html#database-urls)).
+Envelope stores all application data (API keys, bundles, secrets, Terraform HTTP state, OIDC settings, etc.) in a **single** SQL database. You choose the backend with `**ENVELOPE_DATABASE_URL`** (SQLAlchemy [async URL](https://docs.sqlalchemy.org/en/20/core/engines.html#database-urls)).
 
 Supported options:
 
-| Backend | Driver | Typical use |
-| --- | --- | --- |
-| **SQLite** (default) | `aiosqlite` | Single node, development, small teams, Docker with a volume |
-| **PostgreSQL** | `asyncpg` | Managed databases, HA, larger teams, stricter operational requirements |
+
+| Backend              | Driver      | Typical use                                                            |
+| -------------------- | ----------- | ---------------------------------------------------------------------- |
+| **SQLite** (default) | `aiosqlite` | Single node, development, small teams, Docker with a volume            |
+| **PostgreSQL**       | `asyncpg`   | Managed databases, HA, larger teams, stricter operational requirements |
+
 
 The app uses **one** URL per process. There is no automatic replication or multi-writer clustering; for PostgreSQL, point the URL at your **primary** (read/write) endpoint.
 
@@ -38,9 +40,9 @@ ENVELOPE_DATABASE_URL=postgresql+asyncpg://envelope:your-secret@db.example.com:5
 
 **Requirements:**
 
-- The **`asyncpg`** package must be installed (included in the project’s `requirements.txt` and Docker image).
+- The `**asyncpg`** package must be installed (included in the project’s `requirements.txt` and Docker image).
 - The database must exist before Envelope starts (create an empty database and user with appropriate permissions).
-- On first startup, Envelope runs **`create_all`** from the ORM models to create tables and indexes. Use a **dedicated** database (do not share a schema with unrelated applications).
+- On first startup, Envelope runs `**create_all**` from the ORM models to create tables and indexes. Use a **dedicated** database (do not share a schema with unrelated applications).
 
 **SSL / TLS to the server:**
 
@@ -89,22 +91,26 @@ Adjust image name, secrets, and networking to match your environment. Do not com
 
 ## Environment variable summary
 
-| Variable | Meaning |
-| --- | --- |
-| **`ENVELOPE_DATABASE_URL`** | SQLAlchemy async URL. Defaults to SQLite under `./data/envelope.db` if unset (see `app/config.py`). |
 
-Other settings (e.g. **`ENVELOPE_MASTER_KEY`**, **`ENVELOPE_SESSION_SECRET`**) are unchanged; they are not database-specific.
+| Variable                    | Meaning                                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------------------- |
+| `**ENVELOPE_DATABASE_URL**` | SQLAlchemy async URL. Defaults to SQLite under `./data/envelope.db` if unset (see `app/config.py`). |
+
+
+Other settings (e.g. `**ENVELOPE_MASTER_KEY**`, `**ENVELOPE_SESSION_SECRET**`) are unchanged; they are not database-specific.
 
 ---
 
 ## Backups and disaster recovery
 
-| Deployment | Full DB backup in the app |
-| --- | --- |
-| **SQLite** (file-backed) | Yes — admin API and UI can download a snapshot (and optional encrypted archive). |
-| **PostgreSQL** | No — use database-native or platform tooling. |
 
-Restoring a SQLite file via **`POST /api/v1/system/restore/database`** only applies to file-backed SQLite URLs.
+| Deployment               | Full DB backup in the app                                                        |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| **SQLite** (file-backed) | Yes — admin API and UI can download a snapshot (and optional encrypted archive). |
+| **PostgreSQL**           | No — use database-native or platform tooling.                                    |
+
+
+Restoring a SQLite file via `**POST /api/v1/system/restore/database`** only applies to file-backed SQLite URLs.
 
 ---
 
@@ -112,7 +118,7 @@ Restoring a SQLite file via **`POST /api/v1/system/restore/database`** only appl
 
 There is **no** built-in one-click migration. Typical approaches:
 
-1. Export what you need via the API (bundles, keys) and re-import in a fresh PostgreSQL deployment, or  
+1. Export what you need via the API (bundles, keys) and re-import in a fresh PostgreSQL deployment, or
 2. Use one-off ETL / `pgloader` / custom scripts, depending on your compliance and downtime constraints.
 
 Treat this as a planned migration with testing in a staging environment.
@@ -121,7 +127,7 @@ Treat this as a planned migration with testing in a staging environment.
 
 ## Troubleshooting
 
-- **`NotImplementedError: Unsupported database dialect`** — Only **`sqlite`** and **`postgresql`** (via **`asyncpg`**) are supported. Check the URL scheme and driver name.
+- `**NotImplementedError: Unsupported database dialect`** — Only `**sqlite**` and `**postgresql**` (via `**asyncpg**`) are supported. Check the URL scheme and driver name.
 - **Connection refused / timeout** — Verify host, port, firewall, and that PostgreSQL accepts connections from the Envelope host.
 - **Authentication failed** — Check user, password, and `pg_hba.conf` / cloud security rules.
 

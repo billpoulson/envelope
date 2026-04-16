@@ -1212,6 +1212,94 @@ class ApiKeyResolutionTests(unittest.TestCase):
             self.assertEqual(r2.status_code, 200, r.text)
 
 
+class AuditTrailHttpTests(unittest.TestCase):
+    """Structured audit logger + audit_events rows on sensitive reads."""
+
+    _token = "tfstate-http-test-admin-key"
+
+    def test_bundle_export_emits_audit_log_and_database_row(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        with TestClient(app) as client:
+            pr = client.post(
+                "/api/v1/projects",
+                json={"name": f"Audit proj {nonce}", "slug": f"auditproj-{nonce}"},
+                headers=hj,
+            )
+            self.assertEqual(pr.status_code, 201, pr.text)
+            _ensure_default_environment(client, hj, f"auditproj-{nonce}")
+            br = client.post(
+                "/api/v1/bundles",
+                json={
+                    "name": f"audit-bun-{nonce}",
+                    "project_slug": f"auditproj-{nonce}",
+                    "project_environment_slug": "default",
+                },
+                headers=hj,
+            )
+            self.assertEqual(br.status_code, 201, br.text)
+            with self.assertLogs("envelope.audit", level="INFO") as cm:
+                ex = client.get(
+                    f"/api/v1/bundles/audit-bun-{nonce}/export?format=dotenv",
+                    headers=h,
+                )
+            self.assertEqual(ex.status_code, 200, ex.text)
+            logged = "\n".join(cm.output)
+            self.assertIn("bundle.export", logged)
+            ar = client.get("/api/v1/system/audit-events?limit=20", headers=h)
+            self.assertEqual(ar.status_code, 200, ar.text)
+            events = ar.json()["events"]
+            types = [e["event_type"] for e in events]
+            self.assertIn("bundle.export", types)
+            hit = next(e for e in events if e["event_type"] == "bundle.export")
+            self.assertIsNotNone(hit.get("actor_api_key_id"))
+            self.assertEqual(hit.get("details", {}).get("format"), "dotenv")
+
+    def test_env_link_download_audit_has_no_api_key_actor(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        with TestClient(app) as client:
+            pr = client.post(
+                "/api/v1/projects",
+                json={"name": f"Env audit {nonce}", "slug": f"envaudit-{nonce}"},
+                headers=hj,
+            )
+            self.assertEqual(pr.status_code, 201, pr.text)
+            _ensure_default_environment(client, hj, f"envaudit-{nonce}")
+            br = client.post(
+                "/api/v1/bundles",
+                json={
+                    "name": f"env-audit-bun-{nonce}",
+                    "project_slug": f"envaudit-{nonce}",
+                    "project_environment_slug": "default",
+                },
+                headers=hj,
+            )
+            self.assertEqual(br.status_code, 201, br.text)
+            lr = client.post(
+                f"/api/v1/bundles/env-audit-bun-{nonce}/env-links",
+                json={},
+                headers=hj,
+            )
+            self.assertEqual(lr.status_code, 201, lr.text)
+            url = lr.json()["url"]
+            token = url.split("/env/")[-1]
+            with self.assertLogs("envelope.audit", level="INFO") as cm:
+                dr = client.get(f"/env/{token}")
+            self.assertEqual(dr.status_code, 200, dr.text)
+            logged = "\n".join(cm.output)
+            self.assertIn("env_link.download", logged)
+            ar = client.get("/api/v1/system/audit-events?limit=20", headers=h)
+            self.assertEqual(ar.status_code, 200, ar.text)
+            evs = [e for e in ar.json()["events"] if e["event_type"] == "env_link.download"]
+            self.assertTrue(evs)
+            e0 = evs[0]
+            self.assertIsNone(e0.get("actor_api_key_id"))
+            self.assertIsNotNone(e0.get("token_sha256_prefix"))
+
+
 class SecurityHeadersHttpTests(unittest.TestCase):
     """Baseline browser hardening headers from app/security_headers.py."""
 

@@ -15,6 +15,7 @@ from starlette.status import HTTP_302_FOUND
 from app.db import get_db
 from app.limiter import limiter
 from app.models import Bundle, BundleEnvLink, BundleStack, StackEnvLink
+from app.services.audit import emit_audit_event
 from app.paths import url_path
 from app.services.bundles import format_secrets_dotenv, load_bundle_secrets
 from app.services.env_links import token_sha256_hex
@@ -119,8 +120,19 @@ async def download_env_by_secret_token(
     )
     row = r.one_or_none()
     if row is not None:
-        _link, bundle = row
+        link, bundle = row
         _, secrets_map = await load_bundle_secrets(session, bundle.name)
+        await emit_audit_event(
+            session,
+            request,
+            event_type="env_link.download",
+            actor=None,
+            bundle_id=bundle.id,
+            bundle_name=bundle.name,
+            bundle_env_link_id=link.id,
+            token_sha256_prefix=digest[:8],
+            details={"format": format, "kind": "bundle"},
+        )
     else:
         rs = await session.execute(
             select(StackEnvLink, BundleStack)
@@ -130,8 +142,8 @@ async def download_env_by_secret_token(
         row2 = rs.one_or_none()
         if row2 is None:
             raise HTTPException(status_code=404, detail="Not found")
-        slink, stack = row2
-        stack = await get_stack_by_name(session, stack.name)
+        slink, _stack_row = row2
+        stack = await get_stack_by_name(session, _stack_row.name)
         assert stack is not None
         if slink.through_layer_position is not None:
             secrets_map = await load_stack_secrets_through(
@@ -139,6 +151,21 @@ async def download_env_by_secret_token(
             )
         else:
             secrets_map = await load_stack_secrets(session, stack)
+        await emit_audit_event(
+            session,
+            request,
+            event_type="env_link.download",
+            actor=None,
+            stack_id=stack.id,
+            stack_name=stack.name,
+            stack_env_link_id=slink.id,
+            token_sha256_prefix=digest[:8],
+            details={
+                "format": format,
+                "kind": "stack",
+                "through_layer_position": slink.through_layer_position,
+            },
+        )
     if format == "json":
         body = json.dumps(secrets_map, sort_keys=True, indent=2) + "\n"
         return Response(

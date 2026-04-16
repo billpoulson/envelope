@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -113,8 +114,19 @@ def _register_react_spa(app: FastAPI) -> None:
         return FileResponse(index)
 
 
+def _configure_audit_logger() -> None:
+    log = logging.getLogger("envelope.audit")
+    log.setLevel(logging.INFO)
+    if not log.handlers:
+        h = logging.StreamHandler()
+        h.setFormatter(logging.Formatter("%(message)s"))
+        log.addHandler(h)
+        log.propagate = False
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
+    _configure_audit_logger()
     _validate_master_key(settings)
     if not settings.session_secret and not settings.debug:
         raise RuntimeError("ENVELOPE_SESSION_SECRET is required when ENVELOPE_DEBUG is false")

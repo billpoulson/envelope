@@ -45,11 +45,11 @@ This document lists **known limitations** relative to typical **enterprise** or 
 
 ## Gap: No built-in security audit trail
 
-**Issue:** There is no first-class **append-only audit log** (e.g. who exported which bundle, from which identity, at what time) for compliance workflows.
+**Status (partially addressed):** The app emits **structured JSON audit lines** on logger `envelope.audit` and stores **append-only** rows in `audit_events` (see `app/services/audit.py`, `app/models.py` `AuditEvent`). Admin API: `GET /api/v1/system/audit-events`. Flags: `ENVELOPE_AUDIT_LOG_ENABLED`, `ENVELOPE_AUDIT_DATABASE_ENABLED` (see main `README.md`). **Operator guide:** [docs/audit-trail.md](audit-trail.md); in-app **Help** → **Security audit trail** (`/help/audit`).
 
-**Why it matters:** SOC2, ISO 27001, and internal security teams often require queryable access logs and retention policies.
+**Residual expectations:** True immutability, long-term retention, and authoritative client IP for compliance are still typically owned by **SIEM/log pipelines**, **database access controls**, and/or **reverse-proxy access logs**. Opaque `/env/{token}` downloads have no API key identity in-app; correlate via `token_sha256` prefix in audit rows and gateway logs.
 
-**Mitigation direction:** Log at the proxy/WAF; or add structured application audit events to your log pipeline.
+**Mitigation direction:** Continue to log at the proxy/WAF for defense in depth; ship `envelope.audit` JSON to your aggregator; tune retention in your log/DB stack.
 
 ## Gap: IAM model is API-key–centric
 

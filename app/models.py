@@ -434,3 +434,35 @@ class ApiKey(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AuditEvent(Base):
+    """Append-only security audit rows (application code inserts only; no updates/deletes)."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_created_at", "created_at"),
+        Index("ix_audit_events_event_type", "event_type"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_api_key_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    actor_api_key_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    bundle_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    bundle_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    stack_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    stack_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    bundle_env_link_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stack_env_link_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    token_sha256_prefix: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    http_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
