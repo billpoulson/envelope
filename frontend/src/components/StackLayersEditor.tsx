@@ -416,13 +416,6 @@ export function StackLayersEditor({
                   <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-sm text-white">
                     {badge}
                   </span>
-                  <span className="ml-2 text-xs text-slate-500">
-                    {index === 0
-                      ? "Bottom"
-                      : index === layers.length - 1
-                        ? "Top — wins on duplicate keys"
-                        : "Middle"}
-                  </span>
                   {!isExpanded && layer.bundle.trim() && hasCustomLabel ? (
                     <span className="ml-2 truncate font-mono text-xs text-slate-400" title={layer.bundle}>
                       · {layer.bundle}
