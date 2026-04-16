@@ -99,3 +99,4 @@ jobs:
           image-ref: ${{ steps.docker_build.outputs.imageid }}
           severity: CRITICAL,HIGH
           exit-code: "1"
+          trivyignores: .trivyignore
