@@ -23,18 +23,16 @@ class EffectiveOidcConfig:
     scopes: str
     allowed_email_domains: list[str]
     post_login_path: str
-    proxy_admin_key_id: int | None
     redirect_uri_override: str | None
     source: str  # "db" | "env"
 
-    def is_login_ready(self) -> bool:
+    def is_oidc_configured(self) -> bool:
+        """Operator IdP settings complete (SSO button / link flow can start)."""
         if not self.enabled:
             return False
         if not self.issuer or not self.client_id:
             return False
         if not self.client_secret:
-            return False
-        if self.proxy_admin_key_id is None:
             return False
         return True
 
@@ -71,7 +69,6 @@ def _from_env(settings: Settings) -> EffectiveOidcConfig:
         scopes=(settings.oidc_scopes or "").strip() or "openid email profile",
         allowed_email_domains=_parse_domains(settings.oidc_allowed_email_domains),
         post_login_path=(settings.oidc_post_login_path or "").strip() or "/projects",
-        proxy_admin_key_id=settings.oidc_proxy_admin_key_id,
         redirect_uri_override=(settings.oidc_redirect_uri_override or "").strip() or None,
         source="env",
     )
@@ -93,7 +90,6 @@ async def load_effective_oidc_config(session: AsyncSession) -> EffectiveOidcConf
         scopes=(row.scopes or "").strip() or "openid email profile",
         allowed_email_domains=_parse_domains(row.allowed_email_domains),
         post_login_path=(row.post_login_path or "").strip() or "/projects",
-        proxy_admin_key_id=row.proxy_admin_key_id,
         redirect_uri_override=(row.redirect_uri_override or "").strip() or None,
         source="db",
     )

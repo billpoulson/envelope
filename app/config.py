@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     oidc_issuer: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
-    oidc_proxy_admin_key_id: int | None = None
     oidc_scopes: str = "openid email profile"
     oidc_allowed_email_domains: str = ""
     oidc_post_login_path: str = "/projects"

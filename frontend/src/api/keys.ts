@@ -7,6 +7,7 @@ export type ApiKeyRow = {
   scopes: string[];
   created_at: string;
   expires_at: string | null;
+  oidc_linked?: boolean;
 };
 
 export async function listApiKeys(): Promise<ApiKeyRow[]> {

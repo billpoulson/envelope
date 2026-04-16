@@ -75,6 +75,7 @@ export default function ApiKeysPage() {
                   <tr>
                     <th className="px-4 py-3 font-medium">Name</th>
                     <th className="px-4 py-3 font-medium">Scopes</th>
+                    <th className="px-4 py-3 font-medium">SSO</th>
                     <th className="px-4 py-3 font-medium" />
                   </tr>
                 </thead>
@@ -85,6 +86,7 @@ export default function ApiKeysPage() {
                       <td className="px-4 py-3 font-mono text-xs text-slate-400">
                         {k.scopes.join(", ")}
                       </td>
+                      <td className="px-4 py-3 text-slate-400">{k.oidc_linked ? "Linked" : "—"}</td>
                       <td className="px-4 py-3 text-right">
                         <button
                           type="button"

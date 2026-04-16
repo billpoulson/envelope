@@ -14,6 +14,7 @@ import EnvLinkHashPage from "@/pages/EnvLinkHashPage";
 import { PublicDocsLayout } from "@/components/PublicDocsLayout";
 import HelpPage from "@/pages/HelpPage";
 import TutorialPage from "@/pages/TutorialPage";
+import AccountPage from "@/pages/AccountPage";
 import AppSettingsPage from "@/pages/AppSettingsPage";
 import LoginPage from "@/pages/LoginPage";
 import NewBundlePage from "@/pages/NewBundlePage";
@@ -65,6 +66,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<Navigate to="/projects" replace />} />
           <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/account" element={<AccountPage />} />
           <Route path="/projects/new" element={<NewProjectPage />} />
           <Route path="/projects/:projectSlug/settings" element={<ProjectSettingsPage />} />
           <Route path="/projects/:projectSlug/environments" element={<ProjectEnvironmentsPage />} />

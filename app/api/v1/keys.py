@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import require_admin
-from app.models import ApiKey
+from app.models import ApiKey, OidcIdentity
 from app.auth_keys import generate_raw_api_key, hash_api_key
 from app.services.scopes import parse_scopes_json, scopes_to_json, validate_scopes_list
 
@@ -20,6 +20,7 @@ class ApiKeyOut(BaseModel):
     scopes: list[str]
     created_at: datetime
     expires_at: datetime | None
+    oidc_linked: bool = False
 
 
 class CreateApiKeyBody(BaseModel):
@@ -44,6 +45,8 @@ async def list_api_keys(
 ) -> list[ApiKeyOut]:
     r = await session.execute(select(ApiKey).order_by(ApiKey.id))
     rows = r.scalars().all()
+    r_oidc = await session.execute(select(OidcIdentity.api_key_id))
+    linked_ids = {row[0] for row in r_oidc.all()}
     return [
         ApiKeyOut(
             id=x.id,
@@ -51,6 +54,7 @@ async def list_api_keys(
             scopes=parse_scopes_json(x.scopes),
             created_at=x.created_at,
             expires_at=x.expires_at,
+            oidc_linked=x.id in linked_ids,
         )
         for x in rows
     ]
@@ -86,6 +90,7 @@ async def revoke_api_key(
     _: ApiKey = Depends(require_admin),
     session: AsyncSession = Depends(get_db),
 ) -> None:
+    await session.execute(delete(OidcIdentity).where(OidcIdentity.api_key_id == key_id))
     r = await session.execute(delete(ApiKey).where(ApiKey.id == key_id))
     if r.rowcount == 0:
         raise HTTPException(status_code=404, detail="API key not found")

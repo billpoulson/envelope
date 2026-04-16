@@ -1023,7 +1023,7 @@ class OidcAuthApiTests(unittest.TestCase):
         with TestClient(app) as client:
             r = client.get("/api/v1/auth/login-options")
             self.assertEqual(r.status_code, 200, r.text)
-            self.assertFalse(r.json()["oidc_available"])
+            self.assertFalse(r.json()["oidc_configured"])
 
     def test_oidc_settings_requires_auth(self) -> None:
         with TestClient(app) as client:
@@ -1038,7 +1038,6 @@ class OidcAuthApiTests(unittest.TestCase):
             "client_id": "test-client-id",
             "client_secret": "test-client-secret",
             "scopes": "openid email profile",
-            "proxy_admin_key_id": 1,
             "post_login_path": "/projects",
         }
         with TestClient(app) as client:
@@ -1052,7 +1051,17 @@ class OidcAuthApiTests(unittest.TestCase):
             self.assertIn("/api/v1/auth/oidc/callback", j["suggested_callback_url"])
             r2 = client.get("/api/v1/auth/login-options")
             self.assertEqual(r2.status_code, 200, r2.text)
-            self.assertTrue(r2.json()["oidc_available"])
+            self.assertTrue(r2.json()["oidc_configured"])
+
+    def test_oidc_link_requires_auth(self) -> None:
+        with TestClient(app) as client:
+            r = client.get("/api/v1/auth/oidc/link", follow_redirects=False)
+            self.assertEqual(r.status_code, 401, r.text)
+
+    def test_oidc_status_requires_auth(self) -> None:
+        with TestClient(app) as client:
+            r = client.get("/api/v1/auth/oidc/status")
+            self.assertEqual(r.status_code, 401, r.text)
 
     def test_oidc_callback_without_session_redirects(self) -> None:
         with TestClient(app) as client:

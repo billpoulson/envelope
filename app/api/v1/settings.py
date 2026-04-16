@@ -18,7 +18,6 @@ from app.services.oidc_config import (
     load_effective_oidc_config,
     oidc_callback_redirect_uri,
 )
-from app.services.scopes import parse_scopes_json, scopes_allow_admin
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -32,7 +31,6 @@ class OidcSettingsResponse(BaseModel):
     scopes: str
     allowed_email_domains: str
     post_login_path: str
-    proxy_admin_key_id: int | None
     redirect_uri_override: str | None
     oidc_login_ready: bool
     suggested_callback_url: str
@@ -49,7 +47,6 @@ class OidcSettingsPatch(BaseModel):
     scopes: str | None = None
     allowed_email_domains: str | None = None
     post_login_path: str | None = None
-    proxy_admin_key_id: int | None = None
     redirect_uri_override: str | None = None
 
 
@@ -69,9 +66,8 @@ def _effective_to_public(
         scopes=cfg.scopes,
         allowed_email_domains=domains,
         post_login_path=cfg.post_login_path,
-        proxy_admin_key_id=cfg.proxy_admin_key_id,
         redirect_uri_override=cfg.redirect_uri_override,
-        oidc_login_ready=cfg.is_login_ready(),
+        oidc_login_ready=cfg.is_oidc_configured(),
         suggested_callback_url=suggested_callback_url,
     )
 
@@ -125,18 +121,6 @@ async def patch_oidc_settings(
     if "post_login_path" in data and data["post_login_path"] is not None:
         p = str(data["post_login_path"]).strip()
         row.post_login_path = p or "/projects"
-    if "proxy_admin_key_id" in data:
-        kid = data["proxy_admin_key_id"]
-        if kid is None:
-            row.proxy_admin_key_id = None
-        else:
-            kr = await session.execute(select(ApiKey).where(ApiKey.id == int(kid)))
-            key_row = kr.scalar_one_or_none()
-            if key_row is None:
-                raise HTTPException(status_code=400, detail="proxy_admin_key_id does not exist")
-            if not scopes_allow_admin(parse_scopes_json(key_row.scopes)):
-                raise HTTPException(status_code=400, detail="proxy API key must have admin scope")
-            row.proxy_admin_key_id = int(kid)
     if "redirect_uri_override" in data:
         v = data["redirect_uri_override"]
         row.redirect_uri_override = None if v is None else (str(v).strip() or None)

@@ -519,6 +519,22 @@ def _migrate_cleanup_orphan_bundle_stack_layers(sync_conn) -> None:
     )
 
 
+def _migrate_sqlite_oidc_drop_proxy_column(sync_conn) -> None:
+    """Remove legacy proxy_admin_key_id from oidc_app_settings (OIDC links to existing keys per-user)."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    if "oidc_app_settings" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("oidc_app_settings")}
+    if "proxy_admin_key_id" not in cols:
+        return
+    try:
+        sync_conn.execute(text("ALTER TABLE oidc_app_settings DROP COLUMN proxy_admin_key_id"))
+    except Exception:
+        pass
+
+
 async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
@@ -536,3 +552,4 @@ async def init_db() -> None:
             await conn.run_sync(_migrate_sqlite_bundles_stacks_scoped_names)
             await conn.run_sync(_migrate_sqlite_bundle_stacks_slug)
             await conn.run_sync(_migrate_sqlite_bundles_slug)
+            await conn.run_sync(_migrate_sqlite_oidc_drop_proxy_column)

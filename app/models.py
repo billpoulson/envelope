@@ -313,10 +313,26 @@ class OidcAppSettings(Base):
     scopes: Mapped[str] = mapped_column(String(512), default="openid email profile")
     allowed_email_domains: Mapped[str | None] = mapped_column(Text, nullable=True)
     post_login_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    proxy_admin_key_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True
-    )
     redirect_uri_override: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+
+class OidcIdentity(Base):
+    """Binds an IdP (issuer + sub) to exactly one API key for browser SSO."""
+
+    __tablename__ = "oidc_identities"
+    __table_args__ = (UniqueConstraint("issuer", "sub", name="uq_oidc_identities_issuer_sub"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    issuer: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    sub: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    email: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    api_key_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("api_keys.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    linked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ApiKey(Base):

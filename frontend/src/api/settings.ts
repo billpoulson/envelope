@@ -10,7 +10,6 @@ export type OidcSettings = {
   scopes: string;
   allowed_email_domains: string;
   post_login_path: string;
-  proxy_admin_key_id: number | null;
   redirect_uri_override: string | null;
   oidc_login_ready: boolean;
   suggested_callback_url: string;
@@ -24,7 +23,6 @@ export type OidcSettingsPatch = {
   scopes?: string;
   allowed_email_domains?: string;
   post_login_path?: string;
-  proxy_admin_key_id?: number | null;
   redirect_uri_override?: string | null;
 };
 

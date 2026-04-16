@@ -14,7 +14,6 @@ function formFromApi(s: OidcSettings) {
     scopes: s.scopes,
     allowed_email_domains: s.allowed_email_domains,
     post_login_path: s.post_login_path,
-    proxy_admin_key_id: s.proxy_admin_key_id != null ? String(s.proxy_admin_key_id) : "",
     redirect_uri_override: s.redirect_uri_override ?? "",
   };
 }
@@ -32,12 +31,6 @@ export default function AppSettingsPage() {
   const saveM = useMutation({
     mutationFn: () => {
       if (!form) throw new Error("Form not ready");
-      const proxyRaw = form.proxy_admin_key_id.trim();
-      const proxy =
-        proxyRaw === "" ? null : Number.parseInt(proxyRaw, 10);
-      if (proxyRaw !== "" && Number.isNaN(proxy)) {
-        throw new Error("Proxy admin key id must be a number");
-      }
       return patchOidcSettings({
         enabled: form.enabled,
         issuer: form.issuer.trim(),
@@ -46,7 +39,6 @@ export default function AppSettingsPage() {
         scopes: form.scopes.trim(),
         allowed_email_domains: form.allowed_email_domains.trim(),
         post_login_path: form.post_login_path.trim(),
-        proxy_admin_key_id: proxy,
         redirect_uri_override: form.redirect_uri_override.trim() === "" ? null : form.redirect_uri_override.trim(),
       });
     },
@@ -75,7 +67,11 @@ export default function AppSettingsPage() {
         title="App settings"
         below={
           <p className="text-slate-400">
-            Instance-wide options. OIDC applies to the browser admin sign-in only; automation still uses API keys.
+            Instance-wide OIDC client configuration. Each user links their own API key to SSO from the{" "}
+            <a href="/account" className="text-accent hover:underline">
+              Account
+            </a>{" "}
+            page after signing in with a key.
           </p>
         }
       />
@@ -83,8 +79,8 @@ export default function AppSettingsPage() {
       <section className="max-w-2xl space-y-6 rounded-xl border border-border/70 bg-[#0b0f14]/50 p-6">
         <h2 className="text-lg font-medium text-white">OpenID Connect (SSO)</h2>
         <p className="text-sm text-slate-400">
-          Create a dedicated admin-scoped API key to use as the OIDC proxy, then enter its numeric id below. Configure
-          your IdP with the redirect URL shown here.
+          Register the redirect URL below with your IdP. Users sign in with an API key first, then connect SSO under
+          Account.
         </p>
 
         <div className="rounded-lg border border-border/60 bg-[#0b0f14] p-3">
@@ -95,9 +91,9 @@ export default function AppSettingsPage() {
         <p className="text-xs text-slate-500">
           Config source: <span className="text-slate-400">{data.source}</span>
           {data.oidc_login_ready ? (
-            <span className="ml-2 text-emerald-400/90">SSO login is available on the sign-in page.</span>
+            <span className="ml-2 text-emerald-400/90">OIDC is ready for linking and SSO sign-in.</span>
           ) : (
-            <span className="ml-2 text-slate-500">Complete the fields below to enable SSO.</span>
+            <span className="ml-2 text-slate-500">Complete the fields below to enable OIDC.</span>
           )}
         </p>
 
@@ -194,20 +190,6 @@ export default function AppSettingsPage() {
             onChange={(e) => setForm((f) => (f ? { ...f, post_login_path: e.target.value } : f))}
             autoComplete="off"
             placeholder="/projects or /app/projects when using VITE_ADMIN_BASENAME=/app"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-slate-400" htmlFor="oidc-proxy-key">
-            Proxy admin API key id
-          </label>
-          <input
-            id="oidc-proxy-key"
-            className="w-full rounded border border-border bg-[#0b0f14] px-3 py-2 font-mono text-sm text-slate-200"
-            value={form.proxy_admin_key_id}
-            onChange={(e) => setForm((f) => (f ? { ...f, proxy_admin_key_id: e.target.value } : f))}
-            autoComplete="off"
-            inputMode="numeric"
           />
         </div>
 

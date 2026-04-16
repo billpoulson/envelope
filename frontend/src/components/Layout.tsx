@@ -38,6 +38,7 @@ export function Layout() {
   const envWorkspaceMatch = useMatch({ path: "/projects/:projectSlug/env/:environmentSlug/*", end: false });
   const environmentSlug = envWorkspaceMatch?.params.environmentSlug;
 
+  const onAccountPage = pathname === "/account";
   const onAdminPage =
     pathname === "/backup" ||
     pathname === "/keys" ||
@@ -142,6 +143,9 @@ export function Layout() {
           >
             <Link to="/projects" className={navLinkClass(onProjectsNav)}>
               Projects
+            </Link>
+            <Link to="/account" className={navLinkClass(onAccountPage)}>
+              Account
             </Link>
 
             <div className="flex flex-wrap items-center justify-end gap-1">

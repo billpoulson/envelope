@@ -12,7 +12,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   const optsQ = useQuery({ queryKey: ["login-options"], queryFn: loginOptions });
-  const oidcFailed = searchParams.get("oidc_error");
+  const oidcErr = searchParams.get("oidc_error");
 
   const m = useMutation({
     mutationFn: async () => {
@@ -36,7 +36,16 @@ export default function LoginPage() {
       <p className="mb-6 text-sm text-slate-400">
         Enter an admin API key. The session is stored in a signed browser cookie.
       </p>
-      {oidcFailed ? (
+      {oidcErr === "unlinked" ? (
+        <p className="mb-4 text-sm text-amber-200/90">
+          SSO is not linked yet. Sign in with an admin API key, open{" "}
+          <a href="/account" className="text-accent underline">
+            Account
+          </a>
+          , then connect SSO.
+        </p>
+      ) : null}
+      {oidcErr && oidcErr !== "unlinked" ? (
         <p className="mb-4 text-sm text-red-400">
           SSO sign-in did not complete. Try again or use an API key.
         </p>
@@ -66,7 +75,7 @@ export default function LoginPage() {
           {m.isPending ? "Signing in…" : "Sign in"}
         </Button>
       </form>
-      {optsQ.data?.oidc_available ? (
+      {optsQ.data?.oidc_configured ? (
         <p className="mt-8 text-center text-sm text-slate-400">
           <a
             href="/api/v1/auth/oidc/login"

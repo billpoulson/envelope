@@ -26,6 +26,21 @@ export async function sessionInfo(): Promise<{ admin: boolean }> {
   return apiFetch("/auth/session", { method: "GET" });
 }
 
-export async function loginOptions(): Promise<{ oidc_available: boolean }> {
+export async function loginOptions(): Promise<{ oidc_configured: boolean }> {
   return apiFetch("/auth/login-options", { method: "GET" });
+}
+
+export async function getOidcLinkStatus(): Promise<{
+  linked: boolean;
+  issuer?: string | null;
+  email?: string | null;
+}> {
+  return apiFetch("/auth/oidc/status", { method: "GET" });
+}
+
+export async function unlinkOidc(csrf: string): Promise<void> {
+  await apiFetch("/auth/oidc/link", {
+    method: "DELETE",
+    headers: getCsrfHeader(csrf),
+  });
 }
