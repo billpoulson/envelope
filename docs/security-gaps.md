@@ -31,7 +31,7 @@ This document lists **known limitations** relative to typical **enterprise** or 
 
 ## Gap: Browser hardening headers not set in-app
 
-**Status (partially addressed):** `[app/security_headers.py](../app/security_headers.py)` middleware (registered from `[app/main.py](../app/main.py)`) sets `**X-Content-Type-Options`**, `**X-Frame-Options: DENY**`, `**Referrer-Policy**`, `**Permissions-Policy**`, and a **default `Content-Security-Policy`** on routes **outside** Swagger/OpenAPI UI (`/docs`, `/redoc`, `/openapi.json`). `**Strict-Transport-Security`** is sent when `**ENVELOPE_HTTPS_COOKIES=true**` (same signal as secure session cookies). Disable all of this with `**ENVELOPE_SECURITY_HEADERS_ENABLED=false**`, or override CSP via `**ENVELOPE_SECURITY_CSP**` (`-` turns CSP off).
+**Status (partially addressed):** `[app/security_headers.py](../app/security_headers.py)` middleware (registered from `[app/main.py](../app/main.py)`) sets `**X-Content-Type-Options`**, `**X-Frame-Options: DENY`**, `**Referrer-Policy**`, `**Permissions-Policy**`, and a default `Content-Security-Policy` on routes outside Swagger/OpenAPI UI (`/docs`, `/redoc`, `/openapi.json`). `**Strict-Transport-Security**` is sent when `**ENVELOPE_HTTPS_COOKIES=true**` (same signal as secure session cookies). Disable all of this with `**ENVELOPE_SECURITY_HEADERS_ENABLED=false**`, or override CSP via `**ENVELOPE_SECURITY_CSP**` (`-` turns CSP off).
 
 **Why it still matters:** TLS termination, CDN, and corporate gateways often own **stronger** or **complementary** policies (e.g. broader CSP, `includeSubDomains` on HSTS). Document proxy behavior for audits.
 
@@ -59,13 +59,11 @@ This document lists **known limitations** relative to typical **enterprise** or 
 
 **Mitigation direction:** Use OIDC for humans; restrict and rotate API keys; network policies for CI runners; document key lifecycle.
 
-## Gap: Supply-chain / CI security checks
+## Supply-chain / CI security checks
 
-**Issue:** CI runs tests and builds containers (`.github/workflows/ci-ghcr.yml`) but does not show **dependency scanning** (e.g. `pip-audit`, `npm audit`), container image scanning, or SAST as part of the default pipeline.
+**Status (addressed in default CI):** [`.github/workflows/ci-ghcr.yml`](../.github/workflows/ci-ghcr.yml) runs **`pip-audit`** on [`requirements.txt`](../requirements.txt), **`npm audit --audit-level=high`** after `npm ci` in [`frontend/`](../frontend/), **Bandit** (`-ll`, config [`bandit.yaml`](../bandit.yaml)) on `app/` and `cli/`, and **Trivy** on the built image (CRITICAL/HIGH, non-zero exit on matches). These steps are **blocking** for merges that use this workflow as a required check.
 
-**Why it matters:** Enterprise SDLC policies often require automated vulnerability signals on every change.
-
-**Mitigation direction:** Add optional or required jobs for dependency and image scanning; track advisories for pinned versions in `requirements.txt` and `frontend/package.json`.
+**Residual:** Tune severities (`npm audit` level, Trivy `severity` / `ignore-unfixed`) if your org wants stricter or advisory-only runs; optional SARIF upload to GitHub Advanced Security is not wired here.
 
 ## Gap: Rate limiting is partial
 

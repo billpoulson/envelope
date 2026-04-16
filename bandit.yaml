@@ -1,0 +1,9 @@
+# https://bandit.readthedocs.io/en/latest/config.html
+exclude_dirs:
+  - tests
+skips:
+  - B101
+  - B110
+  - B606
+  - B608
+  - B310
