@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.db import get_db
 from app.deps import get_api_key, get_fernet
 from app.limiter import limiter
-from app.models import ApiKey, Bundle, BundleEnvLink, BundleGroup, ProjectEnvironment, Secret
+from app.models import ApiKey, Bundle, BundleEnvLink, BundleGroup, BundleStackLayer, ProjectEnvironment, Secret
 from app.services.project_environments import (
     UNASSIGNED_ENVIRONMENT_SLUG_SENTINEL,
     get_project_environment_by_group_and_slug,
@@ -517,6 +517,9 @@ async def delete_bundle(
         project_slug=ps,
     ):
         raise HTTPException(status_code=403, detail="Insufficient scope for this bundle")
+    # Remove stack layers that reference this bundle so stacks stay consistent (SQLite may not
+    # enforce ON DELETE CASCADE on bundle_id the same way as Postgres).
+    await session.execute(delete(BundleStackLayer).where(BundleStackLayer.bundle_id == b.id))
     await session.execute(delete(Bundle).where(Bundle.id == b.id))
     await session.commit()
     return Response(status_code=204)

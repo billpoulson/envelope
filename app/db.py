@@ -403,10 +403,27 @@ def _migrate_sqlite_bundles_slug(sync_conn) -> None:
     )
 
 
+def _migrate_cleanup_orphan_bundle_stack_layers(sync_conn) -> None:
+    """Remove stack layer rows whose bundle no longer exists (legacy rows if FK cascade did not run)."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    tables = insp.get_table_names()
+    if "bundle_stack_layers" not in tables or "bundles" not in tables:
+        return
+    sync_conn.execute(
+        text(
+            "DELETE FROM bundle_stack_layers WHERE NOT EXISTS "
+            "(SELECT 1 FROM bundles WHERE bundles.id = bundle_stack_layers.bundle_id)"
+        )
+    )
+
+
 async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_migrate_cleanup_orphan_bundle_stack_layers)
         if conn.engine.dialect.name == "sqlite":
             await conn.run_sync(_migrate_sqlite_secrets_is_secret)
             await conn.run_sync(_migrate_sqlite_bundles_group_id)
