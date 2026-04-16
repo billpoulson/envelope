@@ -28,6 +28,12 @@ For **installation**, **environment variables**, **TLS**, and **reverse proxies*
 
 Optional flags (see also **Behind a reverse proxy**): `ENVELOPE_RESTORE_ENABLED`, `ENVELOPE_HTTPS_COOKIES`, `ENVELOPE_ROOT_PATH`, `FORWARDED_ALLOW_IPS`, `ENVELOPE_PULUMI_STATE_ENABLED`, etc., as documented for your image or compose file.
 
+### Database backend (`ENVELOPE_DATABASE_URL`)
+
+- **SQLite** — Default. Single file, good for one node or small teams. Use a persistent volume in Docker so the file survives restarts. The admin **Backup** UI/API downloads a full database snapshot (SQLite file–backed URLs only).
+- **PostgreSQL** — Set `ENVELOPE_DATABASE_URL` to `postgresql+asyncpg://…`. Requires the `asyncpg` dependency (included in the published image and `requirements.txt`). Create an empty database and user first; the app creates tables on startup. Use your cloud or DBA tooling for backups and HA (`pg_dump`, managed snapshots, PITR)—not the in-app full-database download.
+- **Operator guide** — For URL examples, Docker Compose, TLS to Postgres, troubleshooting, and SQLite→Postgres migration notes, see the repository file **`docs/database-configuration.md`** (same content applies whether you run from source or a container image).
+
 ### TLS
 
 Use plain HTTP only on trusted networks. In production, terminate **HTTPS** in front of Envelope (Caddy, Traefik, nginx, cloud load balancer, …).

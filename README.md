@@ -15,6 +15,8 @@ Self-hosted **secure environment bundle** manager: named groups of secrets (like
 - **Terraform HTTP remote state** (optional): per-project URLs `/tfstate/projects/<slug>/…` with **read/write project** scopes; legacy flat `/tfstate/blobs/…` with **`terraform:http_state`** (or **admin**). See [docs/terraform-http-remote-state.md](docs/terraform-http-remote-state.md) and [docs/usage.md](docs/usage.md) (storage model and scopes).
 - **Help** in the web UI at **`/help`** (no login required) — usage overview including Terraform state storage.
 
+**Database:** defaults to **SQLite**; optional **PostgreSQL** via `ENVELOPE_DATABASE_URL`. Configure backends, Docker examples, TLS, and backups in **[docs/database-configuration.md](docs/database-configuration.md)**.
+
 ## Quick start (Docker)
 
 1. Copy `.env.example` to `.env` and set:
