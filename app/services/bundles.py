@@ -367,43 +367,12 @@ async def bulk_upsert_bundle_secrets(
     bundle_id: int,
     rows: list[tuple[str, str, bool]],
 ) -> None:
-    """Insert secrets for a bundle; on SQLite, identical (bundle_id, key_name) rows merge (last wins)."""
+    """Insert secrets for a bundle; identical (bundle_id, key_name) rows merge (last wins)."""
     if not rows:
         return
-    fernet = get_fernet()
-    from app.db import get_engine
+    from app.db import get_database_adapter
 
-    if get_engine().dialect.name != "sqlite":
-        for key_name, val, is_secret in rows:
-            stored = encode_stored_value(fernet, val, is_secret)
-            session.add(
-                Secret(
-                    bundle_id=bundle_id,
-                    key_name=key_name,
-                    value_ciphertext=stored,
-                    is_secret=is_secret,
-                )
-            )
-        return
-
-    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
-    for key_name, val, is_secret in rows:
-        stored = encode_stored_value(fernet, val, is_secret)
-        stmt = sqlite_insert(Secret).values(
-            bundle_id=bundle_id,
-            key_name=key_name,
-            value_ciphertext=stored,
-            is_secret=is_secret,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[Secret.bundle_id, Secret.key_name],
-            set_=dict(
-                value_ciphertext=stmt.excluded.value_ciphertext,
-                is_secret=stmt.excluded.is_secret,
-            ),
-        )
-        await session.execute(stmt)
+    await get_database_adapter().bulk_upsert_bundle_secrets(session, bundle_id, rows)
 
 
 async def encrypt_plain_entry(
