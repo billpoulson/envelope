@@ -13,8 +13,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-# Sync with Debian security updates (e.g. OpenSSL) — slim tags can lag behind the archive.
-RUN apt-get update \
+# Sync with Debian security updates (e.g. OpenSSL). CI passes CACHEBUST so BuildKit cannot
+# reuse an old apt layer after security updates land (otherwise the image stays on stale .deb).
+ARG CACHEBUST=local
+RUN echo "cachebust=${CACHEBUST}" \
+    && apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
