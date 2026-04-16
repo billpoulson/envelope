@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { getDeploymentBaseUrl } from "@/help/deploymentBaseUrl";
 
 type PathScope = "user" | "system";
@@ -253,6 +254,16 @@ export function CliInstallTutorial() {
         <li>
           Pass <code className="font-mono text-slate-300">--envelope-url</code> with the same deployment base as
           above and your opaque <code className="font-mono text-slate-300">--token</code>.
+        </li>
+        <li>
+          For CI, see{" "}
+          <Link
+            className="text-accent underline decoration-accent/40 underline-offset-2 hover:opacity-90"
+            to="/help/github-actions"
+          >
+            GitHub Actions
+          </Link>{" "}
+          (reusable action and step-by-step tutorial).
         </li>
       </ul>
     </div>

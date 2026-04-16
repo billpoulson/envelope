@@ -1,0 +1,68 @@
+name: Envelope opaque env
+description: Fetch environment variables from an Envelope opaque /env/ URL (same behavior as cli/envelope_run.py)
+author: Envelope
+
+branding:
+  icon: package
+  color: blue
+
+inputs:
+  envelope-url:
+    description: Deployment base URL (include gateway path prefix if used). Required unless opaque-env-url is set.
+    required: false
+    default: ""
+  token:
+    description: Opaque path token from Secret env URL. Required unless opaque-env-url is set.
+    required: false
+    default: ""
+  opaque-env-url:
+    description: Full opaque env URL (alternative to envelope-url + token). JSON export is requested automatically.
+    required: false
+    default: ""
+  out-file:
+    description: Path for the written dotenv or JSON file (cleartext secrets).
+    required: false
+    default: ${{ runner.temp }}/envelope.env
+  out-format:
+    description: File format when writing out-file
+    required: false
+    default: dotenv
+  export-to-github-env:
+    description: If true, append all variables to GITHUB_ENV for later steps in the job
+    required: false
+    default: "false"
+  insecure-http:
+    description: Set to true only for local HTTP testing (sets ENVELOPE_CLI_INSECURE=1). Not for production.
+    required: false
+    default: "false"
+
+outputs:
+  out-file:
+    description: Absolute path to the written file (when out-file was used)
+    value: ${{ steps.fetch.outputs.out-file }}
+
+runs:
+  using: composite
+  steps:
+    - id: fetch
+      shell: bash
+      env:
+        INPUT_OPAQUE_ENV_URL: ${{ inputs.opaque-env-url }}
+        INPUT_ENVELOPE_URL: ${{ inputs.envelope-url }}
+        INPUT_TOKEN: ${{ inputs.token }}
+        ENVELOPE_CLI_INSECURE: ${{ inputs.insecure-http == 'true' && '1' || '' }}
+      run: |
+        set -euo pipefail
+        SCRIPT="${GITHUB_ACTION_PATH}/envelope_run.py"
+        ARGS=()
+        if [ -n "${INPUT_OPAQUE_ENV_URL}" ]; then
+          ARGS+=(--opaque-env-url "${INPUT_OPAQUE_ENV_URL}")
+        else
+          ARGS+=(--envelope-url "${INPUT_ENVELOPE_URL}" --token "${INPUT_TOKEN}")
+        fi
+        ARGS+=(--out "${{ inputs.out-file }}")
+        ARGS+=(--out-format "${{ inputs.out-format }}")
+        if [ "${{ inputs.export-to-github-env }}" = "true" ]; then
+          ARGS+=(--export-github-env)
+        fi
+        python "$SCRIPT" "${ARGS[@]}"

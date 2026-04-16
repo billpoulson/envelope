@@ -1,5 +1,6 @@
 import { Navigate, NavLink, useParams } from "react-router-dom";
 import { CliInstallTutorial } from "@/components/CliInstallTutorial";
+import { GithubActionsTutorial } from "@/components/GithubActionsTutorial";
 import { HelpMarkdown } from "@/components/HelpMarkdown";
 import { PageHeader } from "@/components/PageHeader";
 import type { HelpSectionId } from "@/help/usageSections";
@@ -18,6 +19,7 @@ const SECTIONS: { id: HelpSectionId; label: string; path: string }[] = [
   { id: "terraform", label: "Terraform remote state", path: "/help/terraform" },
   { id: "pulumi", label: "Pulumi state", path: "/help/pulumi" },
   { id: "cli", label: "CLI (opaque env)", path: "/help/cli" },
+  { id: "github-actions", label: "GitHub Actions", path: "/help/github-actions" },
   { id: "backup", label: "Backup & security", path: "/help/backup" },
 ];
 
@@ -70,6 +72,7 @@ export default function HelpPage() {
         >
           <HelpMarkdown markdown={body} />
           {sectionId === "cli" ? <CliInstallTutorial /> : null}
+          {sectionId === "github-actions" ? <GithubActionsTutorial /> : null}
         </article>
       </div>
     </div>

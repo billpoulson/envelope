@@ -11,6 +11,7 @@ import BundleVariablesPage from "@/pages/BundleVariablesPage";
 import BundlesPage from "@/pages/BundlesPage";
 import CertificatesPage from "@/pages/CertificatesPage";
 import EnvLinkHashPage from "@/pages/EnvLinkHashPage";
+import { PublicDocsLayout } from "@/components/PublicDocsLayout";
 import HelpPage from "@/pages/HelpPage";
 import TutorialPage from "@/pages/TutorialPage";
 import LoginPage from "@/pages/LoginPage";
@@ -50,6 +51,10 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route element={<PublicDocsLayout />}>
+        <Route path="/help/*" element={<HelpPage />} />
+        <Route path="/tutorial" element={<TutorialPage />} />
+      </Route>
       <Route element={<RequireAuth />}>
         <Route element={<Layout />}>
           <Route path="/" element={<Navigate to="/projects" replace />} />
@@ -100,8 +105,6 @@ export default function App() {
           <Route path="/certificates" element={<CertificatesPage />} />
           <Route path="/backup" element={<BackupPage />} />
           <Route path="/tools/env-link-hash" element={<EnvLinkHashPage />} />
-          <Route path="/help/*" element={<HelpPage />} />
-          <Route path="/tutorial" element={<TutorialPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/projects" replace />} />
