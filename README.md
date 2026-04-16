@@ -15,8 +15,6 @@ Self-hosted **secure environment bundle** manager: named groups of secrets (like
 - **Terraform HTTP remote state** (optional): per-project URLs `/tfstate/projects/<slug>/…` with **read/write project** scopes; legacy flat `/tfstate/blobs/…` with **`terraform:http_state`** (or **admin**). See [docs/terraform-http-remote-state.md](docs/terraform-http-remote-state.md) and [docs/usage.md](docs/usage.md) (storage model and scopes).
 - **Help** in the web UI at **`/help`** (no login required) — usage overview including Terraform state storage.
 
-**Database:** defaults to **SQLite**; optional **PostgreSQL** via `ENVELOPE_DATABASE_URL`. Configure backends, Docker examples, TLS, and backups in **[docs/database-configuration.md](docs/database-configuration.md)**.
-
 ## Quick start (Docker)
 
 1. Copy `.env.example` to `.env` and set:
@@ -36,15 +34,30 @@ Self-hosted **secure environment bundle** manager: named groups of secrets (like
 
 4. Remove `ENVELOPE_INITIAL_ADMIN_KEY` from your compose/env once you have another admin key saved.
 
-### TLS
+## Database configuration
+
+Envelope stores API keys, bundles, secrets, Terraform HTTP state, and related data in **one** SQL database. Set **`ENVELOPE_DATABASE_URL`** if you do not want the default (file-backed SQLite).
+
+| Backend | When to use | Example `ENVELOPE_DATABASE_URL` |
+| --- | --- | --- |
+| **SQLite** | Default; single node, dev, small deployments | `sqlite+aiosqlite:///./data/envelope.db` or, in Docker with a `/data` volume, `sqlite+aiosqlite:////data/envelope.db` |
+| **PostgreSQL** | Managed DB, HA, larger teams | `postgresql+asyncpg://user:password@host:5432/dbname` |
+
+- Copy **`ENVELOPE_DATABASE_URL`** into `.env` or your orchestration env (see [`.env.example`](.env.example)).
+- **SQLite** — The admin backup API/UI can download a full **SQLite file** snapshot. Use a persistent volume so the file survives container restarts.
+- **PostgreSQL** — Requires the **`asyncpg`** driver (listed in [`requirements.txt`](requirements.txt), included in the Docker image). Create an empty database first; the app creates tables on startup. Use **`pg_dump`**, managed backups, or your cloud’s tools—**not** the in-app full-database download (that path is SQLite-only).
+
+**Full guide:** [docs/database-configuration.md](docs/database-configuration.md) — Docker Compose with Postgres, TLS to the server, troubleshooting, and notes on moving from SQLite to PostgreSQL.
+
+## TLS
 
 Use HTTP only on trusted networks. In production, terminate **HTTPS** in front of Envelope (Caddy, Traefik, nginx, a cloud load balancer).
 
-### Security posture and enterprise use
+## Security posture and enterprise use
 
 For **known limitations** (API key lookup model, SQLite, CSRF/header/audit expectations, CI scanning), see [docs/security-gaps.md](docs/security-gaps.md).
 
-### Behind a gateway
+## Behind a gateway
 
 Uvicorn applies **forwarded headers** only from **trusted** client addresses (`FORWARDED_ALLOW_IPS`, default `127.0.0.1`). Set this to your gateway’s subnet (for example Docker bridge `172.18.0.0/16`) so `X-Forwarded-Proto` and `X-Forwarded-For` are honored. The Docker image passes `--forwarded-allow-ips` from that environment variable. Without it, opaque env URLs and `request.base_url` may show `http://` and rate limits may see the proxy as the only client.
 
@@ -52,7 +65,7 @@ Uvicorn applies **forwarded headers** only from **trusted** client addresses (`F
 
 **Pattern B — path prefix (e.g. `https://example.com/envelope/…`).** Set `ENVELOPE_ROOT_PATH=/envelope` (no trailing slash). The reverse proxy must **strip** that prefix when forwarding to Envelope so the upstream request path is `/bundles`, `/api/v1/…`, etc.; uvicorn is started with `--root-path` from the same value (handled in the Dockerfile `CMD`). OpenAPI and the web UI then use the prefixed paths.
 
-#### Subdomain (e.g. `envelope.example.com`)
+### Subdomain (e.g. `envelope.example.com`)
 
 This is **pattern A**: Envelope stays at the **root path** `/` on its own host name; you do **not** set `ENVELOPE_ROOT_PATH`.
 
@@ -62,7 +75,7 @@ This is **pattern A**: Envelope stays at the **root path** `/` on its own host n
 4. Set **`ENVELOPE_HTTPS_COOKIES=true`** so the web UI session cookie is marked **Secure**—browsers only send it over HTTPS to that host.
 5. Set **`FORWARDED_ALLOW_IPS`** so it includes the **proxy’s IP range** (see below). Uvicorn only trusts `X-Forwarded-Proto` / `X-Forwarded-For` from those addresses, which keeps generated opaque env URLs and `request.base_url` on `https://…`.
 
-#### Traefik (example)
+### Traefik (example)
 
 Traefik usually sets **`X-Forwarded-*`** for you when it proxies to the backend. Envelope must **trust** Traefik’s IP (not only `127.0.0.1`) or forwarded headers are ignored.
 
