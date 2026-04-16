@@ -15,6 +15,9 @@ from app.db import get_db
 from app.models import ApiKey
 from app.auth_keys import key_lookup_hmac, verify_api_key
 from app.services.scopes import parse_scopes_json, scopes_allow_admin
+from app.session_csrf import check_csrf
+
+_SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 @lru_cache
@@ -66,12 +69,15 @@ def _bearer_token_optional(authorization: str | None) -> str | None:
 async def get_api_key(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
+    x_csrf_token: Annotated[str | None, Header()] = None,
     session: AsyncSession = Depends(get_db),
 ) -> ApiKey:
     """Resolve API key from Bearer header, or from browser session (`admin_key_id`) after web/JSON login."""
     token = _bearer_token_optional(authorization)
     if token:
         return await resolve_api_key(token, session)
+    if request.method not in _SAFE_HTTP_METHODS:
+        check_csrf(request, x_csrf_token)
     raw_id = request.session.get("admin_key_id")
     if raw_id is not None:
         try:

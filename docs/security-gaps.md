@@ -38,11 +38,11 @@ This document lists **known limitations** relative to typical **enterprise** or 
 
 ## Gap: CSRF coverage may be incomplete for cookie session auth
 
-**Issue:** Session-backed JSON API calls should send `X-CSRF-Token` on **state-changing** requests. Coverage has grown with the SPA; not every route may be audited for parity. The SPA auth ADR notes extending CSRF as the app grows (`docs/react-migration/adr/001-spa-auth.md`).
+**Status (partially addressed):** For `/api/v1` routes that use [`get_api_key`](../app/deps.py), mutating requests authenticated via **session cookie** (no `Authorization: Bearer`) must send a valid **`X-CSRF-Token`** matching the session; safe methods (`GET`, `HEAD`, `OPTIONS`) do not. Bearer-based clients are unchanged.
 
-**Why it matters:** Cookie-authenticated clients are the CSRF threat model; Bearer-only automation is unaffected.
+**Remaining vigilance:** New JSON routes must continue to depend on `get_api_key` (or otherwise enforce CSRF for cookie auth). Same-origin defaults and `SameSite` cookies are still not a substitute for reviewing new endpoints.
 
-**Mitigation direction:** Audit all `POST` / `PUT` / `PATCH` / `DELETE` that accept session cookies; ensure CSRF or an equivalent defense. Same-origin defaults and `SameSite` cookies reduce but do not replace explicit review.
+**Historical note:** The SPA auth ADR (`docs/react-migration/adr/001-spa-auth.md`) described extending CSRF as the app grew; enforcement is centralized in `get_api_key` for session-backed API calls.
 
 ## Gap: No built-in security audit trail
 

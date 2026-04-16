@@ -16,7 +16,7 @@
 ## Consequences
 
 - Positive: Single dependency (`get_api_key`) for API routes; SPA and CLI share `/api/v1`.
-- Risk: Session fixation / CSRF — mutating requests from the browser must send **`X-CSRF-Token`** (validated on auth routes; extend to other POST/PUT/DELETE as the SPA grows).
+- Risk: Session fixation / CSRF — mutating requests from the browser must send **`X-CSRF-Token`**. Auth-only routes validate it explicitly; other `/api/v1` handlers that use **`get_api_key`** enforce it for non-safe HTTP methods when auth is session-based (not Bearer).
 - Logout and key revocation: session cleared; `admin_key_id` removed.
 
 ## Status

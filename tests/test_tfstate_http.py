@@ -911,6 +911,53 @@ class AuthJsonApiTests(unittest.TestCase):
             r5 = client.get("/api/v1/projects")
             self.assertEqual(r5.status_code, 401, r5.text)
 
+    def test_session_post_without_csrf_returns_400(self) -> None:
+        """Cookie session auth requires X-CSRF-Token on mutating API calls."""
+        nonce = uuid4().hex[:8]
+        with TestClient(app) as client:
+            r = client.get("/api/v1/auth/csrf")
+            self.assertEqual(r.status_code, 200, r.text)
+            csrf = r.json()["csrf_token"]
+            r2 = client.post(
+                "/api/v1/auth/login",
+                json={"api_key": self._token},
+                headers={"X-CSRF-Token": csrf},
+            )
+            self.assertEqual(r2.status_code, 200, r2.text)
+            slug = f"csrf-neg-{nonce}"
+            r3 = client.post(
+                "/api/v1/projects",
+                json={"name": f"CSRF neg {nonce}", "slug": slug},
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(r3.status_code, 400, r3.text)
+            self.assertIn("CSRF", r3.json()["detail"])
+
+    def test_session_post_with_csrf_succeeds(self) -> None:
+        nonce = uuid4().hex[:8]
+        slug = f"csrf-ok-{nonce}"
+        with TestClient(app) as client:
+            r = client.get("/api/v1/auth/csrf")
+            self.assertEqual(r.status_code, 200, r.text)
+            csrf = r.json()["csrf_token"]
+            r2 = client.post(
+                "/api/v1/auth/login",
+                json={"api_key": self._token},
+                headers={"X-CSRF-Token": csrf},
+            )
+            self.assertEqual(r2.status_code, 200, r2.text)
+            csrf_new = r2.json()["csrf_token"]
+            r3 = client.post(
+                "/api/v1/projects",
+                json={"name": f"CSRF ok {nonce}", "slug": slug},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": csrf_new,
+                },
+            )
+            self.assertEqual(r3.status_code, 201, r3.text)
+            self.assertEqual(r3.json()["slug"], slug)
+
 
 class StackKeyGraphApiTests(unittest.TestCase):
     """GET /api/v1/stacks/{name}/key-graph returns merged layer graph JSON."""
