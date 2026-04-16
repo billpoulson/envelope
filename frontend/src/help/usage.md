@@ -23,7 +23,7 @@ For **installation**, **environment variables**, **TLS**, and **reverse proxies*
 | --- | --- |
 | **`ENVELOPE_MASTER_KEY`** | Fernet key (url-safe base64) used to encrypt secret values at rest. Generate once, e.g. `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. |
 | **`ENVELOPE_SESSION_SECRET`** | Long random string used to sign browser sessions. Required when not in debug mode. |
-| **`ENVELOPE_DATABASE_URL`** | Optional. Defaults to SQLite under the app data directory (e.g. `sqlite+aiosqlite:////data/envelope.db` in Docker with a `/data` volume). |
+| **`ENVELOPE_DATABASE_URL`** | Optional. Defaults to **SQLite** under the app data directory (e.g. `sqlite+aiosqlite:////data/envelope.db` in Docker with a `/data` volume). For **PostgreSQL**, use `postgresql+asyncpg://user:pass@host:5432/dbname` (managed DB, HA, backups via your platform). |
 | **`ENVELOPE_INITIAL_ADMIN_KEY`** | **First deployment only:** plaintext admin API key, stored hashed; remove after bootstrap. |
 
 Optional flags (see also **Behind a reverse proxy**): `ENVELOPE_RESTORE_ENABLED`, `ENVELOPE_HTTPS_COOKIES`, `ENVELOPE_ROOT_PATH`, `FORWARDED_ALLOW_IPS`, `ENVELOPE_PULUMI_STATE_ENABLED`, etc., as documented for your image or compose file.
@@ -306,8 +306,10 @@ The same opaque-env fetch logic as [`cli/envelope_run.py`](https://github.com/bi
 
 ## Backups
 
-- **Full database** — Admin API or **Backup** in the UI; optional passphrase-encrypted download. The encrypted backup does not include `ENVELOPE_MASTER_KEY`; keep the Fernet key separately.
+- **Full database (SQLite only)** — Admin API or **Backup** in the UI downloads a raw SQLite snapshot; optional passphrase-encrypted download. Not available when using PostgreSQL or other server databases; use your platform’s backups (`pg_dump`, managed automated backups, PITR, volume snapshots) with an agreed RPO/RTO instead.
 - **Per-bundle** — Export/merge via scoped API keys; see README API table.
+
+The encrypted SQLite backup does not include `ENVELOPE_MASTER_KEY`; keep the Fernet key separately.
 
 ---
 

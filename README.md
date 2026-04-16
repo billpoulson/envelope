@@ -4,12 +4,12 @@ Self-hosted **secure environment bundle** manager: named groups of secrets (like
 
 ## Features
 
-- **Fernet (AES)** encryption of secret values in SQLite using `ENVELOPE_MASTER_KEY`
+- **Fernet (AES)** encryption of secret values at rest (SQLite or PostgreSQL) using `ENVELOPE_MASTER_KEY`
 - **API keys** (bcrypt-hashed): `read` (export bundles) and `admin` (manage bundles and keys)
 - **Export** for pipelines: `GET /api/v1/bundles/{name}/export?format=dotenv|json` with `Authorization: Bearer …`
 - **Bundle stacks** — ordered layers of existing bundles merged into one composite `.env` / JSON (`GET /api/v1/stacks/{name}/export`). Later layers **overwrite** duplicate keys from earlier layers. Scopes: `read:stack:…`, `write:stack:…` (and project scopes for stacks in a project). Web: **Stacks**; same opaque `/env/{token}` links as bundles (`POST /api/v1/stacks/{name}/env-links`). Stack links can optionally be a **prefix slice**: merge from the bottom through a chosen layer only (`POST` body `{"through_layer_position": <n>}` matching a layer position). **`GET /api/v1/bundles/{name}`** and **stack key graph** (`GET /api/v1/stacks/{name}/key-graph`) omit encrypted secret plaintext by default; pass `?include_secret_values=true` when you need cleartext (automation and scripts must opt in).
 - **Opaque env URLs**: download a bundle **or merged stack** (full or prefix slice) as `.env` or JSON via `GET /env/{secret-token}` — the path is a random token only (no project, bundle, or stack name). Create links from a bundle’s or stack’s **Secret env URL** page (`…/bundles/{name}/env-links`, `…/stacks/{name}/env-links`) or the matching `POST /api/v1/…/env-links` API (API key with write access).
-- **Backups**: full SQLite snapshots and passphrase-encrypted files (admin); per-bundle JSON/encrypted export and merge import (scoped API keys)
+- **Backups**: full SQLite snapshots and passphrase-encrypted files (admin; SQLite deployments only); per-bundle JSON/encrypted export and merge import (scoped API keys). PostgreSQL: use operator-managed backups.
 - **Rate limits** on sensitive routes (export, web login)
 - **Certificate-backed sealed secrets** (zero-knowledge path): store client-encrypted ciphertext + wrapped data keys per recipient certificate; server does not need private keys to decrypt
 - **Terraform HTTP remote state** (optional): per-project URLs `/tfstate/projects/<slug>/…` with **read/write project** scopes; legacy flat `/tfstate/blobs/…` with **`terraform:http_state`** (or **admin**). See [docs/terraform-http-remote-state.md](docs/terraform-http-remote-state.md) and [docs/usage.md](docs/usage.md) (storage model and scopes).

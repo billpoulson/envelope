@@ -1,6 +1,18 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+    and_,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -86,6 +98,41 @@ class Bundle(Base):
         ForeignKey("project_environments.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
+    __table_args__ = (
+        Index(
+            "uq_bundles_scoped_group_name_env",
+            group_id,
+            name,
+            func.coalesce(project_environment_id, 0),
+            unique=True,
+            sqlite_where=group_id.isnot(None),
+            postgresql_where=group_id.isnot(None),
+        ),
+        Index(
+            "uq_bundles_legacy_name",
+            name,
+            unique=True,
+            sqlite_where=group_id.is_(None),
+            postgresql_where=group_id.is_(None),
+        ),
+        Index(
+            "uq_bundles_scoped_group_slug_env",
+            group_id,
+            slug,
+            func.coalesce(project_environment_id, 0),
+            unique=True,
+            sqlite_where=and_(group_id.isnot(None), slug != ""),
+            postgresql_where=and_(group_id.isnot(None), slug != ""),
+        ),
+        Index(
+            "uq_bundles_legacy_slug",
+            slug,
+            unique=True,
+            sqlite_where=and_(group_id.is_(None), slug != ""),
+            postgresql_where=and_(group_id.is_(None), slug != ""),
+        ),
+    )
+
     group: Mapped["BundleGroup | None"] = relationship(back_populates="bundles")
     project_environment: Mapped["ProjectEnvironment | None"] = relationship(
         back_populates="bundles"
@@ -120,6 +167,41 @@ class BundleStack(Base):
     )
     project_environment_id: Mapped[int | None] = mapped_column(
         ForeignKey("project_environments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_bundle_stacks_scoped_group_name_env",
+            group_id,
+            name,
+            func.coalesce(project_environment_id, 0),
+            unique=True,
+            sqlite_where=group_id.isnot(None),
+            postgresql_where=group_id.isnot(None),
+        ),
+        Index(
+            "uq_bundle_stacks_legacy_name",
+            name,
+            unique=True,
+            sqlite_where=group_id.is_(None),
+            postgresql_where=group_id.is_(None),
+        ),
+        Index(
+            "uq_bundle_stacks_scoped_group_slug_env",
+            group_id,
+            slug,
+            func.coalesce(project_environment_id, 0),
+            unique=True,
+            sqlite_where=and_(group_id.isnot(None), slug != ""),
+            postgresql_where=and_(group_id.isnot(None), slug != ""),
+        ),
+        Index(
+            "uq_bundle_stacks_legacy_slug",
+            slug,
+            unique=True,
+            sqlite_where=and_(group_id.is_(None), slug != ""),
+            postgresql_where=and_(group_id.is_(None), slug != ""),
+        ),
     )
 
     group: Mapped["BundleGroup | None"] = relationship(back_populates="stacks")
@@ -337,6 +419,9 @@ class OidcIdentity(Base):
 
 class ApiKey(Base):
     __tablename__ = "api_keys"
+    __table_args__ = (
+        Index("uq_api_keys_key_lookup_hmac", "key_lookup_hmac", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128))

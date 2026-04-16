@@ -9,16 +9,28 @@ from app.models import Base
 
 _engine = None
 _session_factory = None
+_cached_database_adapter = None
 
 
 async def reset_engine(engine=None) -> None:
     """Dispose the async engine and clear singletons so the DB file can be replaced (e.g. restore)."""
-    global _engine, _session_factory
+    global _engine, _session_factory, _cached_database_adapter
     to_close = engine if engine is not None else _engine
     if to_close is not None:
         await to_close.dispose()
     _engine = None
     _session_factory = None
+    _cached_database_adapter = None
+
+
+def get_database_adapter():
+    """Return the DatabaseAdapter for the current engine (cached until reset_engine)."""
+    global _cached_database_adapter
+    if _cached_database_adapter is None:
+        from app.database.registry import get_adapter_for_engine
+
+        _cached_database_adapter = get_adapter_for_engine(get_engine())
+    return _cached_database_adapter
 
 
 def _ensure_sqlite_parent_dir(database_url: str) -> None:
@@ -553,22 +565,27 @@ def _migrate_sqlite_oidc_drop_proxy_column(sync_conn) -> None:
         pass
 
 
+def run_sqlite_migrations_after_create_all(sync_conn) -> None:
+    """Incremental migrations for existing SQLite files (idempotent)."""
+    _migrate_sqlite_secrets_is_secret(sync_conn)
+    _migrate_sqlite_bundles_group_id(sync_conn)
+    _migrate_sqlite_api_keys_scopes(sync_conn)
+    _migrate_sqlite_api_keys_key_lookup_hmac(sync_conn)
+    _migrate_sqlite_bundle_groups_slug(sync_conn)
+    _migrate_sqlite_bundle_stack_layer_keys(sync_conn)
+    _migrate_sqlite_stack_env_links_slice(sync_conn)
+    _migrate_sqlite_bundles_stacks_project_environment(sync_conn)
+    _migrate_sqlite_assign_environment_to_unassigned_bundles_stacks(sync_conn)
+    _migrate_sqlite_bundles_stacks_scoped_names(sync_conn)
+    _migrate_sqlite_bundle_stacks_slug(sync_conn)
+    _migrate_sqlite_bundles_slug(sync_conn)
+    _migrate_sqlite_oidc_drop_proxy_column(sync_conn)
+
+
 async def init_db() -> None:
     engine = get_engine()
+    adapter = get_database_adapter()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate_cleanup_orphan_bundle_stack_layers)
-        if conn.engine.dialect.name == "sqlite":
-            await conn.run_sync(_migrate_sqlite_secrets_is_secret)
-            await conn.run_sync(_migrate_sqlite_bundles_group_id)
-            await conn.run_sync(_migrate_sqlite_api_keys_scopes)
-            await conn.run_sync(_migrate_sqlite_api_keys_key_lookup_hmac)
-            await conn.run_sync(_migrate_sqlite_bundle_groups_slug)
-            await conn.run_sync(_migrate_sqlite_bundle_stack_layer_keys)
-            await conn.run_sync(_migrate_sqlite_stack_env_links_slice)
-            await conn.run_sync(_migrate_sqlite_bundles_stacks_project_environment)
-            await conn.run_sync(_migrate_sqlite_assign_environment_to_unassigned_bundles_stacks)
-            await conn.run_sync(_migrate_sqlite_bundles_stacks_scoped_names)
-            await conn.run_sync(_migrate_sqlite_bundle_stacks_slug)
-            await conn.run_sync(_migrate_sqlite_bundles_slug)
-            await conn.run_sync(_migrate_sqlite_oidc_drop_proxy_column)
+        await conn.run_sync(adapter.run_migrations_after_create_all)
