@@ -7,7 +7,7 @@ import { listStacks } from "@/api/stacks";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
 
-type AccessMode = "admin" | "scoped" | "terraform_project" | "terraform_legacy";
+type AccessMode = "admin" | "scoped" | "terraform_project";
 type ScopedResource = "project" | "bundle" | "stack" | "terraform_state";
 type Perm = "read" | "write";
 /** Remote state at /tfstate/projects/… — apply needs GET + POST (read + write scopes). */
@@ -160,7 +160,6 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
       if (!n) throw new Error("Enter a name for this key.");
       let scopes: string[];
       if (access === "admin") scopes = ["admin"];
-      else if (access === "terraform_legacy") scopes = ["terraform:http_state"];
       else if (access === "terraform_project") {
         const slug = tfProjectSlug.trim();
         if (!slug) throw new Error("Pick a project.");
@@ -221,7 +220,7 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
     }
     if (step === "access") {
       onError("");
-      if (access === "admin" || access === "terraform_legacy") {
+      if (access === "admin") {
         setStep("review");
       } else if (access === "terraform_project") {
         setStep("tf_project");
@@ -253,7 +252,7 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
   function goBack() {
     onError("");
     if (step === "review") {
-      if (access === "admin" || access === "terraform_legacy") {
+      if (access === "admin") {
         setStep("access");
       } else if (access === "terraform_project") {
         setStep("tf_project");
@@ -283,25 +282,21 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
   const scopeLabel =
     access === "admin"
       ? "Full administrator (all API operations)"
-      : access === "terraform_legacy"
-        ? "Legacy Terraform HTTP state — flat /tfstate/blobs/… only (scope terraform:http_state). Prefer per-project URLs for new setups."
-        : access === "terraform_project"
-          ? "Terraform remote state for one Envelope project (read + write on /tfstate/projects/…)."
-          : null;
+      : access === "terraform_project"
+        ? "Terraform remote state for one Envelope project (read + write on /tfstate/projects/…)."
+        : null;
 
   const reviewScopes =
     access === "admin"
       ? ["admin"]
-      : access === "terraform_legacy"
-        ? ["terraform:http_state"]
-        : access === "terraform_project"
-          ? tfProjectSlug.trim()
-            ? dedupeScopes([
-                `read:project:slug:${tfProjectSlug.trim()}`,
-                `write:project:slug:${tfProjectSlug.trim()}`,
-              ])
-            : []
-          : dedupeScopes(pendingScopes);
+      : access === "terraform_project"
+        ? tfProjectSlug.trim()
+          ? dedupeScopes([
+              `read:project:slug:${tfProjectSlug.trim()}`,
+              `write:project:slug:${tfProjectSlug.trim()}`,
+            ])
+          : []
+        : dedupeScopes(pendingScopes);
 
   const updateDraft = (patch: Partial<ScopeDraft>) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -326,8 +321,8 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
       <p className="mb-8 text-xs text-slate-500">
         {step === "tf_project"
           ? "Pick which Envelope project this key may read/write Terraform state for (/tfstate/projects/…)."
-          : access === "admin" || access === "terraform_legacy"
-            ? "Admin and legacy Terraform keys skip the scope builder."
+          : access === "admin"
+            ? "Admin keys skip the scope builder."
             : "Add one or more scopes from the dropdowns. You can combine bundle, stack, project, and Terraform state access."}
       </p>
 
@@ -365,13 +360,12 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
               <option value="scoped">Scoped access (build a list of scopes)</option>
               <option value="admin">Full administrator — entire API</option>
               <option value="terraform_project">Terraform state for one project (/tfstate/projects/…)</option>
-              <option value="terraform_legacy">Legacy — flat /tfstate/blobs/… only (terraform:http_state)</option>
             </select>
             <p className="mt-2 text-xs text-slate-500">
               <strong className="text-slate-400">Admin</strong> cannot be combined with other scopes.{" "}
               <strong className="text-slate-400">Terraform for one project</strong> grants read + write on that
               project&apos;s remote state. Use <strong className="text-slate-400">Scoped</strong> to mix Terraform with
-              bundle/stack scopes. Legacy flat keys are for existing setups only.
+              bundle/stack scopes.
             </p>
           </div>
         </div>
@@ -722,7 +716,7 @@ export function ApiKeyCreateWizard({ onCreated, onError }: Props) {
             {access === "admin" ? (
               <p className="font-mono text-xs text-accent">admin</p>
             ) : null}
-            {(access === "terraform_legacy" || access === "terraform_project") && scopeLabel ? (
+            {access === "terraform_project" && scopeLabel ? (
               <p className="mb-3 text-slate-300">{scopeLabel}</p>
             ) : null}
             {access !== "admin" && reviewScopes.length > 0 ? (

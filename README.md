@@ -12,7 +12,7 @@ Self-hosted **secure environment bundle** manager: named groups of secrets (like
 - **Backups**: full SQLite snapshots and passphrase-encrypted files (admin; SQLite deployments only); per-bundle JSON/encrypted export and merge import (scoped API keys). PostgreSQL: use operator-managed backups.
 - **Rate limits** on sensitive routes (export, web login)
 - **Certificate-backed sealed secrets** (zero-knowledge path): store client-encrypted ciphertext + wrapped data keys per recipient certificate; server does not need private keys to decrypt
-- **Terraform HTTP remote state** (optional): per-project URLs `/tfstate/projects/<slug>/…` with **read/write project** scopes; legacy flat `/tfstate/blobs/…` with **`terraform:http_state`** (or **admin**). See [docs/terraform-http-remote-state.md](docs/terraform-http-remote-state.md) and [docs/usage.md](docs/usage.md) (storage model and scopes).
+- **Terraform HTTP remote state** (optional): per-project URLs `/tfstate/projects/<slug>/…` with **read/write project** scopes (or **admin**). See [docs/terraform-http-remote-state.md](docs/terraform-http-remote-state.md) and [docs/usage.md](docs/usage.md) (storage model and scopes).
 - **Help** in the web UI at **`/help`** (no login required) — usage overview including Terraform state storage.
 
 ## Quick start (Docker)
@@ -347,7 +347,7 @@ API docs: `http://localhost:8080/docs`
 | POST | `/api/v1/bundles/{name}/sealed-secrets` | write access to bundle — upsert ciphertext envelope + recipients |
 | DELETE | `/api/v1/bundles/{name}/sealed-secrets?key_name=…` | write access to bundle — delete one sealed secret row |
 | GET | `/api/v1/api-keys` | admin |
-| POST | `/api/v1/api-keys` | admin — body `{"name":"…","scopes":["…"]}`; use `read:project:…` / `write:project:…` for Terraform state under `/tfstate/projects/<slug>/…`; `terraform:http_state` only for legacy `/tfstate/blobs/…` |
+| POST | `/api/v1/api-keys` | admin — body `{"name":"…","scopes":["…"]}`; use `read:project:…` / `write:project:…` for Terraform state under `/tfstate/projects/<slug>/…` |
 | DELETE | `/api/v1/api-keys/{id}` | admin |
 | GET | `/api/v1/system/backup/database` | admin — raw SQLite snapshot (`application/octet-stream`) |
 | POST | `/api/v1/system/backup/database` | admin — body `{"passphrase":"..."}`; encrypted `.envelope-db` download |
@@ -357,7 +357,6 @@ API docs: `http://localhost:8080/docs`
 | PUT | `/api/v1/bundles/{name}/backup` | write access — merge secrets from JSON backup (upsert keys) |
 | POST | `/api/v1/bundles/{name}/backup/import-encrypted` | write — multipart `file` + form `passphrase` |
 | GET/POST/DELETE/LOCK/UNLOCK | `/tfstate/projects/{slug}/{path}` | **read:project…** / **write:project…** (or admin); Terraform state per project |
-| GET/POST/DELETE/LOCK/UNLOCK | `/tfstate/blobs/{key}` | **`terraform:http_state`** or admin — legacy flat keys; prefer `/tfstate/projects/…` |
 
 Never log request bodies or API keys.
 

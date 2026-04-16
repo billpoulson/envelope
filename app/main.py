@@ -136,7 +136,7 @@ def create_app() -> FastAPI:
 
     app.include_router(web_router)
     app.include_router(api_v1_router, prefix="/api/v1")
-    if settings.pulumi_state_enabled:
+    if settings.terraform_http_state_enabled:
         app.include_router(tfstate_router, prefix="/tfstate")
 
     _register_react_spa(app)

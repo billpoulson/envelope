@@ -1,6 +1,6 @@
 # Envelope — usage guide
 
-> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **[Installation & hosting](/help/installation)**, **`/help/web-ui`**, **[OpenID Connect (SSO)](/help/oidc)**, **`/help/api`**, **`/help/certificates`**, **`/help/terraform`**, **`/help/pulumi`**, **[CLI (opaque env)](/help/cli)**, **[GitHub Actions](/help/github-actions)**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
+> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **[Installation & hosting](/help/installation)**, **`/help/web-ui`**, **[OpenID Connect (SSO)](/help/oidc)**, **`/help/api`**, **`/help/certificates`**, **`/help/terraform`**, **[CLI (opaque env)](/help/cli)**, **[GitHub Actions](/help/github-actions)**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
 
 Envelope is a self-hosted **secure environment bundle** manager: named groups of variables (like a `.env` file), **encrypted at rest** for secret values, with **API keys** for automation and a **web UI** for administration.
 
@@ -26,7 +26,7 @@ For **installation**, **environment variables**, **TLS**, and **reverse proxies*
 | **`ENVELOPE_DATABASE_URL`** | Optional. Defaults to **SQLite** under the app data directory (e.g. `sqlite+aiosqlite:////data/envelope.db` in Docker with a `/data` volume). For **PostgreSQL**, use `postgresql+asyncpg://user:pass@host:5432/dbname` (managed DB, HA, backups via your platform). |
 | **`ENVELOPE_INITIAL_ADMIN_KEY`** | **First deployment only:** plaintext admin API key, stored hashed; remove after bootstrap. |
 
-Optional flags (see also **Behind a reverse proxy**): `ENVELOPE_RESTORE_ENABLED`, `ENVELOPE_HTTPS_COOKIES`, `ENVELOPE_ROOT_PATH`, `FORWARDED_ALLOW_IPS`, `ENVELOPE_PULUMI_STATE_ENABLED`, etc., as documented for your image or compose file.
+Optional flags (see also **Behind a reverse proxy**): `ENVELOPE_RESTORE_ENABLED`, `ENVELOPE_HTTPS_COOKIES`, `ENVELOPE_ROOT_PATH`, `FORWARDED_ALLOW_IPS`, `ENVELOPE_TERRAFORM_HTTP_STATE_ENABLED`, etc., as documented for your image or compose file.
 
 ### Database backend (`ENVELOPE_DATABASE_URL`)
 
@@ -245,13 +245,9 @@ Examples: `/tfstate/projects/my-proj/default.tfstate`
 
 Authenticate with **`Authorization: Bearer <api-key>`** or HTTP **Basic** (password = API key).
 
-### Legacy flat keys
-
-`GET` / `POST` / `DELETE` / `LOCK` / `UNLOCK` on `/tfstate/blobs/<key>` use a flat key namespace. The API key must include **`terraform:http_state`** or **`pulumi:state`**, or **admin**. Prefer per-project URLs for new setups. Do not put `projects/…` keys under `/tfstate/blobs/` — use `/tfstate/projects/…` instead.
-
 ### Configuration
 
-- Routes are registered when **`ENVELOPE_PULUMI_STATE_ENABLED=true`** (default: enabled). Set to `false` to disable all `/tfstate/…` endpoints.
+- Routes are registered when **`ENVELOPE_TERRAFORM_HTTP_STATE_ENABLED=true`** (default: enabled). Set to `false` to disable all `/tfstate/…` endpoints.
 - If Envelope sits behind a path prefix, set **`ENVELOPE_ROOT_PATH`** and use the same prefix in Terraform `backend "http"` addresses.
 
 ### Terraform example
@@ -276,21 +272,7 @@ export TF_HTTP_PASSWORD="$ENVELOPE_TF_WRITE_KEY"
 
 Use the same exports for **`terraform init`** and for plan/apply. In CI, set `TF_HTTP_PASSWORD` from the platform secret store only.
 
-More detail: see **[Terraform remote state](/help/terraform)** in this help (per-project URLs, scopes, and legacy flat keys).
-
----
-
-## Pulumi state (not Envelope’s Terraform HTTP API)
-
-Envelope’s `/tfstate/…` API implements the **Terraform HTTP backend** wire protocol. The **Pulumi CLI** does not use that protocol for `pulumi login`. Supported self-managed backends include **PostgreSQL**, **S3**, Azure Blob, GCS, and local file — see [Pulumi: State and backends](https://www.pulumi.com/docs/concepts/state/).
-
-**Recommended:** Point Pulumi at Postgres (or S3, etc.), and store the backend URL and credentials in an Envelope **bundle** (or supply them from CI after exporting from Envelope). Example:
-
-```bash
-pulumi login postgres://user:pass@host:5432/pulumi
-```
-
-The legacy scope name **`pulumi:state`** only authorizes flat **`/tfstate/blobs/…`** keys in Envelope; it does not enable the stock Pulumi CLI to use Envelope as an HTTP state store. For Pulumi, use a native backend plus secrets from Envelope.
+More detail: see **[Terraform remote state](/help/terraform)** in this help (per-project URLs and scopes).
 
 ---
 

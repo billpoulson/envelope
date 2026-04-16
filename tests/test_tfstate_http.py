@@ -24,7 +24,7 @@ os.environ["ENVELOPE_MASTER_KEY"] = Fernet.generate_key().decode()
 os.environ["ENVELOPE_SESSION_SECRET"] = "test-session-secret-test-session-secret"
 os.environ["ENVELOPE_DEBUG"] = "true"
 os.environ["ENVELOPE_INITIAL_ADMIN_KEY"] = "tfstate-http-test-admin-key"
-os.environ["ENVELOPE_PULUMI_STATE_ENABLED"] = "true"
+os.environ["ENVELOPE_TERRAFORM_HTTP_STATE_ENABLED"] = "true"
 os.environ["ENVELOPE_RESTORE_ENABLED"] = "true"
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -126,36 +126,47 @@ class TfstateHttpTests(unittest.TestCase):
         return cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
     def test_get_404(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
         with TestClient(app) as client:
+            cp = client.post("/api/v1/projects", json={"name": "TF404", "slug": "tf404"}, headers=h)
+            self.assertEqual(cp.status_code, 201, cp.text)
             r = client.get(
-                "/tfstate/blobs/test-stack/tfstate",
+                "/tfstate/projects/tf404/missing.tfstate",
                 headers={"Authorization": f"Bearer {self._token}"},
             )
         self.assertEqual(r.status_code, 404)
 
     def test_post_get_delete_round_trip(self) -> None:
-        key = "demo/proj/stack.json"
         payload = b'{"version":3,"checkpoint":true}'
-        h = {"Authorization": f"Bearer {self._token}"}
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        h_plain = {"Authorization": f"Bearer {self._token}"}
         with TestClient(app) as client:
-            pr = client.post(f"/tfstate/blobs/{key}", content=payload, headers=h)
+            cp = client.post("/api/v1/projects", json={"name": "Demo TF", "slug": "demotf"}, headers=h)
+            self.assertEqual(cp.status_code, 201, cp.text)
+            pr = client.post(
+                "/tfstate/projects/demotf/proj/stack.json",
+                content=payload,
+                headers=h_plain,
+            )
             self.assertEqual(pr.status_code, 200)
-            gr = client.get(f"/tfstate/blobs/{key}", headers=h)
+            gr = client.get("/tfstate/projects/demotf/proj/stack.json", headers=h_plain)
             self.assertEqual(gr.status_code, 200)
             self.assertEqual(gr.content, payload)
-            dr = client.delete(f"/tfstate/blobs/{key}", headers=h)
+            dr = client.delete("/tfstate/projects/demotf/proj/stack.json", headers=h_plain)
         self.assertEqual(dr.status_code, 200)
 
     def test_lock_conflict(self) -> None:
-        key = "lock-demo/state"
-        h = {"Authorization": f"Bearer {self._token}"}
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        h_plain = {"Authorization": f"Bearer {self._token}"}
         a = '{"ID":"aaa","Operation":"OperationTypeApply"}'
         b = '{"ID":"bbb","Operation":"OperationTypeApply"}'
         with TestClient(app) as client:
-            client.request("LOCK", f"/tfstate/blobs/{key}", content=a, headers=h)
-            r2 = client.request("LOCK", f"/tfstate/blobs/{key}", content=b, headers=h)
+            cp = client.post("/api/v1/projects", json={"name": "Lock demo", "slug": "lockdemo"}, headers=h)
+            self.assertEqual(cp.status_code, 201, cp.text)
+            client.request("LOCK", "/tfstate/projects/lockdemo/state", content=a, headers=h_plain)
+            r2 = client.request("LOCK", "/tfstate/projects/lockdemo/state", content=b, headers=h_plain)
             self.assertEqual(r2.status_code, 423)
-            ul = client.request("UNLOCK", f"/tfstate/blobs/{key}", content=a, headers=h)
+            ul = client.request("UNLOCK", "/tfstate/projects/lockdemo/state", content=a, headers=h_plain)
         self.assertEqual(ul.status_code, 200)
 
     def test_project_post_get_delete_round_trip(self) -> None:

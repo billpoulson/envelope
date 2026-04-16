@@ -18,7 +18,6 @@ const SECTIONS: { id: HelpSectionId; label: string; path: string }[] = [
     path: "/help/certificates",
   },
   { id: "terraform", label: "Terraform remote state", path: "/help/terraform" },
-  { id: "pulumi", label: "Pulumi state", path: "/help/pulumi" },
   { id: "cli", label: "CLI (opaque env)", path: "/help/cli" },
   { id: "github-actions", label: "GitHub Actions", path: "/help/github-actions" },
   { id: "backup", label: "Backup & security", path: "/help/backup" },

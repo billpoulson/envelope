@@ -11,10 +11,6 @@ from fastapi import HTTPException
 # Tokens: read:project:slug:my-app | read:project:id:7 (legacy) | read:project:* | name glob
 
 _ADMIN = "admin"
-# Terraform HTTP backend for remote state (HashiCorp docs: backend "http").
-_TERRAFORM_HTTP_STATE = "terraform:http_state"
-# Deprecated: accepted for existing keys only.
-_LEGACY_PULUMI_STATE_SCOPE = "pulumi:state"
 _READ_BUNDLE = "read:bundle:"
 _WRITE_BUNDLE = "write:bundle:"
 _READ_STACK = "read:stack:"
@@ -48,16 +44,6 @@ def scopes_allow_admin(scopes: list[str]) -> bool:
     return _ADMIN in scopes
 
 
-def scopes_allow_terraform_http_state(scopes: list[str]) -> bool:
-    if _ADMIN in scopes:
-        return True
-    if _TERRAFORM_HTTP_STATE in scopes:
-        return True
-    if _LEGACY_PULUMI_STATE_SCOPE in scopes:
-        return True
-    return False
-
-
 def validate_scopes_list(scopes: list[str]) -> None:
     if not scopes:
         raise HTTPException(status_code=400, detail="scopes must be a non-empty JSON array")
@@ -68,8 +54,6 @@ def validate_scopes_list(scopes: list[str]) -> None:
         )
     for s in scopes:
         if s == _ADMIN:
-            continue
-        if s in (_TERRAFORM_HTTP_STATE, _LEGACY_PULUMI_STATE_SCOPE):
             continue
         if s.startswith(_READ_BUNDLE):
             if len(s) <= len(_READ_BUNDLE):
@@ -98,7 +82,7 @@ def validate_scopes_list(scopes: list[str]) -> None:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Unknown scope: {s!r}. Use admin, terraform:http_state, read:bundle:..., write:bundle:..., "
+                f"Unknown scope: {s!r}. Use admin, read:bundle:..., write:bundle:..., "
                 "read:stack:..., write:stack:..., read:project:..., write:project:... "
                 "(wildcards: * ?; use slug:my-app for a project slug)"
             ),

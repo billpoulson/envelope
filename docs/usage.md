@@ -6,4 +6,4 @@ In the running app, open **Help** → **Installation & hosting** for Docker, env
 
 **Database (SQLite or PostgreSQL):** see **[database-configuration.md](database-configuration.md)** for `ENVELOPE_DATABASE_URL`, Docker Compose with PostgreSQL, TLS, backups, and migration notes.
 
-**On GitHub:** open `[frontend/src/help/usage.md](../frontend/src/help/usage.md)` for the bundled guide (overview, installation, Web UI, API export, sealed secrets, Terraform state, Pulumi, backups, security).
+**On GitHub:** open `[frontend/src/help/usage.md](../frontend/src/help/usage.md)` for the bundled guide (overview, installation, Web UI, API export, sealed secrets, Terraform state, backups, security).
