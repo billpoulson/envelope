@@ -19,6 +19,7 @@ import { bundleScopeForApi } from "@/projectEnv";
 import { DangerTypeConfirmModal } from "@/components/DangerTypeConfirmModal";
 import {
   editorToStackLayer,
+  layerHeadingLabel,
   LayerAliasesBlock,
   stackLayersFromApi,
   type LayerEditorState,
@@ -42,7 +43,11 @@ function moveTargetsForCell(
   const bundleAt = (i: number) => String(layers[i]?.bundle || "");
   const srcB = bundleAt(sourceLi);
   return layers
-    .map((L, ti) => ({ layerIndex: ti, label: L.label, bundle: String(L.bundle || "") }))
+    .map((L, ti) => ({
+      layerIndex: ti,
+      label: layerHeadingLabel(String(L.label ?? ""), String(L.bundle ?? ""), ti),
+      bundle: String(L.bundle || ""),
+    }))
     .filter(
       ({ layerIndex, bundle }) =>
         layerIndex !== sourceLi &&
@@ -407,7 +412,11 @@ export function StackKeyGraphView({
     async (layerIndex: number) => {
       const sn = stackName?.trim();
       if (!sn || stackLayers.length === 0) return;
-      const label = String(data.layers[layerIndex]?.label || "").trim() || `Layer ${layerIndex + 1}`;
+      const label = layerHeadingLabel(
+        String(data.layers[layerIndex]?.label ?? ""),
+        String(data.layers[layerIndex]?.bundle ?? ""),
+        layerIndex,
+      );
       const bundle = String(data.layers[layerIndex]?.bundle || "").trim() || "(no bundle)";
       const msg = `Remove ${label} (${bundle}) from this stack? The bundle is not deleted.`;
       if (!confirm(msg)) return;
@@ -443,7 +452,8 @@ export function StackKeyGraphView({
         </summary>
         <ul className="mt-3 list-inside list-disc space-y-2 pl-1">
           <li>
-            Layers run <strong className="text-slate-300">left → right</strong> (bottom → top of the stack).
+            Layers run <strong className="text-slate-300">left → right</strong> (merge order; later columns override
+            earlier ones for the same key).
           </li>
           <li>
             Use <kbd className="rounded bg-white/10 px-1">▶</kbd> / <kbd className="rounded bg-white/10 px-1">▼</kbd>{" "}
@@ -451,8 +461,8 @@ export function StackKeyGraphView({
           </li>
           <li>
             <span className="inline-block h-2 w-2 rounded-sm bg-slate-500" title="" /> Gray strip — overridden by a
-            layer above. <span className="inline-block h-2 w-2 rounded-sm bg-emerald-500" /> Green — this layer wins
-            vs the layer above for this key.
+            layer to the right. <span className="inline-block h-2 w-2 rounded-sm bg-emerald-500" /> Green — this layer
+            wins vs the layer to the left for this key.
           </li>
           <li>
             <strong className="text-slate-300">Merged export</strong> is the final value. Secret plaintext is not
@@ -462,7 +472,7 @@ export function StackKeyGraphView({
           <li>
             <strong className="text-slate-300">Right-click a layer header</strong> for{" "}
             <strong className="text-slate-300">Open bundle</strong>, to remove that layer from this stack or delete its
-            bundle entirely, or (except the bottom layer) open{" "}
+            bundle entirely, or (except the leftmost layer) open{" "}
             <strong className="text-slate-300">Key aliases for this layer</strong>.
           </li>
           <li>
@@ -550,7 +560,9 @@ export function StackKeyGraphView({
                         {collapsed[li] ? "▶" : "▼"}
                       </button>
                       <div className="min-w-0">
-                        <div className="font-medium leading-tight text-slate-200">{L.label}</div>
+                        <div className="font-medium leading-tight text-slate-200">
+                          {layerHeadingLabel(L.label, L.bundle, li)}
+                        </div>
                         <div className="font-mono text-[10px] text-slate-500">{L.bundle}</div>
                       </div>
                     </div>
@@ -614,7 +626,7 @@ export function StackKeyGraphView({
                       {aliasSourceName ? (
                         <div
                           className="mt-1 max-w-[14rem] font-mono text-[10px] font-normal leading-tight text-slate-500"
-                          title="This name is a stack layer alias; same value as the source variable from merged layers below."
+                          title="This name is a stack layer alias; same value as the source variable from merged layers to the left."
                         >
                           <span className="text-slate-600">alias of </span>
                           <button
@@ -827,7 +839,7 @@ export function StackKeyGraphView({
                                     {aliasSrc?.[li] ? (
                                       <div
                                         className="mt-0.5 font-mono text-[10px] leading-tight text-slate-500"
-                                        title={`Alias: same value as ${aliasSrc[li]} from merged layers below this layer`}
+                                        title={`Alias: same value as ${aliasSrc[li]} from merged layers to the left of this column`}
                                       >
                                         <span className="select-none text-slate-600">from </span>
                                         <button
@@ -863,7 +875,7 @@ export function StackKeyGraphView({
                               {hasVal && overriddenByNext ? (
                                 <span
                                   className="inline-block h-2 w-2 rounded-sm bg-slate-500"
-                                  title="Overridden by the next layer"
+                                  title="Overridden by the layer to the right"
                                 />
                               ) : null}
                               {hasVal && notOverriddenByNext ? (
@@ -871,7 +883,7 @@ export function StackKeyGraphView({
                                   className="inline-block h-2 w-2 rounded-sm bg-emerald-500"
                                   title={
                                     li === n - 1
-                                      ? "Top layer — nothing above overrides"
+                                      ? "Last layer in merge order — nothing to the right overrides"
                                       : "Next layer does not define this key"
                                   }
                                 />
@@ -1144,7 +1156,7 @@ export function StackKeyGraphView({
             >
               {moveDialog.targets.map((t) => (
                 <option key={t.layerIndex} value={t.layerIndex}>
-                  {t.label} — {t.bundle}
+                  {t.label === t.bundle ? t.bundle : `${t.label} — ${t.bundle}`}
                 </option>
               ))}
             </select>
@@ -1180,9 +1192,18 @@ export function StackKeyGraphView({
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="mb-1 text-lg text-white">Key aliases for this layer</h3>
-            <p className="mb-4 font-mono text-xs text-slate-400">
-              {data.layers[aliasModalLayer]?.label} · {data.layers[aliasModalLayer]?.bundle}
-            </p>
+            <div className="mb-4 space-y-0.5">
+              <div className="text-sm text-slate-200">
+                {layerHeadingLabel(
+                  String(data.layers[aliasModalLayer]?.label ?? ""),
+                  String(data.layers[aliasModalLayer]?.bundle ?? ""),
+                  aliasModalLayer,
+                )}
+              </div>
+              <div className="font-mono text-xs text-slate-500">
+                {data.layers[aliasModalLayer]?.bundle}
+              </div>
+            </div>
             {aliasErr ? <p className="mb-3 text-sm text-red-400">{aliasErr}</p> : null}
             <LayerAliasesBlock
               layerIndex={aliasModalLayer}

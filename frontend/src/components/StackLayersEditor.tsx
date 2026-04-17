@@ -30,7 +30,7 @@ export type LayerEditorState = {
 };
 
 /** Heading shown in the layer card when the optional label is blank: use bundle name, then a generic fallback. */
-function layerHeadingLabel(label: string, bundle: string, index: number): string {
+export function layerHeadingLabel(label: string, bundle: string, index: number): string {
   const l = (label || "").trim();
   if (l) return l;
   const b = (bundle || "").trim();
@@ -347,8 +347,9 @@ export function StackLayersEditor({
     <div className="space-y-4">
       <p className="text-sm text-slate-400">
         Choose a bundle per layer, then <strong className="text-slate-300">all keys</strong> or{" "}
-        <strong className="text-slate-300">selected keys</strong>. Bottom layer first; top layer wins on
-        duplicates. Each list only shows bundles not already used on another layer in this stack. Use{" "}
+        <strong className="text-slate-300">selected keys</strong>. The first layer in this list is merged first;
+        later layers override duplicate keys. Each list only shows bundles not already used on another layer in this
+        stack. Use{" "}
         <strong className="text-slate-300">▶/▼</strong> to collapse a layer, <strong className="text-slate-300">Bundle</strong>{" "}
         to open that layer’s source bundle, and drag the grip handle to reorder (or use ↑↓).
       </p>
