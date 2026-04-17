@@ -21,6 +21,7 @@ class StackKeyGraphPayloadTests(unittest.TestCase):
         self.assertTrue(p["secret_values_included"])
         self.assertEqual(len(p["layers"]), 1)
         self.assertEqual(p["layers"][0]["bundle"], "only")
+        self.assertEqual(p["layers"][0]["label"], "only")
         self.assertEqual(p["layers"][0]["bundle_edit_path"], "/bundles/only/edit")
         self.assertIsNone(p["layers"][0].get("bundle_environment_slug"))
         self.assertIsNone(p["layers"][0].get("display_label"))
@@ -34,7 +35,7 @@ class StackKeyGraphPayloadTests(unittest.TestCase):
         )
         self.assertTrue(p["secret_values_included"])
         self.assertEqual(p["layers"][0]["display_label"], "My label")
-        self.assertEqual(p["layers"][0]["label"], "My label · bottom")
+        self.assertEqual(p["layers"][0]["label"], "My label")
         rows = {r["key"]: r for r in p["rows"]}
         r = rows["K"]
         self.assertEqual(r["cells"], ["a"])

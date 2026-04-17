@@ -534,12 +534,9 @@ def stack_key_graph_payload(
             raw = layer_display_labels[i]
             if isinstance(raw, str) and raw.strip():
                 custom = raw.strip()
-        base = custom if custom else f"Layer {i + 1}"
-        lab = base
-        if i == 0:
-            lab += " · bottom"
-        elif i == n - 1:
-            lab += " · top"
+        bn = layer_bundle_names[i]
+        bundle_trim = bn.strip() if isinstance(bn, str) else ""
+        lab = custom if custom else bundle_trim
         edit_path = ""
         if layer_bundle_edit_paths and i < len(layer_bundle_edit_paths):
             edit_path = layer_bundle_edit_paths[i]
