@@ -24,10 +24,11 @@ export default function StackEnvLinksPage() {
   const location = useLocation();
   const resourceScope = resourceScopeFromPath(projectSlugParam, environmentSlug);
   const qc = useQueryClient();
+  const stackScopeReady = !!stackName && !!projectSlugParam?.trim() && !!environmentSlug?.trim();
   const stackQ = useQuery({
     queryKey: ["stack", stackName, projectSlugParam ?? "", environmentSlug],
     queryFn: () => getStack(stackName, resourceScope),
-    enabled: !!stackName,
+    enabled: stackScopeReady,
     retry: resourceScopeQueryRetry,
   });
   const q = useQuery({
@@ -70,6 +71,11 @@ export default function StackEnvLinksPage() {
   }, [resultUrl]);
 
   if (!stackName) return <p className="text-red-400">Missing stack</p>;
+  if (!projectSlugParam?.trim() || !environmentSlug?.trim()) {
+    return <p className="text-red-400">Missing project or environment</p>;
+  }
+  const psRoute = projectSlugParam.trim();
+  const envRoute = environmentSlug.trim();
   if (stackQ.isLoading) return <p className="text-slate-400">Loading…</p>;
   if (stackQ.isError) {
     if (projectSlugParam && isAmbiguousStackScopeError(stackQ.error)) {
@@ -85,12 +91,8 @@ export default function StackEnvLinksPage() {
       <p className="text-red-400">{stackQ.error instanceof Error ? stackQ.error.message : "Failed"}</p>
     );
   }
-  const projectSlug = projectSlugParam ?? stackQ.data?.project_slug ?? "";
-  const subnavSlug = projectSlugParam ?? (projectSlug || undefined);
-  const editTo =
-    projectSlug && environmentSlug
-      ? `${projectStacksBase(projectSlug, environmentSlug)}/${encodeURIComponent(stackName)}/edit`
-      : `/stacks/${encodeURIComponent(stackName)}/edit`;
+  const subnavSlug = psRoute;
+  const editTo = `${projectStacksBase(psRoute, envRoute)}/${encodeURIComponent(stackName)}/edit`;
 
   if (q.isLoading) return <p className="text-slate-400">Loading…</p>;
   if (q.isError) {
@@ -117,7 +119,7 @@ export default function StackEnvLinksPage() {
       stackName={stackName}
       displayName={stackQ.data?.name}
       subnavSlug={subnavSlug}
-      subnavEnvironmentSlug={environmentSlug}
+      subnavEnvironmentSlug={envRoute}
       linkSearch={searchWithoutEnv(location.search)}
       subtitle="Secret env URLs"
       tertiaryLink={{ to: `${editTo}${searchWithoutEnv(location.search)}`, label: "← Edit stack layers" }}

@@ -2,10 +2,8 @@ import { NavLink } from "react-router-dom";
 import { projectStacksBase } from "@/projectPaths";
 
 type Props = {
-  /** When omitted, links use `/stacks/:name/...` (ungrouped stacks). */
-  projectSlug?: string;
-  /** Required with `projectSlug` for project-scoped routes (env-in-path). */
-  environmentSlug?: string;
+  projectSlug: string;
+  environmentSlug: string;
   stackName: string;
   /** Tighter layout for full-page key graph (no bottom margin; border optional). */
   variant?: "default" | "embedded";
@@ -19,10 +17,7 @@ export function StackSubnav({
   variant = "default",
   linkSearch = "",
 }: Props) {
-  const base =
-    projectSlug && environmentSlug
-      ? `${projectStacksBase(projectSlug, environmentSlug)}/${encodeURIComponent(stackName)}`
-      : `/stacks/${encodeURIComponent(stackName)}`;
+  const base = `${projectStacksBase(projectSlug, environmentSlug)}/${encodeURIComponent(stackName)}`;
   const qs = linkSearch || "";
   const linkCls = ({ isActive }: { isActive: boolean }) =>
     `rounded-md px-2 py-1 text-sm ${isActive ? "bg-white/10 text-white" : "text-slate-400 hover:text-slate-200"}`;

@@ -12,12 +12,10 @@ function bundleEditHref(
   if (!bn) return null;
   const enc = encodeURIComponent(bn);
   const env = stackEnvironmentSlug?.trim();
-  if (projectSlug?.trim() && env) {
-    const ps = encodeURIComponent(projectSlug.trim());
-    const es = encodeURIComponent(env);
-    return `/projects/${ps}/env/${es}/bundles/${enc}/edit`;
-  }
-  return `/bundles/${enc}/edit`;
+  if (!projectSlug?.trim() || !env) return null;
+  const ps = encodeURIComponent(projectSlug.trim());
+  const es = encodeURIComponent(env);
+  return `/projects/${ps}/env/${es}/bundles/${enc}/edit`;
 }
 
 export type LayerEditorState = {
@@ -239,7 +237,7 @@ export function StackLayersEditor({
       for (let i = 0; i < parsed.length; i++) {
         if (parsed[i].mode !== "pick" || !parsed[i].bundle.trim()) continue;
         try {
-          const data = await loadPickKeyData(parsed, i);
+          const data = await loadPickKeyData(parsed, i, bundleKeyScope);
           if (cancelled) return;
           updates[i] = data;
         } catch {
@@ -628,6 +626,7 @@ export function StackLayersEditor({
                 layers={layers}
                 aliasRows={layer.aliasRows ?? []}
                 updateLayer={updateLayer}
+                bundleKeyScope={bundleKeyScope}
               />
             ) : null}
               </>
@@ -661,16 +660,23 @@ type AliasBlockProps = {
   layers: LayerEditorState[];
   aliasRows: { target: string; source: string }[];
   updateLayer: (index: number, patch: Partial<LayerEditorState>) => void;
+  bundleKeyScope?: ResourceScopeOpts;
 };
 
-export function LayerAliasesBlock({ layerIndex, layers, aliasRows, updateLayer }: AliasBlockProps) {
+export function LayerAliasesBlock({
+  layerIndex,
+  layers,
+  aliasRows,
+  updateLayer,
+  bundleKeyScope,
+}: AliasBlockProps) {
   const [sourceOptions, setSourceOptions] = useState<string[] | "loading" | "error">("loading");
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const keys = await unionForwardedKeyNames(layers, layerIndex);
+        const keys = await unionForwardedKeyNames(layers, layerIndex, bundleKeyScope);
         if (!cancelled) setSourceOptions(keys);
       } catch {
         if (!cancelled) setSourceOptions("error");
@@ -679,7 +685,7 @@ export function LayerAliasesBlock({ layerIndex, layers, aliasRows, updateLayer }
     return () => {
       cancelled = true;
     };
-  }, [layers, layerIndex]);
+  }, [layers, layerIndex, bundleKeyScope]);
 
   const opts = sourceOptions === "loading" || sourceOptions === "error" ? [] : sourceOptions;
 

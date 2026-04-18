@@ -16,8 +16,8 @@ type Props = {
   stackName: string;
   /** Optional display title in the header (defaults to stackName). */
   displayName?: string;
-  subnavSlug?: string;
-  subnavEnvironmentSlug?: string;
+  subnavSlug: string;
+  subnavEnvironmentSlug: string;
   linkSearch?: string;
   subtitle: string;
   tertiaryLink?: StackTertiaryLink;

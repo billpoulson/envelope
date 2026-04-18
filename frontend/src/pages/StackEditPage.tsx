@@ -37,10 +37,11 @@ export default function StackEditPage() {
   const location = useLocation();
   const qc = useQueryClient();
   const resourceScope = resourceScopeFromPath(projectSlugParam, environmentSlug);
+  const stackScopeReady = !!stackName && !!projectSlugParam?.trim() && !!environmentSlug?.trim();
   const q = useQuery({
     queryKey: ["stack", stackName, projectSlugParam ?? "", environmentSlug],
     queryFn: () => getStack(stackName, resourceScope),
-    enabled: !!stackName,
+    enabled: stackScopeReady,
     retry: resourceScopeQueryRetry,
   });
   const [layerUi, setLayerUi] = useState<LayerEditorState[]>([]);
@@ -59,11 +60,8 @@ export default function StackEditPage() {
   const stackEnvSlug = q.data?.project_environment_slug ?? environmentSlug;
   const bundlesQ = useQuery({
     queryKey: ["bundles", projectSlugForBundles || "global", stackEnvSlug ?? ""],
-    queryFn: () => {
-      if (!projectSlugForBundles) return listBundles();
-      return listBundles(projectSlugForBundles, environmentListApiOpts(stackEnvSlug));
-    },
-    enabled: !!stackName && !!q.data,
+    queryFn: () => listBundles(projectSlugForBundles, environmentListApiOpts(stackEnvSlug)),
+    enabled: !!stackName && !!q.data && !!projectSlugForBundles?.trim(),
   });
 
   const projectSlugResolved = projectSlugParam ?? q.data?.project_slug ?? "";
@@ -148,14 +146,10 @@ export default function StackEditPage() {
       setStackDetailsOpen(false);
 
       const goToCanonicalStackUrl = (ss: string, ps: string) => {
-        if (ps && environmentSlug) {
-          navigate(
-            `${projectStacksBase(ps, environmentSlug)}/${encodeURIComponent(ss)}/edit${searchWithoutEnv(location.search)}`,
-            { replace: true },
-          );
-        } else {
-          navigate(`/stacks/${encodeURIComponent(ss)}/edit${location.search}`, { replace: true });
-        }
+        navigate(
+          `${projectStacksBase(ps, environmentSlug.trim())}/${encodeURIComponent(ss)}/edit${searchWithoutEnv(location.search)}`,
+          { replace: true },
+        );
       };
 
       if (result.skipped) {
@@ -189,37 +183,41 @@ export default function StackEditPage() {
         environmentSlug,
       ]);
       const ps = projectSlugParam ?? detail?.project_slug ?? "";
-      window.location.href = ps && environmentSlug ? projectStacksBase(ps, environmentSlug) : "/stacks";
+      window.location.href = ps && environmentSlug ? projectStacksBase(ps, environmentSlug) : "/projects";
     },
   });
 
   if (!stackName) return <p className="text-red-400">Missing stack</p>;
+  if (!projectSlugParam?.trim() || !environmentSlug?.trim()) {
+    return <p className="text-red-400">Missing project or environment</p>;
+  }
 
-  if (projectSlugParam) {
-    if (allBundlesGate.isLoading) return <p className="text-slate-400">Loading…</p>;
-    if (allBundlesGate.isError) {
-      return (
-        <p className="text-red-400">
-          {allBundlesGate.error instanceof Error ? allBundlesGate.error.message : "Failed to load bundles"}
-        </p>
-      );
-    }
-    if ((allBundlesGate.data?.length ?? 0) === 0) {
-      const stacksTo = projectStacksBase(projectSlugParam, environmentSlug);
-      return (
-        <StackPageShell
-          stackName={stackName}
-          subnavSlug={projectSlugParam}
-          subnavEnvironmentSlug={environmentSlug}
-          linkSearch={searchWithoutEnv(location.search)}
-          subtitle="Edit stack layers"
-          tertiaryLink={{ to: stacksTo, label: "← Stacks" }}
-          fullBleed
-        >
-          <NeedBundlesBeforeStacks projectSlug={projectSlugParam} environmentSlug={environmentSlug} />
-        </StackPageShell>
-      );
-    }
+  const psRoute = projectSlugParam.trim();
+  const envRoute = environmentSlug.trim();
+
+  if (allBundlesGate.isLoading) return <p className="text-slate-400">Loading…</p>;
+  if (allBundlesGate.isError) {
+    return (
+      <p className="text-red-400">
+        {allBundlesGate.error instanceof Error ? allBundlesGate.error.message : "Failed to load bundles"}
+      </p>
+    );
+  }
+  if ((allBundlesGate.data?.length ?? 0) === 0) {
+    const stacksTo = projectStacksBase(psRoute, envRoute);
+    return (
+      <StackPageShell
+        stackName={stackName}
+        subnavSlug={psRoute}
+        subnavEnvironmentSlug={envRoute}
+        linkSearch={searchWithoutEnv(location.search)}
+        subtitle="Edit stack layers"
+        tertiaryLink={{ to: stacksTo, label: "← Stacks" }}
+        fullBleed
+      >
+        <NeedBundlesBeforeStacks projectSlug={psRoute} environmentSlug={envRoute} />
+      </StackPageShell>
+    );
   }
 
   if (q.isLoading) return <p className="text-slate-400">Loading…</p>;
@@ -243,16 +241,15 @@ export default function StackEditPage() {
 
   const projectSlug = projectSlugParam ?? q.data.project_slug ?? "";
   const envAssignmentLocked = q.data.project_environment_slug != null;
-  const subnavSlug = projectSlugParam ?? (projectSlug || undefined);
-  const stacksListTo =
-    projectSlug && environmentSlug ? projectStacksBase(projectSlug, environmentSlug) : "/stacks";
+  const subnavSlug = psRoute;
+  const stacksListTo = projectStacksBase(psRoute, envRoute);
 
   return (
     <StackPageShell
       stackName={stackName}
       displayName={q.data.name}
       subnavSlug={subnavSlug}
-      subnavEnvironmentSlug={environmentSlug}
+      subnavEnvironmentSlug={envRoute}
       linkSearch={searchWithoutEnv(location.search)}
       subtitle="Edit stack layers"
       tertiaryLink={{ to: `${stacksListTo}${searchWithoutEnv(location.search)}`, label: "← Stacks" }}
@@ -301,9 +298,9 @@ export default function StackEditPage() {
         ) : null}
         <StackLayersEditor
           bundleNames={bundlesQ.data ?? []}
-          bundleKeyScope={resourceScopeFromPath(projectSlugForBundles, environmentSlug)}
+          bundleKeyScope={resourceScopeFromPath(psRoute, envRoute)}
           projectSlug={projectSlug || null}
-          stackEnvironmentSlug={environmentSlug}
+          stackEnvironmentSlug={envRoute}
           layers={layerUi}
           onChange={setLayerUi}
         />

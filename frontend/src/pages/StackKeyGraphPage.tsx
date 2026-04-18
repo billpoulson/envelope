@@ -26,10 +26,11 @@ export default function StackKeyGraphPage() {
   const resourceScope = resourceScopeFromPath(projectSlugParam, environmentSlug);
   const qc = useQueryClient();
   const [showSecrets, setShowSecrets] = useState(false);
+  const stackScopeReady = !!stackName && !!projectSlugParam?.trim() && !!environmentSlug?.trim();
   const stackQ = useQuery({
     queryKey: ["stack", stackName, projectSlugParam ?? "", environmentSlug],
     queryFn: () => getStack(stackName, resourceScope),
-    enabled: !!stackName,
+    enabled: stackScopeReady,
     retry: resourceScopeQueryRetry,
   });
   const q = useQuery({
@@ -46,6 +47,15 @@ export default function StackKeyGraphPage() {
       </div>
     );
   }
+  if (!projectSlugParam?.trim() || !environmentSlug?.trim()) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <p className="text-red-400">Missing project or environment</p>
+      </div>
+    );
+  }
+  const psRoute = projectSlugParam.trim();
+  const envRoute = environmentSlug.trim();
   if (stackQ.isLoading) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -98,19 +108,15 @@ export default function StackKeyGraphPage() {
   }
 
   const data = q.data;
-  const projectSlug = projectSlugParam ?? stackQ.data.project_slug ?? "";
-  const subnavSlug = projectSlugParam ?? (projectSlug || undefined);
-  const editTo =
-    projectSlug && environmentSlug
-      ? `${projectStacksBase(projectSlug, environmentSlug)}/${encodeURIComponent(stackName)}/edit`
-      : `/stacks/${encodeURIComponent(stackName)}/edit`;
+  const subnavSlug = psRoute;
+  const editTo = `${projectStacksBase(psRoute, envRoute)}/${encodeURIComponent(stackName)}/edit`;
 
   return (
     <StackPageShell
       stackName={stackName}
       displayName={stackQ.data?.name}
       subnavSlug={subnavSlug}
-      subnavEnvironmentSlug={environmentSlug}
+      subnavEnvironmentSlug={envRoute}
       linkSearch={searchWithoutEnv(location.search)}
       subtitle="Key graph — merged variables by layer"
       tertiaryLink={{ to: `${editTo}${searchWithoutEnv(location.search)}`, label: "← Edit stack layers" }}
@@ -119,7 +125,7 @@ export default function StackKeyGraphPage() {
       <StackKeyGraphView
         data={data}
         stackName={stackName}
-        projectSlug={projectSlugParam ?? projectSlug}
+        projectSlug={psRoute}
         stackScope={resourceScope}
         stackLayers={stackQ.data?.layers ?? []}
         showSecrets={showSecrets}

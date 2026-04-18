@@ -25,10 +25,6 @@ import ProjectEnvironmentsPage from "@/pages/ProjectEnvironmentsPage";
 import ProjectSettingsPage from "@/pages/ProjectSettingsPage";
 import ProjectStacksPage from "@/pages/ProjectStacksPage";
 import ProjectsPage from "@/pages/ProjectsPage";
-import {
-  LegacyOldEnvSegmentRedirect,
-  LegacyProjectWorkspaceRedirect,
-} from "@/routes/LegacyProjectWorkspaceRedirects";
 import StackEditPage from "@/pages/StackEditPage";
 import StackEnvLinksPage from "@/pages/StackEnvLinksPage";
 import StackKeyGraphPage from "@/pages/StackKeyGraphPage";
@@ -101,30 +97,10 @@ export default function App() {
             element={<StackEnvLinksPage />}
           />
 
-          <Route path="/projects/:projectSlug/bundles/*" element={<LegacyProjectWorkspaceRedirect kind="bundles" />} />
-          <Route path="/projects/:projectSlug/stacks/*" element={<LegacyProjectWorkspaceRedirect kind="stacks" />} />
-          <Route
-            path="/projects/:projectSlug/:legacyEnv/bundles/*"
-            element={<LegacyOldEnvSegmentRedirect kind="bundles" />}
-          />
-          <Route
-            path="/projects/:projectSlug/:legacyEnv/stacks/*"
-            element={<LegacyOldEnvSegmentRedirect kind="stacks" />}
-          />
-
           <Route path="/projects/:projectSlug" element={<ProjectEnvironmentGatewayPage />} />
 
           <Route path="/bundles" element={<BundlesPage />} />
-          <Route path="/bundles/:bundleName/edit" element={<BundleVariablesPage />} />
-          <Route path="/bundles/:bundleName/env-links" element={<BundleEnvLinksPage />} />
-          <Route
-            path="/bundles/:bundleName/sealed-secrets"
-            element={<BundleSealedSecretsPage />}
-          />
           <Route path="/stacks" element={<StacksPage />} />
-          <Route path="/stacks/:stackName/edit" element={<StackEditPage />} />
-          <Route path="/stacks/:stackName/key-graph" element={<StackKeyGraphPage />} />
-          <Route path="/stacks/:stackName/env-links" element={<StackEnvLinksPage />} />
           <Route path="/keys" element={<ApiKeysPage />} />
           <Route path="/settings" element={<AppSettingsPage />} />
           <Route path="/certificates" element={<CertificatesPage />} />

@@ -30,7 +30,9 @@ export function Layout() {
   /** Full-bleed main: stack layers, env links, and key graph use full width; body scroll is inside the page shell. */
   const stackWorkbenchFullBleed =
     pathname.includes("/key-graph") ||
-    (pathname.includes("/stacks/") &&
+    (pathname.includes("/projects/") &&
+      pathname.includes("/env/") &&
+      pathname.includes("/stacks/") &&
       (pathname.endsWith("/edit") || pathname.endsWith("/env-links")));
   const projectMatch = useMatch({ path: "/projects/:projectSlug/*", end: false });
   const rawSlug = projectMatch?.params.projectSlug;
@@ -51,9 +53,7 @@ export function Layout() {
     pathname === "/projects" ||
     pathname.startsWith("/projects/") ||
     pathname === "/bundles" ||
-    pathname.startsWith("/bundles/") ||
-    pathname === "/stacks" ||
-    pathname.startsWith("/stacks/");
+    pathname === "/stacks";
   const [adminOpen, setAdminOpen] = useState(false);
   const adminMenuRef = useRef<HTMLDivElement>(null);
 

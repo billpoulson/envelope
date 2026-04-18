@@ -34,9 +34,5 @@ export function envLinksPageLocation(
     return { pathname: projectGatewayPath(project_slug), search: appendHighlight(new URLSearchParams(), hl) };
   }
 
-  const pathname =
-    resource === "bundle"
-      ? `/bundles/${enc(bundleSeg)}/env-links`
-      : `/stacks/${enc(stackSeg)}/env-links`;
-  return { pathname, search: appendHighlight(new URLSearchParams(), hl) };
+  return { pathname: "/projects", search: appendHighlight(new URLSearchParams(), hl) };
 }

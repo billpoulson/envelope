@@ -93,5 +93,10 @@ export default defineConfig(({ mode, command }) => {
       outDir: "dist",
       emptyOutDir: true,
     },
+    test: {
+      environment: "jsdom",
+      globals: true,
+      setupFiles: ["./src/test/setup.ts"],
+    },
   };
 });

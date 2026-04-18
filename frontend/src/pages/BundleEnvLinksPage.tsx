@@ -1,12 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import {
-  createBundleEnvLink,
-  deleteBundleEnvLink,
-  getBundle,
-  listBundleEnvLinks,
-} from "@/api/bundles";
+import { createBundleEnvLink, deleteBundleEnvLink, listBundleEnvLinks } from "@/api/bundles";
 import { PickEnvironmentForAmbiguousResource } from "@/components/PickEnvironmentForAmbiguousResource";
 import { BundlePageShell } from "@/components/BundlePageShell";
 import { Button } from "@/components/ui";
@@ -23,16 +18,11 @@ export default function BundleEnvLinksPage() {
   const location = useLocation();
   const resourceScope = resourceScopeFromPath(projectSlugParam, environmentSlug);
   const qc = useQueryClient();
-  const bq = useQuery({
-    queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug ?? ""],
-    queryFn: () => getBundle(bundleName, resourceScope),
-    enabled: !!bundleName && !projectSlugParam,
-    retry: resourceScopeQueryRetry,
-  });
+  const scopeReady = !!bundleName && !!projectSlugParam?.trim() && !!environmentSlug?.trim();
   const q = useQuery({
     queryKey: ["bundle-env-links", bundleName, projectSlugParam ?? "", environmentSlug ?? ""],
     queryFn: () => listBundleEnvLinks(bundleName, resourceScope),
-    enabled: !!bundleName,
+    enabled: scopeReady,
     retry: resourceScopeQueryRetry,
   });
   const rows = q.data ?? [];
@@ -59,18 +49,13 @@ export default function BundleEnvLinksPage() {
   });
 
   if (!bundleName) return <p className="text-red-400">Missing bundle</p>;
-  if (!projectSlugParam && bq.isLoading) return <p className="text-slate-400">Loading…</p>;
-  if (!projectSlugParam && bq.isError) {
-    return (
-      <p className="text-red-400">{bq.error instanceof Error ? bq.error.message : "Failed"}</p>
-    );
+  if (!projectSlugParam?.trim() || !environmentSlug?.trim()) {
+    return <p className="text-red-400">Missing project or environment</p>;
   }
-  const projectSlug = projectSlugParam ?? bq.data?.project_slug ?? "";
-  const subnavSlug = projectSlugParam ?? (projectSlug || undefined);
-  const editTo =
-    projectSlug && environmentSlug
-      ? `${projectBundlesBase(projectSlug, environmentSlug)}/${encodeURIComponent(bundleName)}/edit`
-      : `/bundles/${encodeURIComponent(bundleName)}/edit`;
+  const ps = projectSlugParam.trim();
+  const es = environmentSlug.trim();
+  const subnavSlug = ps;
+  const editTo = `${projectBundlesBase(ps, es)}/${encodeURIComponent(bundleName)}/edit`;
 
   if (q.isLoading) return <p className="text-slate-400">Loading…</p>;
   if (q.isError) {
@@ -92,7 +77,7 @@ export default function BundleEnvLinksPage() {
     <BundlePageShell
       bundleName={bundleName}
       subnavSlug={subnavSlug}
-      subnavEnvironmentSlug={environmentSlug || undefined}
+      subnavEnvironmentSlug={es}
       linkSearch={searchWithoutEnv(location.search)}
       subtitle="Secret env URLs"
       tertiaryLink={{ to: `${editTo}${searchWithoutEnv(location.search)}`, label: "← Variables" }}

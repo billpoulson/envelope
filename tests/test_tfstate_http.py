@@ -1518,5 +1518,70 @@ class SecurityHeadersHttpTests(unittest.TestCase):
         self.assertTrue(should_attach_content_security_policy("/api/v1/auth/login-options"))
 
 
+class BundleKeyNamesScopeHttpTests(unittest.TestCase):
+    """GET /bundles/{name}/key-names disambiguation when the same bundle name exists in multiple environments."""
+
+    _token = "tfstate-http-test-admin-key"
+
+    def test_key_names_ambiguous_without_scope_disambiguates_with_query_params(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}"}
+        hj = {**h, "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        project_slug = f"knscope-{nonce}"
+        with TestClient(app) as client:
+            pr = client.post(
+                "/api/v1/projects",
+                json={"name": f"KN scope {nonce}", "slug": project_slug},
+                headers=hj,
+            )
+            self.assertEqual(pr.status_code, 201, pr.text)
+            _ensure_default_environment(client, hj, project_slug)
+            er = client.post(
+                f"/api/v1/projects/{project_slug}/environments",
+                json={"name": "Staging", "slug": "staging"},
+                headers=hj,
+            )
+            self.assertEqual(er.status_code, 201, er.text)
+            for env, extra_key in (("default", "KEY_DEFAULT"), ("staging", "KEY_STAGING")):
+                br = client.post(
+                    "/api/v1/bundles",
+                    json={
+                        "name": "postgres",
+                        "slug": "postgres",
+                        "project_slug": project_slug,
+                        "project_environment_slug": env,
+                        "entries": {"SHARED": "1", extra_key: "2"},
+                    },
+                    headers=hj,
+                )
+                self.assertEqual(br.status_code, 201, br.text)
+
+            nr = client.get("/api/v1/bundles/postgres/key-names", headers=h)
+            self.assertEqual(nr.status_code, 400, nr.text)
+            det = nr.json()["detail"]
+            self.assertIsInstance(det, dict)
+            self.assertEqual(det.get("code"), "ambiguous_bundle_scope")
+
+            r_def = client.get(
+                f"/api/v1/bundles/postgres/key-names?project_slug={project_slug}&environment_slug=default",
+                headers=h,
+            )
+            self.assertEqual(r_def.status_code, 200, r_def.text)
+            keys_def = set(r_def.json()["keys"])
+            self.assertIn("SHARED", keys_def)
+            self.assertIn("KEY_DEFAULT", keys_def)
+            self.assertNotIn("KEY_STAGING", keys_def)
+
+            r_st = client.get(
+                f"/api/v1/bundles/postgres/key-names?project_slug={project_slug}&environment_slug=staging",
+                headers=h,
+            )
+            self.assertEqual(r_st.status_code, 200, r_st.text)
+            keys_st = set(r_st.json()["keys"])
+            self.assertIn("SHARED", keys_st)
+            self.assertIn("KEY_STAGING", keys_st)
+            self.assertNotIn("KEY_DEFAULT", keys_st)
+
+
 if __name__ == "__main__":
     unittest.main()

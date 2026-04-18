@@ -13,8 +13,8 @@ type Props = {
   bundleName: string;
   /** Optional display title in the header. */
   displayName?: string;
-  subnavSlug?: string;
-  subnavEnvironmentSlug?: string;
+  subnavSlug: string;
+  subnavEnvironmentSlug: string;
   /** Appends to bundle subnav links (e.g. `?key=`). */
   linkSearch?: string;
   subtitle: string;

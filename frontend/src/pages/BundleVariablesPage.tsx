@@ -52,14 +52,15 @@ export default function BundleVariablesPage() {
   const [bundleSlug, setBundleSlug] = useState("");
   const [bundleDetailsOpen, setBundleDetailsOpen] = useState(false);
 
+  const scopeReady = !!bundleName && !!projectSlugParam?.trim() && !!environmentSlug?.trim();
   const q = useQuery({
     queryKey: ["bundle", bundleName, projectSlugParam ?? "", environmentSlug, showSecrets],
     queryFn: () => getBundle(bundleName, resourceScope, showSecrets),
-    enabled: !!bundleName,
+    enabled: scopeReady,
     retry: resourceScopeQueryRetry,
   });
 
-  const projectSlugForEnv = projectSlugParam ?? q.data?.project_slug ?? "";
+  const projectSlugForEnv = projectSlugParam?.trim() ?? q.data?.project_slug ?? "";
   const envsQ = useQuery({
     queryKey: ["project-environments", projectSlugForEnv],
     queryFn: () => listProjectEnvironments(projectSlugForEnv),
@@ -118,17 +119,15 @@ export default function BundleVariablesPage() {
       const goToCanonicalBundleUrl = (ss: string) => {
         const sp = new URLSearchParams(location.search);
         const qs = sp.toString();
-        if (projectSlugParam) {
-          navigate(
-            {
-              pathname: `${projectBundlesBase(projectSlugParam, environmentSlug)}/${encodeURIComponent(ss)}/edit`,
-              search: qs ? `?${qs}` : "",
-            },
-            { replace: true },
-          );
-        } else {
-          navigate(`/bundles/${encodeURIComponent(ss)}/edit${location.search}`, { replace: true });
-        }
+        const ps = projectSlugParam!.trim();
+        const es = environmentSlug.trim();
+        navigate(
+          {
+            pathname: `${projectBundlesBase(ps, es)}/${encodeURIComponent(ss)}/edit`,
+            search: qs ? `?${qs}` : "",
+          },
+          { replace: true },
+        );
       };
 
       const navigatedToNewSlug =
@@ -208,7 +207,7 @@ export default function BundleVariablesPage() {
         .find(Boolean);
       const ps = projectSlugParam ?? cached?.project_slug ?? null;
       const es = environmentSlug;
-      window.location.href = ps && es ? projectBundlesBase(ps, es) : "/bundles";
+      window.location.href = ps && es ? projectBundlesBase(ps, es) : "/projects";
     },
   });
 
@@ -245,6 +244,9 @@ export default function BundleVariablesPage() {
   }, [q.data, bundleName, location.pathname, navigate]);
 
   if (!bundleName) return <p className="text-red-400">Missing bundle name</p>;
+  if (!projectSlugParam?.trim() || !environmentSlug?.trim()) {
+    return <p className="text-red-400">Missing project or environment</p>;
+  }
   if (q.isLoading) return <p className="text-slate-400">Loading…</p>;
   if (q.isError) {
     if (projectSlugParam && isAmbiguousBundleScopeError(q.error)) {
@@ -267,9 +269,8 @@ export default function BundleVariablesPage() {
   const data = q.data;
   const envAssignmentLocked = data.project_environment_slug != null;
   const projectSlug = projectSlugParam ?? data.project_slug ?? "";
-  const subnavProjectSlug = projectSlugParam ?? (projectSlug || undefined);
-  const bundlesListTo =
-    projectSlug && environmentSlug ? projectBundlesBase(projectSlug, environmentSlug) : "/bundles";
+  const subnavProjectSlug = projectSlugParam.trim();
+  const bundlesListTo = projectBundlesBase(projectSlugParam.trim(), environmentSlug.trim());
   const entries = Object.entries(data.secrets).sort(([a], [b]) => a.localeCompare(b));
 
   return (
@@ -277,7 +278,7 @@ export default function BundleVariablesPage() {
       bundleName={bundleName}
       displayName={data.name}
       subnavSlug={subnavProjectSlug}
-      subnavEnvironmentSlug={environmentSlug || undefined}
+      subnavEnvironmentSlug={environmentSlug.trim()}
       linkSearch={searchWithoutEnv(location.search)}
       subtitle="Variables"
       tertiaryLink={{ to: `${bundlesListTo}${searchWithoutEnv(location.search)}`, label: "← Bundles" }}

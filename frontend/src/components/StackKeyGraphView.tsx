@@ -1214,6 +1214,7 @@ export function StackKeyGraphView({
                   prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
                 );
               }}
+              bundleKeyScope={stackScope}
             />
             <div className="mt-6 flex flex-wrap gap-2 border-t border-border/40 pt-4">
               <Button type="button" disabled={aliasBusy} onClick={() => void submitAliasSave()}>
