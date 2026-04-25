@@ -88,3 +88,30 @@ test("fetchJson normalizes response values and rejects plain http by default", a
   });
   assert.deepEqual(out, { A: "x", B: "", C: "3", D: "false" });
 });
+
+test("getInput reads GitHub's hyphenated input environment names", () => {
+  const githubName = "INPUT_OPAQUE-ENV-URL";
+  const fallbackName = "INPUT_OPAQUE_ENV_URL";
+  const oldGithub = process.env[githubName];
+  const oldFallback = process.env[fallbackName];
+  try {
+    delete process.env[fallbackName];
+    process.env[githubName] = " https://envelope.example/env/token ";
+    assert.equal(action.getInput("opaque-env-url"), "https://envelope.example/env/token");
+
+    delete process.env[githubName];
+    process.env[fallbackName] = "fallback";
+    assert.equal(action.getInput("opaque-env-url"), "fallback");
+  } finally {
+    if (oldGithub === undefined) {
+      delete process.env[githubName];
+    } else {
+      process.env[githubName] = oldGithub;
+    }
+    if (oldFallback === undefined) {
+      delete process.env[fallbackName];
+    } else {
+      process.env[fallbackName] = oldFallback;
+    }
+  }
+});

@@ -151,8 +151,9 @@ function appendGithubOutput(name, value, githubOutputPath) {
 }
 
 function getInput(name) {
-  const envName = `INPUT_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
-  return (process.env[envName] || "").trim();
+  const githubEnvName = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
+  const fallbackEnvName = `INPUT_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+  return (process.env[githubEnvName] || process.env[fallbackEnvName] || "").trim();
 }
 
 function isTruthyInput(value) {
@@ -219,6 +220,7 @@ module.exports = {
   defaultOutFile,
   fetchJson,
   formatSecretsDotenv,
+  getInput,
   opaqueUrlWithJsonFormat,
   sortedJson,
 };

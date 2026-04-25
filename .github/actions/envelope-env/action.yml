@@ -39,7 +39,6 @@ inputs:
 outputs:
   out-file:
     description: Absolute path to the written file (when out-file was used)
-    value: ${{ steps.fetch.outputs.out-file }}
 
 runs:
   using: node20
