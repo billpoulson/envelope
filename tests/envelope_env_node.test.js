@@ -39,10 +39,14 @@ test("opaqueUrlWithJsonFormat forces json and preserves other query params", () 
   );
 });
 
-test("formatSecretsDotenv sorts keys and escapes dotenv values", () => {
+test("formatSecretsDotenv sorts keys and writes raw persisted values", () => {
   assert.equal(
-    action.formatSecretsDotenv({ B: "a\nb", A: 'q"uote', C: "back\\slash" }),
-    'A="q\\"uote"\nB="a\\nb"\nC="back\\\\slash"\n',
+    action.formatSecretsDotenv({
+      B: "plain",
+      A: "['https://exhelion.net/auth/callback']",
+      C: "'http://localhost/auth/callback'",
+    }),
+    "A=['https://exhelion.net/auth/callback']\nB=plain\nC='http://localhost/auth/callback'\n",
   );
 });
 

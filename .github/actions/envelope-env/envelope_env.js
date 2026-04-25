@@ -13,11 +13,7 @@ function formatSecretsDotenv(secretsMap) {
   const lines = Object.keys(secretsMap)
     .sort()
     .map((key) => {
-      const value = String(secretsMap[key])
-        .replace(/\\/g, "\\\\")
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, "\\n");
-      return `${key}="${value}"`;
+      return `${key}=${String(secretsMap[key])}`;
     });
   return lines.length ? `${lines.join("\n")}\n` : "";
 }

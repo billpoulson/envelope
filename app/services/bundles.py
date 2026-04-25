@@ -52,8 +52,7 @@ def format_secrets_dotenv(secrets_map: dict[str, str]) -> str:
     lines = []
     for k in sorted(secrets_map.keys()):
         v = secrets_map[k]
-        esc = v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-        lines.append(f'{k}="{esc}"')
+        lines.append(f"{k}={v}")
     return "\n".join(lines) + ("\n" if lines else "")
 
 # Strip, NFC-normalize, remove invisible chars that often duplicate keys in pasted exports.

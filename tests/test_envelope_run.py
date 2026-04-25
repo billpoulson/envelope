@@ -51,11 +51,19 @@ class BuildFetchUrlTests(unittest.TestCase):
 
 
 class FormatSecretsDotenvTests(unittest.TestCase):
-    def test_sorted_keys_and_escapes(self) -> None:
-        s = _er.format_secrets_dotenv({"B": "a\nb", "A": 'q"uote'})
+    def test_sorted_keys_and_raw_values(self) -> None:
+        s = _er.format_secrets_dotenv(
+            {
+                "B": "plain",
+                "A": "['https://exhelion.net/auth/callback']",
+                "C": "'http://localhost/auth/callback'",
+            }
+        )
         self.assertEqual(
             s,
-            'A="q\\"uote"\nB="a\\nb"\n',
+            "A=['https://exhelion.net/auth/callback']\n"
+            "B=plain\n"
+            "C='http://localhost/auth/callback'\n",
         )
 
 

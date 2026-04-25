@@ -3,6 +3,7 @@
 import unittest
 
 from app.services.bundles import (
+    format_secrets_dotenv,
     parse_bundle_initial_paste,
     parse_bundle_entries_json,
 )
@@ -104,6 +105,21 @@ class DotenvLinesKindTests(unittest.TestCase):
         self.assertIsNone(err)
         # Without leading " on key we do not strip trailing " from value (avoid eating real quotes).
         self.assertEqual(rows[0], ("FOO", 'bar"', True))
+
+
+class FormatSecretsDotenvTests(unittest.TestCase):
+    def test_raw_persisted_values_are_not_requoted(self) -> None:
+        text = format_secrets_dotenv(
+            {
+                "VITE_OIDC_REDIRECT_URI": "'http://localhost/auth/callback'",
+                "YACHT_OIDC_REDIRECT_URIS": "['https://exhelion.net/auth/callback','https://green.exhelion.net/auth/callback']",
+            }
+        )
+        self.assertEqual(
+            text,
+            "VITE_OIDC_REDIRECT_URI='http://localhost/auth/callback'\n"
+            "YACHT_OIDC_REDIRECT_URIS=['https://exhelion.net/auth/callback','https://green.exhelion.net/auth/callback']\n",
+        )
 
 
 if __name__ == "__main__":

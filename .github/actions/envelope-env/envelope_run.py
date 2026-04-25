@@ -30,12 +30,11 @@ from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 
 def format_secrets_dotenv(secrets_map: dict[str, str]) -> str:
-    """Match app.services.bundles.format_secrets_dotenv (sorted keys, quoted values)."""
+    """Match app.services.bundles.format_secrets_dotenv (sorted keys, raw values)."""
     lines = []
     for k in sorted(secrets_map.keys()):
         v = secrets_map[k]
-        esc = v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-        lines.append(f'{k}="{esc}"')
+        lines.append(f"{k}={v}")
     return "\n".join(lines) + ("\n" if lines else "")
 
 
