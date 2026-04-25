@@ -1,4 +1,4 @@
-"""Unit tests for cli/envelope_run.py (opaque env URL builder and dotenv formatting)."""
+"""Unit tests for cli/envelope_run.py and the reusable action metadata."""
 
 import importlib.util
 import tempfile
@@ -16,6 +16,8 @@ _er = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_er)
 
 _ACTION_ENVELOPE_RUN = _repo_root / ".github" / "actions" / "envelope-env" / "envelope_run.py"
+_ACTION_YML = _repo_root / ".github" / "actions" / "envelope-env" / "action.yml"
+_ACTION_NODE = _repo_root / ".github" / "actions" / "envelope-env" / "envelope_env.js"
 
 
 class BuildFetchUrlTests(unittest.TestCase):
@@ -103,14 +105,17 @@ class AppendGithubEnvTests(unittest.TestCase):
             Path(path).unlink(missing_ok=True)
 
 
-class ActionEnvelopeRunCopyTests(unittest.TestCase):
-    def test_matches_cli_byte_for_byte(self) -> None:
-        cli_text = (_repo_root / "cli" / "envelope_run.py").read_bytes()
-        action_text = _ACTION_ENVELOPE_RUN.read_bytes()
-        self.assertEqual(
-            cli_text,
-            action_text,
-            "copy .github/actions/envelope-env/envelope_run.py from cli/envelope_run.py",
+class ActionMetadataTests(unittest.TestCase):
+    def test_action_uses_node_entrypoint(self) -> None:
+        action_text = _ACTION_YML.read_text(encoding="utf-8")
+        self.assertIn("using: node20", action_text)
+        self.assertIn("main: envelope_env.js", action_text)
+        self.assertTrue(_ACTION_NODE.exists())
+
+    def test_python_helper_is_still_available_for_vendored_users(self) -> None:
+        self.assertTrue(
+            _ACTION_ENVELOPE_RUN.exists(),
+            "keep envelope_run.py available for users who vendored the older action",
         )
 
 

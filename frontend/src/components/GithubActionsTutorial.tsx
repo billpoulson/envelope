@@ -94,7 +94,7 @@ export function GithubActionsTutorial() {
         <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-500">5. Vendoring (optional)</h4>
         <p className="text-sm text-slate-400">
           Copy <code className="font-mono text-xs text-slate-300">action.yml</code> and{" "}
-          <code className="font-mono text-xs text-slate-300">envelope_run.py</code> into{" "}
+          <code className="font-mono text-xs text-slate-300">envelope_env.js</code> into{" "}
           <code className="font-mono text-xs text-slate-300">.github/actions/envelope-env/</code> in your repo, then{" "}
           <code className="font-mono text-xs text-slate-300">uses: ./.github/actions/envelope-env</code>.
         </p>
@@ -122,11 +122,11 @@ export function GithubActionsTutorial() {
             ,{" "}
             <a
               className="text-accent underline decoration-accent/40 underline-offset-2 hover:opacity-90"
-              href={`https://raw.githubusercontent.com/${REPO}/main/.github/actions/envelope-env/envelope_run.py`}
+              href={`https://raw.githubusercontent.com/${REPO}/main/.github/actions/envelope-env/envelope_env.js`}
               target="_blank"
               rel="noreferrer"
             >
-              envelope_run.py
+              envelope_env.js
             </a>{" "}
             (pin a tag in the URL when you care about reproducibility)
           </li>

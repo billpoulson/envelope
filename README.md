@@ -258,7 +258,7 @@ curl -fsS "$ENVELOPE_SECRET_ENV_URL?format=json" | python -m json.tool
   run: curl -fsS "${{ secrets.ENVELOPE_ENV_URL }}" -o .env
 ```
 
-**Reusable action** (same behavior as `[cli/envelope_run.py](cli/envelope_run.py)`: JSON export, optional `GITHUB_ENV` for later steps, HTTPS-only unless you opt into insecure HTTP). Pin a **release tag** or **commit SHA** (not a moving branch). Examples below use `v1.0.0` as a placeholder—substitute the tag you publish, or use `main` / a commit SHA until then.
+**Reusable action** (Node 20 action with the same opaque-env behavior as `[cli/envelope_run.py](cli/envelope_run.py)`: JSON export, optional `GITHUB_ENV` for later steps, HTTPS-only unless you opt into insecure HTTP). Pin a **release tag** or **commit SHA** (not a moving branch). Examples below use `v1.0.0` as a placeholder—substitute the tag you publish, or use `main` / a commit SHA until then.
 
 ```yaml
 - uses: billpoulson/envelope/.github/actions/envelope-env@v1.0.0
@@ -279,7 +279,7 @@ Or pass the **full opaque URL** from a secret (like the `curl` example above):
 **Reference / vendoring** — browse or download raw files at a tag (replace `v1.0.0` with the tag you pin):
 
 - Folder: `https://github.com/billpoulson/envelope/tree/v1.0.0/.github/actions/envelope-env`
-- `[action.yml](https://raw.githubusercontent.com/billpoulson/envelope/v1.0.0/.github/actions/envelope-env/action.yml)` · `[envelope_run.py](https://raw.githubusercontent.com/billpoulson/envelope/v1.0.0/.github/actions/envelope-env/envelope_run.py)` (keep both under `.github/actions/envelope-env/` if you copy them into another repo)
+- `[action.yml](https://raw.githubusercontent.com/billpoulson/envelope/v1.0.0/.github/actions/envelope-env/action.yml)` · `[envelope_env.js](https://raw.githubusercontent.com/billpoulson/envelope/v1.0.0/.github/actions/envelope-env/envelope_env.js)` (keep both under `.github/actions/envelope-env/` if you copy them into another repo)
 
 If Envelope is behind a **path prefix** (`ENVELOPE_ROOT_PATH`), the `url` from the API already includes that prefix—use it exactly as returned.
 

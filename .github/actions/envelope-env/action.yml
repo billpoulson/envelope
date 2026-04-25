@@ -1,5 +1,5 @@
 name: Envelope opaque env
-description: Fetch environment variables from an Envelope opaque /env/ URL (same behavior as cli/envelope_run.py)
+description: Fetch environment variables from an Envelope opaque /env/ URL with Node 20
 author: Envelope
 
 branding:
@@ -20,9 +20,9 @@ inputs:
     required: false
     default: ""
   out-file:
-    description: Path for the written dotenv or JSON file (cleartext secrets).
+    description: Path for the written dotenv or JSON file (cleartext secrets). Defaults to runner temp/envelope.env.
     required: false
-    default: ${{ runner.temp }}/envelope.env
+    default: ""
   out-format:
     description: File format when writing out-file
     required: false
@@ -42,31 +42,5 @@ outputs:
     value: ${{ steps.fetch.outputs.out-file }}
 
 runs:
-  using: composite
-  steps:
-    - uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
-    - id: fetch
-      shell: bash
-      env:
-        INPUT_OPAQUE_ENV_URL: ${{ inputs.opaque-env-url }}
-        INPUT_ENVELOPE_URL: ${{ inputs.envelope-url }}
-        INPUT_TOKEN: ${{ inputs.token }}
-        ENVELOPE_CLI_INSECURE: ${{ inputs.insecure-http == 'true' && '1' || '' }}
-      run: |
-        set -euo pipefail
-        SCRIPT="${GITHUB_ACTION_PATH}/envelope_run.py"
-        ARGS=()
-        if [ -n "${INPUT_OPAQUE_ENV_URL}" ]; then
-          ARGS+=(--opaque-env-url "${INPUT_OPAQUE_ENV_URL}")
-        else
-          ARGS+=(--envelope-url "${INPUT_ENVELOPE_URL}" --token "${INPUT_TOKEN}")
-        fi
-        ARGS+=(--out "${{ inputs.out-file }}")
-        ARGS+=(--out-format "${{ inputs.out-format }}")
-        if [ "${{ inputs.export-to-github-env }}" = "true" ]; then
-          ARGS+=(--export-github-env)
-        fi
-        python "$SCRIPT" "${ARGS[@]}"
+  using: node20
+  main: envelope_env.js

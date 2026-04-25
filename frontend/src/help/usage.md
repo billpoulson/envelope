@@ -282,13 +282,13 @@ Download the **opaque env CLI** from this deployment (`GET /cli/envelope_run.py`
 
 Use **`--envelope-url`** with your deployment’s public base URL (including any gateway path prefix, e.g. `https://host/envelope`) and **`--token`** with the secret path segment from **Secret env URL**. The interactive **installer** below runs in your browser: it detects that base URL, lets you choose **user** vs **system** environment scope for **`PATH`**, and generates a **Bash** or **PowerShell** script you can save and run locally.
 
-For **GitHub Actions**, see **[GitHub Actions](/help/github-actions)** (reusable composite action and tutorial).
+For **GitHub Actions**, see **[GitHub Actions](/help/github-actions)** (reusable Node action and tutorial).
 
 ---
 
 ## GitHub Actions
 
-The same opaque-env fetch logic as [`cli/envelope_run.py`](https://github.com/billpoulson/envelope/blob/main/cli/envelope_run.py) is published as a **reusable composite action** in the [Envelope](https://github.com/billpoulson/envelope) repository: **`.github/actions/envelope-env/`**. Reference it with `uses: billpoulson/envelope/.github/actions/envelope-env@<tag>` and pin a **semver tag** or **commit SHA**. The **tutorial** below walks through secrets, workflow YAML, and optional vendoring.
+The same opaque-env fetch logic as [`cli/envelope_run.py`](https://github.com/billpoulson/envelope/blob/main/cli/envelope_run.py) is published as a **reusable Node 20 action** in the [Envelope](https://github.com/billpoulson/envelope) repository: **`.github/actions/envelope-env/`**. Reference it with `uses: billpoulson/envelope/.github/actions/envelope-env@<tag>` and pin a **semver tag** or **commit SHA**. The **tutorial** below walks through secrets, workflow YAML, and optional vendoring.
 
 ---
 
