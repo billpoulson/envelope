@@ -18,6 +18,10 @@ _spec.loader.exec_module(_er)
 _ACTION_ENVELOPE_RUN = _repo_root / ".github" / "actions" / "envelope-env" / "envelope_run.py"
 _ACTION_YML = _repo_root / ".github" / "actions" / "envelope-env" / "action.yml"
 _ACTION_NODE = _repo_root / ".github" / "actions" / "envelope-env" / "envelope_env.js"
+_PULUMI_ACTION_YML = _repo_root / ".github" / "actions" / "envelope-pulumi" / "action.yml"
+_PULUMI_ACTION_NODE = (
+    _repo_root / ".github" / "actions" / "envelope-pulumi" / "envelope_pulumi.js"
+)
 
 
 class BuildFetchUrlTests(unittest.TestCase):
@@ -125,6 +129,12 @@ class ActionMetadataTests(unittest.TestCase):
             _ACTION_ENVELOPE_RUN.exists(),
             "keep envelope_run.py available for users who vendored the older action",
         )
+
+    def test_pulumi_action_uses_node_entrypoint(self) -> None:
+        action_text = _PULUMI_ACTION_YML.read_text(encoding="utf-8")
+        self.assertIn("using: node20", action_text)
+        self.assertIn("main: envelope_pulumi.js", action_text)
+        self.assertTrue(_PULUMI_ACTION_NODE.exists())
 
 
 if __name__ == "__main__":

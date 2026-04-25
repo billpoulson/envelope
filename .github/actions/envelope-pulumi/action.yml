@@ -1,0 +1,68 @@
+name: Envelope Pulumi outputs
+description: Push selected Pulumi stack outputs into an Envelope bundle with Node 20
+author: Envelope
+
+branding:
+  icon: upload-cloud
+  color: blue
+
+inputs:
+  envelope-url:
+    description: Envelope deployment base URL (include gateway path prefix if used).
+    required: true
+  api-key:
+    description: Envelope API key with write access to the target bundle/project.
+    required: true
+  project-slug:
+    description: Envelope project slug containing the target environment and bundle.
+    required: true
+  environment-slug:
+    description: Envelope project environment slug for the target bundle.
+    required: true
+  bundle-slug:
+    description: Envelope bundle slug to create or update.
+    required: true
+  outputs:
+    description: Comma-separated Pulumi output keys to push using their original names.
+    required: false
+    default: ""
+  map:
+    description: Newline-separated ENV_KEY=pulumiOutputName mappings.
+    required: false
+    default: ""
+  pulumi-json:
+    description: Raw JSON from `pulumi stack output --json`.
+    required: false
+    default: ""
+  pulumi-json-file:
+    description: Path to a file containing JSON from `pulumi stack output --json`.
+    required: false
+    default: ""
+  run-pulumi:
+    description: If true, run `pulumi stack output --json` when no JSON input/file is provided.
+    required: false
+    default: "false"
+  pulumi-stack:
+    description: Optional Pulumi stack name passed to `pulumi stack output --json --stack <name>`.
+    required: false
+    default: ""
+  pulumi-cwd:
+    description: Optional working directory for the Pulumi command.
+    required: false
+    default: ""
+  insecure-http:
+    description: Set to true only for local HTTP testing. Not for production.
+    required: false
+    default: "false"
+
+outputs:
+  bundle-slug:
+    description: Target Envelope bundle slug.
+  updated-count:
+    description: Number of Envelope entries created or updated.
+  created:
+    description: "true if the bundle was created, false if an existing bundle was patched."
+
+runs:
+  using: node20
+  main: envelope_pulumi.js
