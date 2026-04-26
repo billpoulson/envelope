@@ -38,6 +38,41 @@ test("buildEnvelopeEntries does not duplicate outputs that are also mapped", () 
   });
 });
 
+test("buildEnvelopeEntries expands output globs deterministically", () => {
+  const entries = action.buildEnvelopeEntries(
+    {
+      appPostgresPasswordOutput: "app-pg",
+      ignoredValue: "skip-me",
+      keycloakPgPasswordOutput: "keycloak-pg",
+      keycloakServerAdminClientIdOutput: "yacht-server-admin",
+      keycloakServerAdminClientSecretOutput: "[secret]",
+    },
+    "keycloak*Output,*PostgresPasswordOutput",
+    "",
+  );
+
+  assert.deepEqual(entries, {
+    appPostgresPasswordOutput: { value: "app-pg", secret: true },
+    keycloakPgPasswordOutput: { value: "keycloak-pg", secret: true },
+    keycloakServerAdminClientIdOutput: { value: "yacht-server-admin", secret: true },
+    keycloakServerAdminClientSecretOutput: { value: "[secret]", secret: true },
+  });
+});
+
+test("buildEnvelopeEntries reports unmatched output glob patterns", () => {
+  assert.throws(
+    () => action.buildEnvelopeEntries({ keycloakServerAdminClientIdOutput: "x" }, "missing*Output", ""),
+    /Pulumi output\(s\) not found: missing\*Output/,
+  );
+});
+
+test("buildEnvelopeEntries requires map target when a glob selects non-env output names", () => {
+  assert.throws(
+    () => action.buildEnvelopeEntries({ "bad-output": "x" }, "bad-*", ""),
+    /needs a valid map target/,
+  );
+});
+
 test("buildEnvelopeEntries reports missing Pulumi output names", () => {
   assert.throws(
     () => action.buildEnvelopeEntries({ A: "x" }, "A,B", "C=missingMapped"),

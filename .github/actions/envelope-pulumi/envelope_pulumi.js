@@ -58,14 +58,60 @@ function assertAllowedUrl(url, insecureHttp = false) {
 }
 
 function parseOutputs(raw) {
-  const out = new Set();
+  const out = [];
+  const seen = new Set();
   for (const part of String(raw || "").split(",")) {
     const key = part.trim();
-    if (key) {
-      out.add(key);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      out.push(key);
     }
   }
   return out;
+}
+
+function hasGlobMagic(pattern) {
+  return /[*?]/.test(pattern);
+}
+
+function globPatternToRegExp(pattern) {
+  let source = "^";
+  for (const char of pattern) {
+    if (char === "*") {
+      source += ".*";
+    } else if (char === "?") {
+      source += ".";
+    } else {
+      source += char.replace(/[\\^$+?.()|[\]{}]/g, "\\$&");
+    }
+  }
+  source += "$";
+  return new RegExp(source);
+}
+
+function resolveOutputKeys(pulumiOutputs, outputPatterns) {
+  const available = Object.keys(pulumiOutputs).sort();
+  const selected = [];
+  const seen = new Set();
+  const missing = [];
+
+  for (const pattern of outputPatterns) {
+    const matches = hasGlobMagic(pattern)
+      ? available.filter((key) => globPatternToRegExp(pattern).test(key))
+      : available.filter((key) => key === pattern);
+    if (matches.length === 0) {
+      missing.push(pattern);
+      continue;
+    }
+    for (const key of matches) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        selected.push(key);
+      }
+    }
+  }
+
+  return { missing, selected };
 }
 
 function parseMap(raw) {
@@ -178,7 +224,7 @@ function loadPulumiOutputs(options, deps = {}) {
 function buildEnvelopeEntries(pulumiOutputs, outputsRaw, mapRaw) {
   const outputs = parseOutputs(outputsRaw);
   const mappings = parseMap(mapRaw);
-  if (outputs.size === 0 && mappings.length === 0) {
+  if (outputs.length === 0 && mappings.length === 0) {
     throw new Error("provide outputs and/or map");
   }
 
@@ -195,12 +241,11 @@ function buildEnvelopeEntries(pulumiOutputs, outputsRaw, mapRaw) {
     entries[envKey] = { value: coercePulumiValue(pulumiOutputs[pulumiKey]), secret: true };
   }
 
-  for (const pulumiKey of outputs) {
+  const resolvedOutputs = resolveOutputKeys(pulumiOutputs, outputs);
+  missing.push(...resolvedOutputs.missing);
+
+  for (const pulumiKey of resolvedOutputs.selected) {
     if (mappedSources.has(pulumiKey)) {
-      continue;
-    }
-    if (!Object.prototype.hasOwnProperty.call(pulumiOutputs, pulumiKey)) {
-      missing.push(pulumiKey);
       continue;
     }
     if (!ENV_KEY_RE.test(pulumiKey)) {
@@ -359,6 +404,7 @@ module.exports = {
   parseMap,
   parseOutputs,
   parsePulumiJson,
+  resolveOutputKeys,
   pushEntries,
   requestJson,
   runPulumiStackOutput,

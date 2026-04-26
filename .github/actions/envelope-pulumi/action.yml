@@ -23,7 +23,7 @@ inputs:
     description: Envelope bundle slug to create or update.
     required: true
   outputs:
-    description: Comma-separated Pulumi output keys to push using their original names.
+    description: Comma-separated Pulumi output keys or glob patterns to push using their original names.
     required: false
     default: ""
   map:

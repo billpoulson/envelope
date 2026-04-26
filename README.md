@@ -281,7 +281,7 @@ Or pass the **full opaque URL** from a secret (like the `curl` example above):
 - Folder: `https://github.com/billpoulson/envelope/tree/v1.0.0/.github/actions/envelope-env`
 - `[action.yml](https://raw.githubusercontent.com/billpoulson/envelope/v1.0.0/.github/actions/envelope-env/action.yml)` · `[envelope_env.js](https://raw.githubusercontent.com/billpoulson/envelope/v1.0.0/.github/actions/envelope-env/envelope_env.js)` (keep both under `.github/actions/envelope-env/` if you copy them into another repo)
 
-**Pulumi output push action** — for consumer CI/CD that provisions infrastructure with Pulumi, push selected `pulumi stack output --json` values into an Envelope bundle. The action creates the target bundle in the project/environment when it does not already exist, then upserts the selected values as encrypted-at-rest entries. If you need actual Pulumi secret values, make sure the JSON you provide contains them (for example, use Pulumi's `--show-secrets` flag where appropriate); otherwise Pulumi may emit placeholders such as `[secret]`.
+**Pulumi output push action** — for consumer CI/CD that provisions infrastructure with Pulumi, push selected `pulumi stack output --json` values into an Envelope bundle. The action creates the target bundle in the project/environment when it does not already exist, then upserts the selected values as encrypted-at-rest entries. Use `outputs` for exact Pulumi output names or simple glob patterns (`*` and `?`) that should keep their original names; use `map` when the Envelope key should differ from the Pulumi output name. If you need actual Pulumi secret values, make sure the JSON you provide contains them (for example, use Pulumi's `--show-secrets` flag where appropriate); otherwise Pulumi may emit placeholders such as `[secret]`.
 
 ```yaml
 - name: Export Pulumi outputs
@@ -295,7 +295,7 @@ Or pass the **full opaque URL** from a secret (like the `curl` example above):
     environment-slug: local-dev
     bundle-slug: keycloak
     pulumi-json-file: pulumi-outputs.json
-    outputs: keycloakServerAdminClientIdOutput,keycloakServerAdminClientSecretOutput
+    outputs: keycloak*Output
     map: |
       KEYCLOAK_SERVER_ADMIN_CLIENT_ID=keycloakServerAdminClientIdOutput
       KEYCLOAK_SERVER_ADMIN_CLIENT_SECRET=keycloakServerAdminClientSecretOutput
