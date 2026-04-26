@@ -36,12 +36,22 @@ environment:
 - **Format:** Single-line JSON per event (no multiline pretty-printing). Fields include `event_type`, `actor_api_key_id` / `actor_api_key_name` when the caller used an API key, resource identifiers (`bundle_id`, `stack_id`, link ids), `client_ip`, `user_agent`, `http_method`, `path`, and a `details` object. **Secrets and raw env tokens are never logged.**
 - **Shipping:** Point your log agent, sidecar, or platform integration at the container/process log stream and filter or parse `envelope.audit` (or ship all stdout and filter in the SIEM).
 
+### Usage-identification headers
+
+Clients may include optional headers to identify why a secret-bearing endpoint is being used. Envelope records sanitized values under `details.usage` in audit events for both API-key authenticated requests and opaque `/env/{token}` downloads:
+
+- `X-Envelope-Usage-Name`: caller/job label, for example `yacht-ai-pulumi-preview`.
+- `X-Envelope-Usage-Kind`: bounded category, for example `github-action`, `ci`, `pulumi`, `terraform`, or `manual`.
+- `X-Envelope-Usage-Run`: external run/build id or URL.
+
+These headers are audit metadata only. They do not grant access and should not contain secrets.
+
 ### Example log line
 
 Each emitted line is a single JSON object (keys are sorted). Example (values illustrative):
 
 ```json
-{"actor_api_key_id": 1, "actor_api_key_name": "ci-readonly", "bundle_env_link_id": null, "bundle_id": 42, "bundle_name": "my-app", "client_ip": "10.0.0.1", "details": {"format": "dotenv"}, "event_type": "bundle.export", "http_method": "GET", "path": "/api/v1/bundles/my-app/export", "stack_env_link_id": null, "stack_id": null, "stack_name": null, "token_sha256_prefix": null, "ts": "2026-04-16T12:00:00.000000+00:00", "user_agent": "curl/8.0"}
+{"actor_api_key_id": 1, "actor_api_key_name": "ci-readonly", "bundle_env_link_id": null, "bundle_id": 42, "bundle_name": "my-app", "client_ip": "10.0.0.1", "details": {"format": "dotenv", "usage": {"kind": "github-action", "name": "deploy-prod", "run": "123456789"}}, "event_type": "bundle.export", "http_method": "GET", "path": "/api/v1/bundles/my-app/export", "stack_env_link_id": null, "stack_id": null, "stack_name": null, "token_sha256_prefix": null, "ts": "2026-04-16T12:00:00.000000+00:00", "user_agent": "curl/8.0"}
 ```
 
 ### Consumers of the structured log

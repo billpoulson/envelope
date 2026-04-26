@@ -116,6 +116,41 @@ test("fetchJson retries HTTP failures until the endpoint is ready", async () => 
   assert.deepEqual(sleeps, [25, 25]);
 });
 
+test("fetchJson sends usage headers when provided", async () => {
+  const calls = [];
+  const out = await action.fetchJson("https://h.example/env/token?format=json", {
+    fetchImpl: async (url, options) => {
+      calls.push({ options, url });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ A: "x" }),
+      };
+    },
+    usageHeaders: action.buildUsageHeaders({
+      usageKind: "github-action",
+      usageName: "ci-env-fetch",
+      usageRun: "run-123",
+    }),
+  });
+
+  assert.deepEqual(out, { A: "x" });
+  assert.equal(calls[0].options.headers["X-Envelope-Usage-Name"], "ci-env-fetch");
+  assert.equal(calls[0].options.headers["X-Envelope-Usage-Kind"], "github-action");
+  assert.equal(calls[0].options.headers["X-Envelope-Usage-Run"], "run-123");
+});
+
+test("buildUsageHeaders omits blank usage values", () => {
+  assert.deepEqual(
+    action.buildUsageHeaders({
+      usageKind: " ",
+      usageName: "ci-env-fetch",
+      usageRun: "",
+    }),
+    { "X-Envelope-Usage-Name": "ci-env-fetch" },
+  );
+});
+
 test("fetchJson retries network errors before returning JSON", async () => {
   let attempts = 0;
   const out = await action.fetchJson("https://h.example/env/token?format=json", {
@@ -137,6 +172,40 @@ test("fetchJson retries network errors before returning JSON", async () => {
 
   assert.equal(attempts, 2);
   assert.deepEqual(out, { A: "x" });
+});
+
+test("fetchJson debug logs redact opaque env tokens and include response details", async () => {
+  const logs = [];
+  await assert.rejects(
+    () =>
+      action.fetchJson(`https://h.example/env/${"a".repeat(40)}?format=json`, {
+        debug: true,
+        fetchImpl: async () => ({
+          ok: false,
+          status: 400,
+          text: async () => `bad token /env/${"b".repeat(40)} rejected`,
+        }),
+        logImpl: (line) => logs.push(line),
+      }),
+    (error) => {
+      assert.match(error.message, /HTTP 400/);
+      assert.match(error.message, /bad token \/env\/<redacted> rejected/);
+      assert.doesNotMatch(error.message, /bbbb/);
+      return true;
+    },
+  );
+
+  assert.match(logs.join("\n"), /\/env\/<redacted>\?format=json/);
+  assert.match(logs.join("\n"), /response="bad token \/env\/<redacted> rejected"/);
+  assert.doesNotMatch(logs.join("\n"), /aaaa/);
+  assert.doesNotMatch(logs.join("\n"), /bbbb/);
+});
+
+test("redactedFetchTarget preserves host and query while hiding opaque token", () => {
+  assert.equal(
+    action.redactedFetchTarget(`https://h.example/root/env/${"a".repeat(40)}?format=json&x=1`),
+    "https://h.example/root/env/<redacted>?format=json&x=1",
+  );
 });
 
 test("parseSecondsInput validates non-negative numeric inputs", () => {

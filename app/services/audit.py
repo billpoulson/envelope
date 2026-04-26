@@ -15,6 +15,12 @@ from app.models import ApiKey, AuditEvent
 
 _audit_logger = logging.getLogger("envelope.audit")
 
+_USAGE_HEADERS = {
+    "name": ("x-envelope-usage-name", 128),
+    "kind": ("x-envelope-usage-kind", 64),
+    "run": ("x-envelope-usage-run", 256),
+}
+
 
 def _safe_client_ip(request: Request) -> str:
     c = request.client
@@ -29,6 +35,24 @@ def _safe_user_agent(request: Request) -> str:
 def _scope_path(request: Request) -> str:
     p = request.scope.get("path")
     return str(p) if p else ""
+
+
+def _safe_usage_header(value: str | None, max_len: int) -> str | None:
+    if value is None:
+        return None
+    cleaned = "".join(ch for ch in value.strip() if ch >= " " and ch != "\x7f")
+    if not cleaned:
+        return None
+    return cleaned[:max_len]
+
+
+def usage_details_from_headers(request: Request) -> dict[str, str] | None:
+    usage: dict[str, str] = {}
+    for key, (header_name, max_len) in _USAGE_HEADERS.items():
+        value = _safe_usage_header(request.headers.get(header_name), max_len)
+        if value:
+            usage[key] = value
+    return usage or None
 
 
 async def emit_audit_event(
@@ -50,6 +74,13 @@ async def emit_audit_event(
     settings = get_settings()
     now = datetime.now(timezone.utc)
     extra = dict(details or {})
+    usage = usage_details_from_headers(request)
+    if usage:
+        existing_usage = extra.get("usage")
+        if isinstance(existing_usage, dict):
+            extra["usage"] = {**usage, **existing_usage}
+        else:
+            extra["usage"] = usage
     details_json = json.dumps(extra, sort_keys=True) if extra else None
 
     actor_id = actor.id if actor else None

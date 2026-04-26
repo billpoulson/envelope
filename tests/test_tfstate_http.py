@@ -1263,10 +1263,16 @@ class AuditTrailHttpTests(unittest.TestCase):
                 headers=hj,
             )
             self.assertEqual(br.status_code, 201, br.text)
+            usage_headers = {
+                **h,
+                "X-Envelope-Usage-Name": " yacht-ai-pulumi-preview ",
+                "X-Envelope-Usage-Kind": "github-action",
+                "X-Envelope-Usage-Run": "https://github.com/billpoulson/yacht.ai/actions/runs/123",
+            }
             with self.assertLogs("envelope.audit", level="INFO") as cm:
                 ex = client.get(
                     f"/api/v1/bundles/audit-bun-{nonce}/export?format=dotenv",
-                    headers=h,
+                    headers=usage_headers,
                 )
             self.assertEqual(ex.status_code, 200, ex.text)
             logged = "\n".join(cm.output)
@@ -1276,9 +1282,22 @@ class AuditTrailHttpTests(unittest.TestCase):
             events = ar.json()["events"]
             types = [e["event_type"] for e in events]
             self.assertIn("bundle.export", types)
-            hit = next(e for e in events if e["event_type"] == "bundle.export")
+            hit = next(
+                e
+                for e in events
+                if e["event_type"] == "bundle.export"
+                and e.get("bundle_name") == f"audit-bun-{nonce}"
+            )
             self.assertIsNotNone(hit.get("actor_api_key_id"))
             self.assertEqual(hit.get("details", {}).get("format"), "dotenv")
+            self.assertEqual(
+                hit.get("details", {}).get("usage"),
+                {
+                    "kind": "github-action",
+                    "name": "yacht-ai-pulumi-preview",
+                    "run": "https://github.com/billpoulson/yacht.ai/actions/runs/123",
+                },
+            )
 
     def test_env_link_download_audit_has_no_api_key_actor(self) -> None:
         h = {"Authorization": f"Bearer {self._token}"}
@@ -1310,18 +1329,36 @@ class AuditTrailHttpTests(unittest.TestCase):
             self.assertEqual(lr.status_code, 201, lr.text)
             url = lr.json()["url"]
             token = url.split("/env/")[-1]
+            usage_headers = {
+                "X-Envelope-Usage-Name": "opaque-env-bootstrap",
+                "X-Envelope-Usage-Kind": "github-action",
+                "X-Envelope-Usage-Run": "run-456",
+            }
             with self.assertLogs("envelope.audit", level="INFO") as cm:
-                dr = client.get(f"/env/{token}")
+                dr = client.get(f"/env/{token}", headers=usage_headers)
             self.assertEqual(dr.status_code, 200, dr.text)
             logged = "\n".join(cm.output)
             self.assertIn("env_link.download", logged)
             ar = client.get("/api/v1/system/audit-events?limit=20", headers=h)
             self.assertEqual(ar.status_code, 200, ar.text)
-            evs = [e for e in ar.json()["events"] if e["event_type"] == "env_link.download"]
+            evs = [
+                e
+                for e in ar.json()["events"]
+                if e["event_type"] == "env_link.download"
+                and e.get("bundle_name") == f"env-audit-bun-{nonce}"
+            ]
             self.assertTrue(evs)
             e0 = evs[0]
             self.assertIsNone(e0.get("actor_api_key_id"))
             self.assertIsNotNone(e0.get("token_sha256_prefix"))
+            self.assertEqual(
+                e0.get("details", {}).get("usage"),
+                {
+                    "kind": "github-action",
+                    "name": "opaque-env-bootstrap",
+                    "run": "run-456",
+                },
+            )
 
 
 class ApiKeysExpiryHttpTests(unittest.TestCase):

@@ -54,6 +54,18 @@ inputs:
     description: Set to true only for local HTTP testing. Not for production.
     required: false
     default: "false"
+  usage-name:
+    description: Optional caller/job label recorded in Envelope audit events.
+    required: false
+    default: ""
+  usage-kind:
+    description: Optional caller category recorded in Envelope audit events.
+    required: false
+    default: ""
+  usage-run:
+    description: Optional external run/build id or URL recorded in Envelope audit events.
+    required: false
+    default: ""
 
 outputs:
   bundle-slug:

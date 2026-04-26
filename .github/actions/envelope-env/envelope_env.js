@@ -41,6 +41,69 @@ function redactedHost(url) {
   }
 }
 
+function redactedFetchTarget(url) {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/");
+    const envIdx = parts.indexOf("env");
+    if (envIdx >= 0 && parts.length > envIdx + 1) {
+      parts[envIdx + 1] = "<redacted>";
+      parsed.pathname = parts.join("/");
+    }
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}`.replace(
+      /%3Credacted%3E/gi,
+      "<redacted>",
+    );
+  } catch {
+    return "<invalid-url>";
+  }
+}
+
+function sanitizeDebugText(value) {
+  return String(value || "")
+    .replace(/\/env\/[^/?#\s"'`]+/g, "/env/<redacted>")
+    .replace(/[A-Za-z0-9_-]{32,}/g, "<redacted>");
+}
+
+async function responseDebugDetail(response) {
+  if (!response || typeof response.text !== "function") {
+    return "";
+  }
+  let text = "";
+  try {
+    if (typeof response.clone === "function") {
+      text = await response.clone().text();
+    } else {
+      text = await response.text();
+    }
+  } catch {
+    return "";
+  }
+  return sanitizeDebugText(text).slice(0, 500);
+}
+
+function debugLog(enabled, logImpl, message) {
+  if (enabled) {
+    logImpl(`[envelope-env debug] ${message}`);
+  }
+}
+
+function buildUsageHeaders({ usageName = "", usageKind = "", usageRun = "" } = {}) {
+  const headers = {};
+  const values = [
+    ["X-Envelope-Usage-Name", usageName],
+    ["X-Envelope-Usage-Kind", usageKind],
+    ["X-Envelope-Usage-Run", usageRun],
+  ];
+  for (const [name, value] of values) {
+    const trimmed = String(value || "").trim();
+    if (trimmed) {
+      headers[name] = trimmed;
+    }
+  }
+  return headers;
+}
+
 function parseSecondsInput(value, defaultValue, name) {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -66,10 +129,13 @@ async function fetchJson(
   {
     insecureHttp = false,
     fetchImpl = fetch,
+    debug = false,
+    logImpl = console.log,
     nowImpl = Date.now,
     retryIntervalMs = 0,
     retryTimeoutMs = 0,
     sleepImpl = sleep,
+    usageHeaders = {},
   } = {},
 ) {
   const parsed = new URL(url);
@@ -83,15 +149,22 @@ async function fetchJson(
   const startedAt = nowImpl();
   let attempt = 0;
   let response;
+  debugLog(
+    debug,
+    logImpl,
+    `fetch target ${JSON.stringify(redactedFetchTarget(url))}; retryTimeoutMs=${retryTimeoutMs}; retryIntervalMs=${retryIntervalMs}`,
+  );
   while (true) {
     attempt += 1;
+    debugLog(debug, logImpl, `attempt ${attempt} started`);
     try {
       response = await fetchImpl(url, {
-        headers: { Accept: "application/json" },
+        headers: { Accept: "application/json", ...usageHeaders },
         method: "GET",
         signal: AbortSignal.timeout(120_000),
       });
     } catch {
+      debugLog(debug, logImpl, `attempt ${attempt} failed with network error`);
       if (!shouldRetry(startedAt, retryTimeoutMs, nowImpl)) {
         throw new Error(`request failed for host ${JSON.stringify(redactedHost(url))}: network error`);
       }
@@ -103,11 +176,20 @@ async function fetchJson(
     }
 
     if (response.ok) {
+      debugLog(debug, logImpl, `attempt ${attempt} succeeded with HTTP ${response.status}`);
       break;
     }
 
+    const detail = debug ? await responseDebugDetail(response) : "";
+    debugLog(
+      debug,
+      logImpl,
+      `attempt ${attempt} received HTTP ${response.status}${detail ? `; response=${JSON.stringify(detail)}` : ""}`,
+    );
     if (!shouldRetry(startedAt, retryTimeoutMs, nowImpl)) {
-      throw new Error(`request failed for host ${JSON.stringify(redactedHost(url))} (HTTP ${response.status})`);
+      throw new Error(
+        `request failed for host ${JSON.stringify(redactedHost(url))} (HTTP ${response.status})${detail ? `: ${detail}` : ""}`,
+      );
     }
     console.warn(
       `request not ready for host ${JSON.stringify(redactedHost(url))} (HTTP ${response.status}); retrying attempt ${attempt + 1}`,
@@ -219,6 +301,12 @@ async function main() {
   const outFormat = getInput("out-format") || "dotenv";
   const exportToGithubEnv = isTruthyInput(getInput("export-to-github-env"));
   const insecureHttp = isTruthyInput(getInput("insecure-http"));
+  const debug = isTruthyInput(getInput("debug"));
+  const usageHeaders = buildUsageHeaders({
+    usageKind: getInput("usage-kind"),
+    usageName: getInput("usage-name"),
+    usageRun: getInput("usage-run"),
+  });
   const retryTimeoutSeconds = parseSecondsInput(getInput("retry-timeout-seconds"), 120, "retry-timeout-seconds");
   const retryIntervalSeconds = parseSecondsInput(getInput("retry-interval-seconds"), 5, "retry-interval-seconds");
 
@@ -236,9 +324,11 @@ async function main() {
   }
 
   const secretsMap = await fetchJson(fetchUrl, {
+    debug,
     insecureHttp,
     retryIntervalMs: retryIntervalSeconds * 1000,
     retryTimeoutMs: retryTimeoutSeconds * 1000,
+    usageHeaders,
   });
   if (outFormat === "json") {
     atomicWrite(outFile, sortedJson(secretsMap));
@@ -268,6 +358,7 @@ if (require.main === module) {
 module.exports = {
   appendGithubEnv,
   atomicWrite,
+  buildUsageHeaders,
   buildFetchUrl,
   defaultOutFile,
   fetchJson,
@@ -275,5 +366,7 @@ module.exports = {
   getInput,
   opaqueUrlWithJsonFormat,
   parseSecondsInput,
+  redactedFetchTarget,
+  sanitizeDebugText,
   sortedJson,
 };

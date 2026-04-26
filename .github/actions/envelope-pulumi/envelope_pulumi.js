@@ -14,6 +14,22 @@ function isTruthyInput(value) {
   return ["1", "true", "yes"].includes(String(value || "").trim().toLowerCase());
 }
 
+function buildUsageHeaders({ usageName = "", usageKind = "", usageRun = "" } = {}) {
+  const headers = {};
+  const values = [
+    ["X-Envelope-Usage-Name", usageName],
+    ["X-Envelope-Usage-Kind", usageKind],
+    ["X-Envelope-Usage-Run", usageRun],
+  ];
+  for (const [name, value] of values) {
+    const trimmed = String(value || "").trim();
+    if (trimmed) {
+      headers[name] = trimmed;
+    }
+  }
+  return headers;
+}
+
 function requireInput(name) {
   const value = getInput(name);
   if (!value) {
@@ -264,7 +280,7 @@ function buildEnvelopeEntries(pulumiOutputs, outputsRaw, mapRaw) {
   return entries;
 }
 
-async function requestJson(url, { apiKey, method, body, insecureHttp = false, fetchImpl = fetch }) {
+async function requestJson(url, { apiKey, method, body, insecureHttp = false, fetchImpl = fetch, usageHeaders = {} }) {
   assertAllowedUrl(url, insecureHttp);
   let response;
   try {
@@ -273,6 +289,7 @@ async function requestJson(url, { apiKey, method, body, insecureHttp = false, fe
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${apiKey}`,
+        ...usageHeaders,
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       },
       method,
@@ -306,6 +323,7 @@ async function pushEntries(options, deps = {}) {
     bundleSlug,
     entries,
     insecureHttp = false,
+    usageHeaders = {},
   } = options;
   const fetchImpl = deps.fetchImpl || fetch;
   const bundlePath = `/api/v1/bundles/${encodePathSegment(bundleSlug)}`;
@@ -317,6 +335,7 @@ async function pushEntries(options, deps = {}) {
     fetchImpl,
     insecureHttp,
     method: "PATCH",
+    usageHeaders,
   });
   if (patch.ok) {
     return { created: false, updatedCount: Object.keys(entries).length, data: patch.data };
@@ -340,6 +359,7 @@ async function pushEntries(options, deps = {}) {
     fetchImpl,
     insecureHttp,
     method: "POST",
+    usageHeaders,
   });
   if (!create.ok) {
     throw new Error(
@@ -360,6 +380,11 @@ async function main() {
   const environmentSlug = requireInput("environment-slug");
   const bundleSlug = requireInput("bundle-slug");
   const insecureHttp = isTruthyInput(getInput("insecure-http"));
+  const usageHeaders = buildUsageHeaders({
+    usageKind: getInput("usage-kind"),
+    usageName: getInput("usage-name"),
+    usageRun: getInput("usage-run"),
+  });
   const pulumiOutputs = loadPulumiOutputs({
     pulumiCwd: getInput("pulumi-cwd"),
     pulumiJson: getInput("pulumi-json"),
@@ -376,6 +401,7 @@ async function main() {
     environmentSlug,
     insecureHttp,
     projectSlug,
+    usageHeaders,
   });
 
   if (process.env.GITHUB_OUTPUT) {
@@ -398,6 +424,7 @@ if (require.main === module) {
 module.exports = {
   buildApiUrl,
   buildEnvelopeEntries,
+  buildUsageHeaders,
   coercePulumiValue,
   getInput,
   loadPulumiOutputs,

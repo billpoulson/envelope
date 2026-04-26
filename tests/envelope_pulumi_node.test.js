@@ -137,6 +137,11 @@ test("pushEntries patches existing bundle with scoped query parameters", async (
       envelopeUrl: "https://envelope.example.com/root",
       environmentSlug: "local-dev",
       projectSlug: "my-project",
+      usageHeaders: action.buildUsageHeaders({
+        usageKind: "github-action",
+        usageName: "pulumi-output-push",
+        usageRun: "run-123",
+      }),
     },
     {
       fetchImpl: async (url, options) => {
@@ -156,7 +161,21 @@ test("pushEntries patches existing bundle with scoped query parameters", async (
   assert.match(calls[0].url, /environment_slug=local-dev/);
   assert.equal(calls[0].options.method, "PATCH");
   assert.equal(calls[0].options.headers.Authorization, "Bearer env_secret");
+  assert.equal(calls[0].options.headers["X-Envelope-Usage-Name"], "pulumi-output-push");
+  assert.equal(calls[0].options.headers["X-Envelope-Usage-Kind"], "github-action");
+  assert.equal(calls[0].options.headers["X-Envelope-Usage-Run"], "run-123");
   assert.equal(calls[0].options.body, JSON.stringify({ entries: { A: { value: "x", secret: true } } }));
+});
+
+test("buildUsageHeaders omits blank usage values", () => {
+  assert.deepEqual(
+    action.buildUsageHeaders({
+      usageKind: "ci",
+      usageName: "",
+      usageRun: " ",
+    }),
+    { "X-Envelope-Usage-Kind": "ci" },
+  );
 });
 
 test("pushEntries creates bundle when scoped patch returns 404", async () => {
