@@ -41,7 +41,37 @@ function redactedHost(url) {
   }
 }
 
-async function fetchJson(url, { insecureHttp = false, fetchImpl = fetch } = {}) {
+function parseSecondsInput(value, defaultValue, name) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return defaultValue;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative number`);
+  }
+  return parsed;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetry(startedAt, retryTimeoutMs, nowImpl) {
+  return retryTimeoutMs > 0 && nowImpl() - startedAt < retryTimeoutMs;
+}
+
+async function fetchJson(
+  url,
+  {
+    insecureHttp = false,
+    fetchImpl = fetch,
+    nowImpl = Date.now,
+    retryIntervalMs = 0,
+    retryTimeoutMs = 0,
+    sleepImpl = sleep,
+  } = {},
+) {
   const parsed = new URL(url);
   if (parsed.protocol === "http:" && !insecureHttp) {
     throw new Error("refusing http:// (set insecure-http: true for local dev only)");
@@ -50,19 +80,39 @@ async function fetchJson(url, { insecureHttp = false, fetchImpl = fetch } = {}) 
     throw new Error("invalid URL scheme (https required)");
   }
 
+  const startedAt = nowImpl();
+  let attempt = 0;
   let response;
-  try {
-    response = await fetchImpl(url, {
-      headers: { Accept: "application/json" },
-      method: "GET",
-      signal: AbortSignal.timeout(120_000),
-    });
-  } catch {
-    throw new Error(`request failed for host ${JSON.stringify(redactedHost(url))}: network error`);
-  }
+  while (true) {
+    attempt += 1;
+    try {
+      response = await fetchImpl(url, {
+        headers: { Accept: "application/json" },
+        method: "GET",
+        signal: AbortSignal.timeout(120_000),
+      });
+    } catch {
+      if (!shouldRetry(startedAt, retryTimeoutMs, nowImpl)) {
+        throw new Error(`request failed for host ${JSON.stringify(redactedHost(url))}: network error`);
+      }
+      console.warn(
+        `request not ready for host ${JSON.stringify(redactedHost(url))}: network error; retrying attempt ${attempt + 1}`,
+      );
+      await sleepImpl(retryIntervalMs);
+      continue;
+    }
 
-  if (!response.ok) {
-    throw new Error(`request failed for host ${JSON.stringify(redactedHost(url))} (HTTP ${response.status})`);
+    if (response.ok) {
+      break;
+    }
+
+    if (!shouldRetry(startedAt, retryTimeoutMs, nowImpl)) {
+      throw new Error(`request failed for host ${JSON.stringify(redactedHost(url))} (HTTP ${response.status})`);
+    }
+    console.warn(
+      `request not ready for host ${JSON.stringify(redactedHost(url))} (HTTP ${response.status}); retrying attempt ${attempt + 1}`,
+    );
+    await sleepImpl(retryIntervalMs);
   }
 
   let data;
@@ -169,6 +219,8 @@ async function main() {
   const outFormat = getInput("out-format") || "dotenv";
   const exportToGithubEnv = isTruthyInput(getInput("export-to-github-env"));
   const insecureHttp = isTruthyInput(getInput("insecure-http"));
+  const retryTimeoutSeconds = parseSecondsInput(getInput("retry-timeout-seconds"), 120, "retry-timeout-seconds");
+  const retryIntervalSeconds = parseSecondsInput(getInput("retry-interval-seconds"), 5, "retry-interval-seconds");
 
   if (outFormat !== "dotenv" && outFormat !== "json") {
     throw new Error("out-format must be either 'dotenv' or 'json'");
@@ -183,7 +235,11 @@ async function main() {
     throw new Error("provide opaque-env-url, or both envelope-url and token");
   }
 
-  const secretsMap = await fetchJson(fetchUrl, { insecureHttp });
+  const secretsMap = await fetchJson(fetchUrl, {
+    insecureHttp,
+    retryIntervalMs: retryIntervalSeconds * 1000,
+    retryTimeoutMs: retryTimeoutSeconds * 1000,
+  });
   if (outFormat === "json") {
     atomicWrite(outFile, sortedJson(secretsMap));
   } else {
@@ -218,5 +274,6 @@ module.exports = {
   formatSecretsDotenv,
   getInput,
   opaqueUrlWithJsonFormat,
+  parseSecondsInput,
   sortedJson,
 };

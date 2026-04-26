@@ -93,6 +93,61 @@ test("fetchJson normalizes response values and rejects plain http by default", a
   assert.deepEqual(out, { A: "x", B: "", C: "3", D: "false" });
 });
 
+test("fetchJson retries HTTP failures until the endpoint is ready", async () => {
+  const statuses = [400, 502, 200];
+  const sleeps = [];
+  const out = await action.fetchJson("https://h.example/env/token?format=json", {
+    fetchImpl: async () => {
+      const status = statuses.shift();
+      return {
+        ok: status === 200,
+        status,
+        json: async () => ({ A: "x" }),
+      };
+    },
+    retryIntervalMs: 25,
+    retryTimeoutMs: 1_000,
+    sleepImpl: async (ms) => {
+      sleeps.push(ms);
+    },
+  });
+
+  assert.deepEqual(out, { A: "x" });
+  assert.deepEqual(sleeps, [25, 25]);
+});
+
+test("fetchJson retries network errors before returning JSON", async () => {
+  let attempts = 0;
+  const out = await action.fetchJson("https://h.example/env/token?format=json", {
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("temporary network failure");
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ A: "x" }),
+      };
+    },
+    retryIntervalMs: 0,
+    retryTimeoutMs: 1_000,
+    sleepImpl: async () => {},
+  });
+
+  assert.equal(attempts, 2);
+  assert.deepEqual(out, { A: "x" });
+});
+
+test("parseSecondsInput validates non-negative numeric inputs", () => {
+  assert.equal(action.parseSecondsInput("", 120, "retry-timeout-seconds"), 120);
+  assert.equal(action.parseSecondsInput("2.5", 120, "retry-timeout-seconds"), 2.5);
+  assert.throws(
+    () => action.parseSecondsInput("-1", 120, "retry-timeout-seconds"),
+    /retry-timeout-seconds must be a non-negative number/,
+  );
+});
+
 test("getInput reads GitHub's hyphenated input environment names", () => {
   const githubName = "INPUT_OPAQUE-ENV-URL";
   const fallbackName = "INPUT_OPAQUE_ENV_URL";

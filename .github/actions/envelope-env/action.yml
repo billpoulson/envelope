@@ -35,6 +35,14 @@ inputs:
     description: Set to true only for local HTTP testing (sets ENVELOPE_CLI_INSECURE=1). Not for production.
     required: false
     default: "false"
+  retry-timeout-seconds:
+    description: Maximum time to wait for the Envelope env endpoint to become available.
+    required: false
+    default: "120"
+  retry-interval-seconds:
+    description: Seconds to wait between Envelope env fetch attempts.
+    required: false
+    default: "5"
 
 outputs:
   out-file:

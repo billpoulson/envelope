@@ -258,7 +258,7 @@ curl -fsS "$ENVELOPE_SECRET_ENV_URL?format=json" | python -m json.tool
   run: curl -fsS "${{ secrets.ENVELOPE_ENV_URL }}" -o .env
 ```
 
-**Reusable action** (Node 20 action with the same opaque-env behavior as `[cli/envelope_run.py](cli/envelope_run.py)`: JSON export, optional `GITHUB_ENV` for later steps, HTTPS-only unless you opt into insecure HTTP). Pin a **release tag** or **commit SHA** (not a moving branch). Examples below use `v1.0.0` as a placeholder—substitute the tag you publish, or use `main` / a commit SHA until then.
+**Reusable action** (Node 20 action with the same opaque-env behavior as `[cli/envelope_run.py](cli/envelope_run.py)`: JSON export, optional `GITHUB_ENV` for later steps, HTTPS-only unless you opt into insecure HTTP). It retries fetch failures for up to 120 seconds by default so dependent services can finish starting; tune this with `retry-timeout-seconds` and `retry-interval-seconds`. Pin a **release tag** or **commit SHA** (not a moving branch). Examples below use `v1.0.0` as a placeholder—substitute the tag you publish, or use `main` / a commit SHA until then.
 
 ```yaml
 - uses: billpoulson/envelope/.github/actions/envelope-env@v1.0.0
