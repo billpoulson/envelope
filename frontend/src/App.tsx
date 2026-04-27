@@ -17,6 +17,7 @@ import TutorialPage from "@/pages/TutorialPage";
 import AccountPage from "@/pages/AccountPage";
 import AppSettingsPage from "@/pages/AppSettingsPage";
 import AuditTrailPage from "@/pages/AuditTrailPage";
+import CliDevicePage from "@/pages/CliDevicePage";
 import LoginPage from "@/pages/LoginPage";
 import McpPage from "@/pages/McpPage";
 import NewBundlePage from "@/pages/NewBundlePage";
@@ -104,6 +105,7 @@ export default function App() {
           <Route path="/bundles" element={<BundlesPage />} />
           <Route path="/stacks" element={<StacksPage />} />
           <Route path="/keys" element={<ApiKeysPage />} />
+          <Route path="/cli/device" element={<CliDevicePage />} />
           <Route path="/settings" element={<AppSettingsPage />} />
           <Route path="/mcp" element={<McpPage />} />
           <Route path="/audit" element={<AuditTrailPage />} />

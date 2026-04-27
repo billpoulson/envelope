@@ -488,6 +488,34 @@ class AuditEvent(Base):
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class CliDeviceAuthorization(Base):
+    """RFC 8628-style device login: CLI polls until an admin approves creation of an API key."""
+
+    __tablename__ = "cli_device_authorizations"
+    __table_args__ = (
+        Index("ix_cli_device_authorizations_user_code_status", "user_code", "status"),
+        Index("ix_cli_device_authorizations_expires_at", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    user_code: Mapped[str] = mapped_column(String(16), index=True)
+    device_code_hmac: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    poll_interval_sec: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    last_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    encrypted_grant: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    created_api_key_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True
+    )
+    approver_admin_key_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True
+    )
+
+
 class McpApprovalRequest(Base):
     """Human approval gate for MCP write tools."""
 

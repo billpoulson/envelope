@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "envelope-cli"
+version = "0.1.0"
+description = "Envelope CLI: opaque env fetch, device login, and bundle export"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+envelope = "envelope_cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -26,3 +26,10 @@ def hash_api_key(raw: str) -> str:
 
 def verify_api_key(raw: str, key_hash: str) -> bool:
     return _pwd.verify(raw, key_hash)
+
+
+def device_code_lookup_hmac(raw: str, master_key: str) -> str:
+    """Indexed digest for CLI device flow (never store raw device_code)."""
+    mk = master_key.strip().encode("utf-8")
+    hmac_key = hashlib.sha256(b"envelope-cli-device-v1|" + mk).digest()
+    return hmac.new(hmac_key, raw.encode("utf-8"), hashlib.sha256).hexdigest()

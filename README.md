@@ -329,9 +329,19 @@ If Envelope is behind a **path prefix** (`ENVELOPE_ROOT_PATH`), the `url` from t
 
 ### CLI (install from deployment)
 
-Download the helper and wrappers from your Envelope origin (paths are stable):
+**Recommended:** install the `envelope` command from a **git checkout** of this repo (Python 3.10+):
 
-- `GET /cli/envelope_run.py` — Python implementation (stdlib only)
+- **Linux / macOS:** `./scripts/install-envelope-cli.sh` (optional `--editable` for developers)
+- **Windows:** `.\scripts\install-envelope-cli.ps1` (optional `-Editable`)
+
+The same scripts are also available from a running server as `GET /cli/install-envelope-cli.sh` and `GET /cli/install-envelope-cli.ps1`.
+
+After install, use **`envelope login --envelope-url …`** to authorize in the browser (**Admin → CLI device login**), then **`envelope run --bundle my-bundle …`** with the saved API key, or continue using opaque env tokens as below.
+
+Download legacy helpers and wrappers from your Envelope origin (paths are stable):
+
+- `GET /cli/envelope_run.py` — Python implementation (stdlib only; forwards to the `envelope-cli` package when `cli/src` is present)
+- `GET /cli/envelope` — POSIX launcher (`envelope` on `PATH` or `python3 -m envelope_cli`)
 - `GET /cli/envelope-run.sh` — shell wrapper (`exec python3` next to `envelope_run.py`)
 - `GET /cli/envelope-run.ps1` — PowerShell wrapper
 
@@ -347,6 +357,11 @@ curl -fsS "$ENVELOPE_URL/cli/envelope-run.sh" -o envelope-run.sh && chmod +x env
 **Arguments:** pass the deployment **base URL** as a single value—**including** any gateway path prefix (e.g. `https://envelope.example.com/envelope`)—and the opaque **token** (the path segment after `/env/`). The script builds `…/env/{token}` internally.
 
 ```bash
+envelope run \
+  --envelope-url 'https://envelope.example.com/envelope' \
+  --token '<token-from-env-link>' \
+  -- terraform plan
+
 ./envelope-run.sh \
   --envelope-url 'https://envelope.example.com/envelope' \
   --token '<token-from-env-link>' \

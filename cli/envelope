@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# Prefer ``pip install ./cli`` (envelope on PATH). Fallback: run from checkout via Python path.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if command -v envelope >/dev/null 2>&1; then
+  exec envelope "$@"
+fi
+export PYTHONPATH="${SCRIPT_DIR}/src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m envelope_cli "$@"

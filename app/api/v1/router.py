@@ -1,9 +1,23 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, bundles, certificates, env_resolve, keys, mcp, projects, sealed_secrets, settings, stacks, system
+from app.api.v1 import (
+    auth,
+    bundles,
+    certificates,
+    device_auth,
+    env_resolve,
+    keys,
+    mcp,
+    projects,
+    sealed_secrets,
+    settings,
+    stacks,
+    system,
+)
 
 router = APIRouter()
 router.include_router(auth.router, tags=["auth"])
+router.include_router(device_auth.router, tags=["auth"])
 router.include_router(settings.router)
 router.include_router(env_resolve.router, tags=["env-links"])
 router.include_router(bundles.router, tags=["bundles"])

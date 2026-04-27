@@ -144,9 +144,14 @@ export function CliInstallTutorial() {
       <p className="text-sm leading-relaxed text-slate-400">
         The base URL below is detected from your browser address (including a gateway path prefix such as{" "}
         <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-xs text-slate-200">/envelope</code> when
-        used). Scripts download{" "}
-        <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-xs">/cli/envelope_run.py</code> and
-        wrappers from this server.
+        used). For the full <code className="font-mono text-xs">envelope</code> CLI (browser login, bundle export),
+        clone the repo and run <code className="font-mono text-xs">scripts/install-envelope-cli.sh</code> or{" "}
+        <code className="font-mono text-xs">install-envelope-cli.ps1</code>, or download the same installers from{" "}
+        <code className="font-mono text-xs">/cli/install-envelope-cli.sh</code> and{" "}
+        <code className="font-mono text-xs">/cli/install-envelope-cli.ps1</code> on this host. The generated scripts
+        below download{" "}
+        <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-xs">/cli/envelope_run.py</code> and wrappers
+        for the opaque-env workflow.
       </p>
 
       <div className="rounded-lg border border-border/80 bg-[#121820] px-4 py-3 font-mono text-xs text-slate-300 break-all">

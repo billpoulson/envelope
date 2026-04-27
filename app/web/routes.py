@@ -216,3 +216,32 @@ async def download_cli_envelope_run_ps1() -> FileResponse:
 async def download_cli_envelope_run_py() -> FileResponse:
     """Python implementation: fetch /env/{{token}} and run a command or write an env file."""
     return _cli_file_response("envelope_run.py")
+
+
+@router.get("/cli/envelope")
+async def download_cli_envelope_sh() -> FileResponse:
+    """POSIX launcher: ``envelope`` on PATH or ``python3 -m envelope_cli`` from checkout."""
+    return _cli_file_response("envelope")
+
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts"
+
+
+@router.get("/cli/install-envelope-cli.sh")
+async def download_install_envelope_cli_sh() -> FileResponse:
+    path = _SCRIPTS_DIR / "install-envelope-cli.sh"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path, media_type="text/plain; charset=utf-8", filename="install-envelope-cli.sh")
+
+
+@router.get("/cli/install-envelope-cli.ps1")
+async def download_install_envelope_cli_ps1() -> FileResponse:
+    path = _SCRIPTS_DIR / "install-envelope-cli.ps1"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(
+        path,
+        media_type="text/plain; charset=utf-8",
+        filename="install-envelope-cli.ps1",
+    )

@@ -49,7 +49,8 @@ export function Layout() {
     pathname === "/mcp" ||
     pathname === "/audit" ||
     pathname === "/certificates" ||
-    pathname.startsWith("/tools/");
+    pathname.startsWith("/tools/") ||
+    pathname.startsWith("/cli/");
   /** Match classic UI: Projects stays highlighted for any project subtree and global bundle/stack lists. */
   const onProjectsNav =
     pathname === "/projects" ||
@@ -201,6 +202,16 @@ export function Layout() {
                       onClick={() => setAdminOpen(false)}
                     >
                       API keys
+                    </NavLink>
+                    <NavLink
+                      to="/cli/device"
+                      role="menuitem"
+                      className={({ isActive }) =>
+                        `block px-3 py-2 text-sm ${isActive ? "bg-white/10 text-white" : "text-slate-300 hover:bg-white/5"}`
+                      }
+                      onClick={() => setAdminOpen(false)}
+                    >
+                      CLI device login
                     </NavLink>
                     <NavLink
                       to="/settings"

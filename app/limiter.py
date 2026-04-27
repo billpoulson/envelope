@@ -9,6 +9,8 @@ limiter = Limiter(key_func=get_remote_address)
 LOGIN = "20/minute"
 OIDC_REDIRECT = "45/minute"
 OIDC_CALLBACK = "45/minute"
+CLI_DEVICE_AUTHORIZE = "20/minute"
+CLI_DEVICE_TOKEN = "120/minute"
 API_KEYS_LIST = "120/minute"
 API_KEYS_CREATE = "60/minute"
 API_KEYS_DELETE = "60/minute"
