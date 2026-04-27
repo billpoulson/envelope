@@ -8,6 +8,7 @@ export type HelpSectionId =
   | "web-ui"
   | "oidc"
   | "api"
+  | "mcp"
   | "certificates"
   | "terraform"
   | "cli"
@@ -21,6 +22,7 @@ function headingToSectionId(title: string): HelpSectionId | null {
   if (t === "Web UI") return "web-ui";
   if (t === "OpenID Connect (SSO)") return "oidc";
   if (t.startsWith("Exporting bundles")) return "api";
+  if (t === "Model Context Protocol (MCP)") return "mcp";
   if (t.startsWith("Certificate-backed")) return "certificates";
   if (t.startsWith("Terraform HTTP")) return "terraform";
   if (t === "CLI tool") return "cli";

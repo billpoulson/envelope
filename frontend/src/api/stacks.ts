@@ -1,5 +1,6 @@
 import { apiFetch, getCsrfHeader } from "./client";
 import { fetchCsrf } from "./auth";
+import type { LastAccessMetadata } from "./system";
 import { appendResourceScope, type ResourceScopeOpts } from "./bundles";
 
 export type { ResourceScopeOpts };
@@ -149,7 +150,7 @@ export async function getStackKeyGraph(
   );
 }
 
-export type StackEnvLinkRow = {
+export type StackEnvLinkRow = LastAccessMetadata & {
   id: number;
   created_at: string;
   through_layer_position: number | null;

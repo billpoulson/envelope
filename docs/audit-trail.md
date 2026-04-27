@@ -9,6 +9,8 @@ Two sinks are available:
 
 For enterprise expectations (SOC2, ISO 27001, internal security), combine these with **reverse-proxy or WAF access logs** and your **SIEM** retention policies.
 
+Admins can browse the same database-backed history in the web UI at **Admin → Audit trail** (`/audit`). API key and Secret env URL list pages also show a denormalized **Last accessed** summary for the latest successful use; the audit trail remains the complete history.
+
 ---
 
 ## Environment variables

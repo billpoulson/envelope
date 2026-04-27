@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.db import get_db
 from app.deps import get_api_key
 from app.services.audit import emit_audit_event
+from app.services.audit import last_access_payload
 from app.limiter import limiter
 from app.models import ApiKey, BundleGroup, BundleStack, BundleStackLayer, ProjectEnvironment, StackEnvLink
 from app.services.bundles import format_secrets_dotenv
@@ -730,28 +731,24 @@ async def list_stack_env_links(
     layers_sorted = sorted(st.layers, key=lambda L: L.position)
     pos_to_bundle = {L.position: L.bundle.name for L in layers_sorted}
     r = await session.execute(
-        select(
-            StackEnvLink.id,
-            StackEnvLink.created_at,
-            StackEnvLink.through_layer_position,
-            StackEnvLink.token_sha256,
-        )
+        select(StackEnvLink)
         .where(StackEnvLink.stack_id == st.id)
         .order_by(StackEnvLink.created_at.desc())
     )
     out: list[dict[str, int | str | None]] = []
-    for row in r.all():
-        tpl = row.through_layer_position
+    for link in r.scalars().all():
+        tpl = link.through_layer_position
         slice_label: str | None = None
         if tpl is not None:
             slice_label = pos_to_bundle.get(tpl)
         out.append(
             {
-                "id": row.id,
-                "created_at": row.created_at.isoformat(),
+                "id": link.id,
+                "created_at": link.created_at.isoformat(),
                 "through_layer_position": tpl,
                 "slice_label": slice_label,
-                "token_sha256": row.token_sha256,
+                "token_sha256": link.token_sha256,
+                **last_access_payload(link),
             }
         )
     return out

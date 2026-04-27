@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -15,7 +16,7 @@ from starlette.status import HTTP_302_FOUND
 from app.db import get_db
 from app.limiter import limiter
 from app.models import Bundle, BundleEnvLink, BundleStack, StackEnvLink
-from app.services.audit import emit_audit_event
+from app.services.audit import emit_audit_event, last_access_metadata_from_request
 from app.paths import url_path
 from app.services.bundles import format_secrets_dotenv, load_bundle_secrets
 from app.services.env_links import token_sha256_hex
@@ -122,6 +123,10 @@ async def download_env_by_secret_token(
     if row is not None:
         link, bundle = row
         _, secrets_map = await load_bundle_secrets(session, bundle.name)
+        link.last_accessed_at = datetime.now(timezone.utc)
+        for key, value in last_access_metadata_from_request(request).items():
+            setattr(link, key, value)
+        await session.commit()
         await emit_audit_event(
             session,
             request,
@@ -145,6 +150,10 @@ async def download_env_by_secret_token(
         slink, _stack_row = row2
         stack = await get_stack_by_name(session, _stack_row.name)
         assert stack is not None
+        slink.last_accessed_at = datetime.now(timezone.utc)
+        for key, value in last_access_metadata_from_request(request).items():
+            setattr(slink, key, value)
+        await session.commit()
         if slink.through_layer_position is not None:
             secrets_map = await load_stack_secrets_through(
                 session, stack, slink.through_layer_position

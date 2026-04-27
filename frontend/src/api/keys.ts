@@ -1,7 +1,8 @@
 import { apiFetch, getCsrfHeader } from "./client";
 import { fetchCsrf } from "./auth";
+import type { LastAccessMetadata } from "./system";
 
-export type ApiKeyRow = {
+export type ApiKeyRow = LastAccessMetadata & {
   id: number;
   name: string;
   scopes: string[];

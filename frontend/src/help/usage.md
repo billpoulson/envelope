@@ -1,6 +1,6 @@
 # Envelope — usage guide
 
-> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **[Installation & hosting](/help/installation)**, **`/help/web-ui`**, **[OpenID Connect (SSO)](/help/oidc)**, **`/help/api`**, **`/help/certificates`**, **`/help/terraform`**, **[CLI (opaque env)](/help/cli)**, **[GitHub Actions](/help/github-actions)**, **[Security audit trail](/help/audit)**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
+> **Web UI:** When the app is running, the same material is published as multi-page help: open **`/help`** (overview), then use the sidebar for **[Installation & hosting](/help/installation)**, **`/help/web-ui`**, **[OpenID Connect (SSO)](/help/oidc)**, **`/help/api`**, **`/help/mcp`**, **`/help/certificates`**, **`/help/terraform`**, **[CLI (opaque env)](/help/cli)**, **[GitHub Actions](/help/github-actions)**, **[Security audit trail](/help/audit)**, and **`/help/backup`**. The certificates page has the most detail on registering recipient public keys and sealed-secret payloads.
 
 Envelope is a self-hosted **secure environment bundle** manager: named groups of variables (like a `.env` file), **encrypted at rest** for secret values, with **API keys** for automation and a **web UI** for administration.
 
@@ -136,6 +136,32 @@ curl -fsS "https://your-envelope.example.com/env/<token>" -o .env
 ```
 
 Create links from the UI or `POST /api/v1/bundles/{name}/env-links` with a key that has write access to the bundle.
+
+---
+
+## Model Context Protocol (MCP)
+
+Envelope exposes a remote MCP endpoint at **`/mcp`** when `ENVELOPE_MCP_ENABLED=true` (default). MCP clients authenticate with an Envelope API key:
+
+```json
+{
+  "mcpServers": {
+    "envelope": {
+      "type": "streamable-http",
+      "url": "https://your-envelope.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <envelope-api-key>"
+      }
+    }
+  }
+}
+```
+
+Read tools use the same scopes as the REST API: project, bundle, and stack reads only return resources the key can access. Export tools can return dotenv or JSON content and are audited like normal API exports.
+
+Write tools never mutate Envelope immediately. They create an approval request under **Admin → MCP**. An admin reviews the sanitized arguments, approves or denies the request, and approved requests execute using the original requester API key and scopes. The stored request payload is encrypted at rest with the Envelope master key; values and entries are redacted in the UI.
+
+Available tools include project/environment listing, bundle and stack listing, bundle inspection, bundle/stack exports, write approval requests for bundle and stack changes, and approval status checks.
 
 ### Bundle stacks (merged export)
 
@@ -315,6 +341,7 @@ Typical events include bundle/stack **export**, bundle **JSON or encrypted backu
 ### Database and admin API
 
 - Rows accumulate in **`audit_events`**. Plan **disk** (SQLite) or **table growth** (PostgreSQL); the product does not prune old rows automatically.
+- Admins can browse events in the web UI at **Admin → Audit trail** (`/audit`). The API key page and Secret env URL pages show the latest successful **Last accessed** summary, including usage labels when clients send `X-Envelope-Usage-*` headers.
 - Admins can page events: **`GET /api/v1/system/audit-events?limit=50`** with optional **`before_id`** for older pages (see OpenAPI **`/docs`**). Requires an **admin** API key (or signed-in admin session for browser calls).
 
 ### Opaque env URLs and gateways

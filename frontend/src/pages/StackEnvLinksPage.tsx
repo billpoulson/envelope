@@ -8,6 +8,7 @@ import {
   listStackEnvLinks,
 } from "@/api/stacks";
 import { envLinkRowId, useEnvLinkRowHighlight } from "@/hooks/useEnvLinkRowHighlight";
+import { LastAccessSummary } from "@/components/LastAccessSummary";
 import { PickEnvironmentForAmbiguousResource } from "@/components/PickEnvironmentForAmbiguousResource";
 import { StackPageShell } from "@/components/StackPageShell";
 import { Button } from "@/components/ui";
@@ -177,6 +178,9 @@ export default function StackEnvLinksPage() {
                   <span className="text-slate-500">created {r.created_at}</span>
                   <div className="mt-1 font-mono text-xs text-slate-400 break-all" title={r.token_sha256}>
                     {r.token_sha256}
+                  </div>
+                  <div className="mt-2">
+                    <LastAccessSummary row={r} />
                   </div>
                 </div>
                 <button
