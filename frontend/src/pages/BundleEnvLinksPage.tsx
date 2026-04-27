@@ -4,6 +4,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { createBundleEnvLink, deleteBundleEnvLink, listBundleEnvLinks } from "@/api/bundles";
 import { PickEnvironmentForAmbiguousResource } from "@/components/PickEnvironmentForAmbiguousResource";
 import { BundlePageShell } from "@/components/BundlePageShell";
+import { LastAccessSummary } from "@/components/LastAccessSummary";
 import { Button } from "@/components/ui";
 import { envLinkRowId, useEnvLinkRowHighlight } from "@/hooks/useEnvLinkRowHighlight";
 import { projectBundlesBase, resourceScopeFromPath, searchWithoutEnv } from "@/projectPaths";
@@ -117,14 +118,21 @@ export default function BundleEnvLinksPage() {
               }`}
               aria-label={isHighlighted(r.token_sha256) ? "Matched env link (from Identify Secret Url)" : undefined}
             >
-              <span className="text-slate-400">#{r.id}</span>
-              <code
-                className="max-w-[min(100%,28rem)] truncate text-xs text-slate-300"
-                title={r.token_sha256}
-              >
-                {r.token_sha256}
-              </code>
-              <span className="text-xs text-slate-500">{r.created_at}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-slate-400">#{r.id}</span>
+                  <code
+                    className="max-w-[min(100%,28rem)] truncate text-xs text-slate-300"
+                    title={r.token_sha256}
+                  >
+                    {r.token_sha256}
+                  </code>
+                  <span className="text-xs text-slate-500">created {r.created_at}</span>
+                </div>
+                <div className="mt-2">
+                  <LastAccessSummary row={r} />
+                </div>
+              </div>
               <button
                 type="button"
                 className="text-sm text-red-400 underline"

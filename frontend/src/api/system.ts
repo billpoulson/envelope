@@ -1,6 +1,63 @@
 import { apiFetch, getCsrfHeader } from "./client";
 import { fetchCsrf } from "./auth";
 
+export type AuditUsage = {
+  name?: string;
+  kind?: string;
+  run?: string;
+};
+
+export type AuditDetails = {
+  usage?: AuditUsage;
+  [key: string]: unknown;
+};
+
+export type AuditEventRow = {
+  id: number;
+  created_at: string;
+  event_type: string;
+  actor_api_key_id: number | null;
+  actor_api_key_name: string | null;
+  bundle_id: number | null;
+  bundle_name: string | null;
+  stack_id: number | null;
+  stack_name: string | null;
+  bundle_env_link_id: number | null;
+  stack_env_link_id: number | null;
+  token_sha256_prefix: string | null;
+  client_ip: string | null;
+  user_agent: string | null;
+  http_method: string | null;
+  path: string | null;
+  details: AuditDetails | null;
+};
+
+export type AuditEventsResponse = {
+  events: AuditEventRow[];
+};
+
+export type LastAccessMetadata = {
+  last_accessed_at: string | null;
+  last_accessed_usage_name: string | null;
+  last_accessed_usage_kind: string | null;
+  last_accessed_usage_run: string | null;
+  last_accessed_ip: string | null;
+  last_accessed_user_agent: string | null;
+};
+
+export async function listAuditEvents({
+  limit = 50,
+  beforeId,
+}: {
+  limit?: number;
+  beforeId?: number;
+} = {}): Promise<AuditEventsResponse> {
+  const q = new URLSearchParams();
+  q.set("limit", String(limit));
+  if (beforeId !== undefined) q.set("before_id", String(beforeId));
+  return apiFetch<AuditEventsResponse>(`/system/audit-events?${q.toString()}`, { method: "GET" });
+}
+
 export async function downloadEncryptedBackup(passphrase: string): Promise<void> {
   const csrf = await fetchCsrf();
   const res = await fetch("/api/v1/system/backup/database", {

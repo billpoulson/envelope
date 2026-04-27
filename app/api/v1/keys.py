@@ -24,6 +24,12 @@ class ApiKeyOut(BaseModel):
     created_at: datetime
     expires_at: datetime | None
     oidc_linked: bool = False
+    last_accessed_at: datetime | None = None
+    last_accessed_usage_name: str | None = None
+    last_accessed_usage_kind: str | None = None
+    last_accessed_usage_run: str | None = None
+    last_accessed_ip: str | None = None
+    last_accessed_user_agent: str | None = None
 
 
 class CreateApiKeyBody(BaseModel):
@@ -74,6 +80,12 @@ async def list_api_keys(
             created_at=x.created_at,
             expires_at=x.expires_at,
             oidc_linked=x.id in linked_ids,
+            last_accessed_at=x.last_accessed_at,
+            last_accessed_usage_name=x.last_accessed_usage_name,
+            last_accessed_usage_kind=x.last_accessed_usage_kind,
+            last_accessed_usage_run=x.last_accessed_usage_run,
+            last_accessed_ip=x.last_accessed_ip,
+            last_accessed_user_agent=x.last_accessed_user_agent,
         )
         for x in rows
     ]

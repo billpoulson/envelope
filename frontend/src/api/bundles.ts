@@ -1,5 +1,6 @@
 import { apiFetch, getCsrfHeader } from "./client";
 import { fetchCsrf } from "./auth";
+import type { LastAccessMetadata } from "./system";
 
 /** Matches backend disambiguation for duplicate bundle/stack names per environment. */
 export type ResourceScopeOpts = {
@@ -222,7 +223,7 @@ export async function listBundleKeyNames(
 }
 
 /** SHA-256 hex (64 chars) of the UTF-8 env path token; matches server ``token_sha256_hex(raw)``. */
-export type EnvLinkRow = { id: number; created_at: string; token_sha256: string };
+export type EnvLinkRow = LastAccessMetadata & { id: number; created_at: string; token_sha256: string };
 
 export async function listBundleEnvLinks(
   bundleName: string,

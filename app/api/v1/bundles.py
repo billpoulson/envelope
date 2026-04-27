@@ -30,6 +30,7 @@ from app.services.scopes import (
     scopes_allow_admin,
 )
 from app.services.audit import emit_audit_event
+from app.services.audit import last_access_payload
 from app.services.backup_crypto import (
     WrongPassphraseError,
     decrypt_bytes,
@@ -1047,7 +1048,7 @@ async def list_bundle_env_links(
     scope: ResourcePathScope = Depends(),
     auth: ApiKey = Depends(get_api_key),
     session: AsyncSession = Depends(get_db),
-) -> list[dict[str, int | str]]:
+) -> list[dict[str, int | str | None]]:
     """List opaque env links: id, created time, and ``token_sha256`` (SHA-256 hex of the path token).
 
     The raw URL segment is never stored; compare hashes to pick ``id`` for ``DELETE``.
@@ -1069,17 +1070,18 @@ async def list_bundle_env_links(
             status_code=403, detail="Insufficient scope to manage env links for this bundle"
         )
     r = await session.execute(
-        select(BundleEnvLink.id, BundleEnvLink.created_at, BundleEnvLink.token_sha256)
+        select(BundleEnvLink)
         .where(BundleEnvLink.bundle_id == bundle.id)
         .order_by(BundleEnvLink.created_at.desc())
     )
     return [
         {
-            "id": row.id,
-            "created_at": row.created_at.isoformat(),
-            "token_sha256": row.token_sha256,
+            "id": link.id,
+            "created_at": link.created_at.isoformat(),
+            "token_sha256": link.token_sha256,
+            **last_access_payload(link),
         }
-        for row in r.all()
+        for link in r.scalars().all()
     ]
 
 

@@ -15,6 +15,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, Response
 
 from app.api.tfstate.routes import router as tfstate_router
+from app.api.mcp.routes import router as mcp_router
 from app.api.v1.router import router as api_v1_router
 from app.security_headers import make_security_headers_middleware
 from app.limiter import limiter
@@ -152,6 +153,8 @@ def create_app() -> FastAPI:
     app.include_router(api_v1_router, prefix="/api/v1")
     if settings.terraform_http_state_enabled:
         app.include_router(tfstate_router, prefix="/tfstate")
+    if settings.mcp_enabled:
+        app.include_router(mcp_router, prefix="/mcp", tags=["mcp"])
 
     _register_react_spa(app)
     return app

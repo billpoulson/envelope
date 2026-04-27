@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     security_csp: str = ""
     # Terraform HTTP remote state API (/tfstate/projects/...). See docs/terraform-http-remote-state.md
     terraform_http_state_enabled: bool = True
+    # Model Context Protocol endpoint (/mcp). Uses API-key Bearer auth and per-tool scope checks.
+    mcp_enabled: bool = True
 
     # OIDC (browser admin only). Used when no `oidc_app_settings` row exists; otherwise DB wins.
     oidc_enabled: bool = False

@@ -15,6 +15,7 @@ from app.db import get_db
 from app.models import ApiKey
 from app.auth_keys import key_lookup_hmac, verify_api_key
 from app.services.scopes import parse_scopes_json, scopes_allow_admin
+from app.services.audit import last_access_metadata_from_request
 from app.session_csrf import check_csrf
 
 _SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -70,6 +71,17 @@ async def resolve_api_key(
     raise HTTPException(status_code=401, detail="Invalid API key")
 
 
+async def record_api_key_last_access(
+    row: ApiKey,
+    request: Request,
+    session: AsyncSession,
+) -> None:
+    row.last_accessed_at = datetime.now(timezone.utc)
+    for key, value in last_access_metadata_from_request(request).items():
+        setattr(row, key, value)
+    await session.commit()
+
+
 def _bearer_token_optional(authorization: str | None) -> str | None:
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
@@ -86,7 +98,9 @@ async def get_api_key(
     """Resolve API key from Bearer header, or from browser session (`admin_key_id`) after web/JSON login."""
     token = _bearer_token_optional(authorization)
     if token:
-        return await resolve_api_key(token, session)
+        row = await resolve_api_key(token, session)
+        await record_api_key_last_access(row, request, session)
+        return row
     if request.method not in _SAFE_HTTP_METHODS:
         check_csrf(request, x_csrf_token)
     raw_id = request.session.get("admin_key_id")
@@ -141,7 +155,10 @@ async def resolve_api_key_bearer_or_basic(
 
 
 async def get_api_key_bearer_or_basic(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     session: AsyncSession = Depends(get_db),
 ) -> ApiKey:
-    return await resolve_api_key_bearer_or_basic(authorization, session)
+    row = await resolve_api_key_bearer_or_basic(authorization, session)
+    await record_api_key_last_access(row, request, session)
+    return row

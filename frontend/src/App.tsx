@@ -16,7 +16,9 @@ import HelpPage from "@/pages/HelpPage";
 import TutorialPage from "@/pages/TutorialPage";
 import AccountPage from "@/pages/AccountPage";
 import AppSettingsPage from "@/pages/AppSettingsPage";
+import AuditTrailPage from "@/pages/AuditTrailPage";
 import LoginPage from "@/pages/LoginPage";
+import McpPage from "@/pages/McpPage";
 import NewBundlePage from "@/pages/NewBundlePage";
 import NewProjectPage from "@/pages/NewProjectPage";
 import ProjectBundlesPage from "@/pages/ProjectBundlesPage";
@@ -103,6 +105,8 @@ export default function App() {
           <Route path="/stacks" element={<StacksPage />} />
           <Route path="/keys" element={<ApiKeysPage />} />
           <Route path="/settings" element={<AppSettingsPage />} />
+          <Route path="/mcp" element={<McpPage />} />
+          <Route path="/audit" element={<AuditTrailPage />} />
           <Route path="/certificates" element={<CertificatesPage />} />
           <Route path="/backup" element={<BackupPage />} />
           <Route path="/tools/env-link-hash" element={<EnvLinkHashPage />} />

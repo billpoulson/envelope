@@ -88,6 +88,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          load: ${{ github.event_name == 'pull_request' }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -95,11 +96,21 @@ jobs:
             CACHEBUST=${{ github.run_id }}-${{ github.run_attempt }}
             VITE_BUILD_NUMBER=${{ github.run_number }}
 
+      - name: Image scan reference
+        id: scan_ref
+        shell: bash
+        run: |
+          {
+            echo "ref<<EOF"
+            echo "${{ steps.meta.outputs.tags }}" | head -n 1
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: image
-          image-ref: ${{ steps.docker_build.outputs.imageid }}
+          image-ref: ${{ steps.scan_ref.outputs.ref }}
           severity: CRITICAL,HIGH
           exit-code: "1"
           trivyignores: ${{ github.workspace }}/.trivyignore

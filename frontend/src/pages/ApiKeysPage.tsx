@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { deleteApiKey, listApiKeys } from "@/api/keys";
 import { ApiKeyCreateWizard } from "@/components/ApiKeyCreateWizard";
+import { LastAccessSummary } from "@/components/LastAccessSummary";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui";
 import { formatApiError } from "@/util/apiError";
@@ -89,6 +90,7 @@ export default function ApiKeysPage() {
                     <th className="px-4 py-3 font-medium">Name</th>
                     <th className="px-4 py-3 font-medium">Scopes</th>
                     <th className="px-4 py-3 font-medium">Expires</th>
+                    <th className="px-4 py-3 font-medium">Last accessed</th>
                     <th className="px-4 py-3 font-medium">SSO</th>
                     <th className="px-4 py-3 font-medium" />
                   </tr>
@@ -108,6 +110,9 @@ export default function ApiKeysPage() {
                         ) : (
                           <span title={k.expires_at ?? undefined}>{formatExpiresAt(k.expires_at)}</span>
                         )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <LastAccessSummary row={k} />
                       </td>
                       <td className="px-4 py-3 text-slate-400">{k.oidc_linked ? "Linked" : "—"}</td>
                       <td className="px-4 py-3 text-right">

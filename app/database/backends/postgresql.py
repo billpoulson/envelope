@@ -40,9 +40,81 @@ def _migrate_postgresql_bundles_sort_order(sync_conn) -> None:
         i += 1
 
 
+_LAST_ACCESS_COLUMNS = {
+    "last_accessed_at": "TIMESTAMP WITH TIME ZONE",
+    "last_accessed_usage_name": "VARCHAR(128)",
+    "last_accessed_usage_kind": "VARCHAR(64)",
+    "last_accessed_usage_run": "VARCHAR(256)",
+    "last_accessed_ip": "VARCHAR(128)",
+    "last_accessed_user_agent": "VARCHAR(512)",
+}
+
+
+def _migrate_postgresql_last_access_metadata(sync_conn) -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    tables = set(insp.get_table_names())
+    for table in ("api_keys", "bundle_env_links", "stack_env_links"):
+        if table not in tables:
+            continue
+        cols = {c["name"] for c in insp.get_columns(table)}
+        for name, sql_type in _LAST_ACCESS_COLUMNS.items():
+            if name not in cols:
+                sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
+
+
+def _migrate_postgresql_mcp_approval_requests(sync_conn) -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    if "mcp_approval_requests" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("mcp_approval_requests")}
+    desired = {
+        "updated_at": "TIMESTAMP WITH TIME ZONE",
+        "status": "VARCHAR(32) NOT NULL DEFAULT 'pending'",
+        "tool_name": "VARCHAR(128)",
+        "arguments_encrypted": "BYTEA",
+        "sanitized_arguments_json": "TEXT",
+        "requester_api_key_id": "INTEGER",
+        "requester_api_key_name": "VARCHAR(128)",
+        "requester_scopes_json": "TEXT",
+        "resource_type": "VARCHAR(64)",
+        "resource_name": "VARCHAR(256)",
+        "project_slug": "VARCHAR(128)",
+        "environment_slug": "VARCHAR(64)",
+        "decision_admin_api_key_id": "INTEGER",
+        "decision_admin_api_key_name": "VARCHAR(128)",
+        "decided_at": "TIMESTAMP WITH TIME ZONE",
+        "decision_note": "TEXT",
+        "result_json": "TEXT",
+        "error": "TEXT",
+    }
+    for name, sql_type in desired.items():
+        if name not in cols:
+            sync_conn.execute(
+                text(f"ALTER TABLE mcp_approval_requests ADD COLUMN {name} {sql_type}")
+            )
+    sync_conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_mcp_approval_requests_status_created_at "
+            "ON mcp_approval_requests(status, created_at)"
+        )
+    )
+    sync_conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_mcp_approval_requests_requester_api_key_id "
+            "ON mcp_approval_requests(requester_api_key_id)"
+        )
+    )
+
+
 class PostgresqlDatabaseAdapter:
     def run_migrations_after_create_all(self, sync_conn) -> None:
         _migrate_postgresql_bundles_sort_order(sync_conn)
+        _migrate_postgresql_last_access_metadata(sync_conn)
+        _migrate_postgresql_mcp_approval_requests(sync_conn)
 
     async def bulk_upsert_bundle_secrets(
         self,

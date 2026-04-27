@@ -76,6 +76,12 @@ class BundleEnvLink(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_accessed_usage_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_accessed_usage_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_accessed_usage_run: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    last_accessed_ip: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_accessed_user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     bundle: Mapped["Bundle"] = relationship(back_populates="env_links")
 
@@ -263,6 +269,12 @@ class StackEnvLink(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_accessed_usage_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_accessed_usage_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_accessed_usage_run: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    last_accessed_ip: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_accessed_user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # None = merge all layers; else merge layers with position <= this value (prefix slice).
     through_layer_position: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
@@ -436,6 +448,12 @@ class ApiKey(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_accessed_usage_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_accessed_usage_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_accessed_usage_run: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    last_accessed_ip: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_accessed_user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
 class AuditEvent(Base):
@@ -468,3 +486,43 @@ class AuditEvent(Base):
     http_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
     path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class McpApprovalRequest(Base):
+    """Human approval gate for MCP write tools."""
+
+    __tablename__ = "mcp_approval_requests"
+    __table_args__ = (
+        Index("ix_mcp_approval_requests_status_created_at", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    tool_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    arguments_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    sanitized_arguments_json: Mapped[str] = mapped_column(Text, nullable=False)
+    requester_api_key_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    requester_api_key_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    requester_scopes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resource_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resource_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    project_slug: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    environment_slug: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    decision_admin_api_key_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True
+    )
+    decision_admin_api_key_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)

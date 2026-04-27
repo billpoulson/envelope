@@ -55,6 +55,29 @@ def usage_details_from_headers(request: Request) -> dict[str, str] | None:
     return usage or None
 
 
+def last_access_metadata_from_request(request: Request) -> dict[str, str | None]:
+    usage = usage_details_from_headers(request) or {}
+    return {
+        "last_accessed_usage_name": usage.get("name"),
+        "last_accessed_usage_kind": usage.get("kind"),
+        "last_accessed_usage_run": usage.get("run"),
+        "last_accessed_ip": _safe_client_ip(request)[:128] or None,
+        "last_accessed_user_agent": _safe_user_agent(request) or None,
+    }
+
+
+def last_access_payload(row: Any) -> dict[str, Any]:
+    accessed_at = getattr(row, "last_accessed_at", None)
+    return {
+        "last_accessed_at": accessed_at.isoformat() if accessed_at is not None else None,
+        "last_accessed_usage_name": getattr(row, "last_accessed_usage_name", None),
+        "last_accessed_usage_kind": getattr(row, "last_accessed_usage_kind", None),
+        "last_accessed_usage_run": getattr(row, "last_accessed_usage_run", None),
+        "last_accessed_ip": getattr(row, "last_accessed_ip", None),
+        "last_accessed_user_agent": getattr(row, "last_accessed_user_agent", None),
+    }
+
+
 async def emit_audit_event(
     session: AsyncSession,
     request: Request,

@@ -767,9 +767,30 @@ class StacksHttpTests(unittest.TestCase):
             self.assertEqual(lr.status_code, 201, lr.text)
             url = lr.json()["url"]
             path = url.split("/env/")[-1].split("?")[0]
-            nr = client.get(f"/env/{path}?format=json")
+            nr = client.get(
+                f"/env/{path}?format=json",
+                headers={
+                    "X-Envelope-Usage-Name": "stack-env-link-test",
+                    "X-Envelope-Usage-Kind": "github-action",
+                    "X-Envelope-Usage-Run": "run-stack",
+                    "User-Agent": "stack-link-last-access-agent",
+                },
+            )
             self.assertEqual(nr.status_code, 200)
             self.assertEqual(json.loads(nr.text)["Z"], "2")
+            listed = client.get(f"/api/v1/stacks/env-stack-{nonce}/env-links", headers=h)
+            self.assertEqual(listed.status_code, 200, listed.text)
+            link_row = next(
+                x
+                for x in listed.json()
+                if x["token_sha256"] == hashlib.sha256(path.encode("utf-8")).hexdigest()
+            )
+            self.assertIsNotNone(link_row.get("last_accessed_at"))
+            self.assertEqual(link_row.get("last_accessed_usage_name"), "stack-env-link-test")
+            self.assertEqual(link_row.get("last_accessed_usage_kind"), "github-action")
+            self.assertEqual(link_row.get("last_accessed_usage_run"), "run-stack")
+            self.assertIsNotNone(link_row.get("last_accessed_ip"))
+            self.assertEqual(link_row.get("last_accessed_user_agent"), "stack-link-last-access-agent")
 
     def test_stack_env_link_prefix_slice(self) -> None:
         h = {"Authorization": f"Bearer {self._token}"}
@@ -1235,6 +1256,36 @@ class ApiKeyResolutionTests(unittest.TestCase):
             r2 = client.get("/api/v1/bundles", headers=h2)
             self.assertEqual(r2.status_code, 200, r.text)
 
+    def test_api_key_list_includes_last_access_metadata(self) -> None:
+        h = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        nonce = uuid4().hex[:8]
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/api-keys",
+                headers=h,
+                json={"name": f"last-access-{nonce}", "scopes": ["read:bundle:*"]},
+            )
+            self.assertEqual(r.status_code, 201, r.text)
+            plain = r.json()["plain_key"]
+            use_headers = {
+                "Authorization": f"Bearer {plain}",
+                "X-Envelope-Usage-Name": "api-key-list-test",
+                "X-Envelope-Usage-Kind": "ci",
+                "X-Envelope-Usage-Run": "run-api-key",
+                "User-Agent": "last-access-test-agent",
+            }
+            used = client.get("/api/v1/bundles", headers=use_headers)
+            self.assertEqual(used.status_code, 200, used.text)
+            listed = client.get("/api/v1/api-keys", headers={"Authorization": f"Bearer {self._token}"})
+            self.assertEqual(listed.status_code, 200, listed.text)
+            row = next(x for x in listed.json() if x["name"] == f"last-access-{nonce}")
+            self.assertIsNotNone(row.get("last_accessed_at"))
+            self.assertEqual(row.get("last_accessed_usage_name"), "api-key-list-test")
+            self.assertEqual(row.get("last_accessed_usage_kind"), "ci")
+            self.assertEqual(row.get("last_accessed_usage_run"), "run-api-key")
+            self.assertIsNotNone(row.get("last_accessed_ip"))
+            self.assertEqual(row.get("last_accessed_user_agent"), "last-access-test-agent")
+
 
 class AuditTrailHttpTests(unittest.TestCase):
     """Structured audit logger + audit_events rows on sensitive reads."""
@@ -1329,10 +1380,12 @@ class AuditTrailHttpTests(unittest.TestCase):
             self.assertEqual(lr.status_code, 201, lr.text)
             url = lr.json()["url"]
             token = url.split("/env/")[-1]
+            token_digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
             usage_headers = {
                 "X-Envelope-Usage-Name": "opaque-env-bootstrap",
                 "X-Envelope-Usage-Kind": "github-action",
                 "X-Envelope-Usage-Run": "run-456",
+                "User-Agent": "env-link-last-access-agent",
             }
             with self.assertLogs("envelope.audit", level="INFO") as cm:
                 dr = client.get(f"/env/{token}", headers=usage_headers)
@@ -1359,6 +1412,18 @@ class AuditTrailHttpTests(unittest.TestCase):
                     "run": "run-456",
                 },
             )
+            lr2 = client.get(
+                f"/api/v1/bundles/env-audit-bun-{nonce}/env-links",
+                headers=h,
+            )
+            self.assertEqual(lr2.status_code, 200, lr2.text)
+            link_row = next(x for x in lr2.json() if x["token_sha256"] == token_digest)
+            self.assertIsNotNone(link_row.get("last_accessed_at"))
+            self.assertEqual(link_row.get("last_accessed_usage_name"), "opaque-env-bootstrap")
+            self.assertEqual(link_row.get("last_accessed_usage_kind"), "github-action")
+            self.assertEqual(link_row.get("last_accessed_usage_run"), "run-456")
+            self.assertIsNotNone(link_row.get("last_accessed_ip"))
+            self.assertEqual(link_row.get("last_accessed_user_agent"), "env-link-last-access-agent")
 
 
 class ApiKeysExpiryHttpTests(unittest.TestCase):
